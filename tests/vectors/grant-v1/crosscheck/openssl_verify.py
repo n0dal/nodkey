@@ -9,7 +9,9 @@ envelope, Sig_structure rebuilt here, and the `openssl pkeyutl` Ed25519 implemen
 Checks:
   1. every step expecting ACCEPT or STORED_OUTCOME:ACCEPT verifies under OpenSSL;
   2. every vector expecting grant_signature_invalid whose envelope is well-formed fails under
-     OpenSSL (negative control).
+     OpenSSL (negative control), except vectors whose description contains "STRICT-ONLY": those
+     must VERIFY under OpenSSL (its Ed25519 does not reject a small-order R), which shows that
+     only the verify_strict rule rejects them.
 Exit status is 0 only if both hold. TEST-ONLY keys (RFC 8032).
 """
 import base64, json, os, subprocess, sys, tempfile
@@ -74,7 +76,7 @@ def main(dirpath):
     m = json.load(open(os.path.join(dirpath, "manifest.json")))
     keys = {bytes.fromhex(k["kid"]): bytes.fromhex(k["public_key"]) for k in m["keys"]}
     tag = m["constants"]["external_aad_tag"].encode()
-    ok_pos = ok_neg = bad = skipped = 0
+    ok_pos = ok_neg = ok_strict = bad = skipped = 0
     for v in m["vectors"]:
         if v["kind"] != "grant":
             continue
@@ -93,6 +95,14 @@ def main(dirpath):
             aad = tag + b"\x00" + s["broker_id"].encode()
             msg = b"\x84\x6aSignature1" + enc_bstr(prot) + enc_bstr(aad) + enc_bstr(payload)
             good = pk is not None and openssl_verify(pk, msg, sig)
+            strict_only = "STRICT-ONLY" in v["description"]
+            if strict_only and not positive:
+                if good:
+                    ok_strict += 1
+                else:
+                    bad += 1
+                    print(f"MISMATCH {v['id']}: STRICT-ONLY vector should verify under a lax verifier")
+                continue
             if positive and good:
                 ok_pos += 1
             elif not positive and not good:
@@ -101,6 +111,7 @@ def main(dirpath):
                 bad += 1
                 print(f"MISMATCH {v['id']}: expected {want}, openssl {'verified' if good else 'rejected'}")
     print(f"openssl: {ok_pos} ACCEPT steps verified, {ok_neg} signature_invalid steps rejected, "
+          f"{ok_strict} STRICT-ONLY steps verified by OpenSSL (rejected only by verify_strict), "
           f"{bad} mismatches, {skipped} skipped (envelope not parseable by this reader)")
     return 0 if bad == 0 and ok_pos > 0 else 1
 

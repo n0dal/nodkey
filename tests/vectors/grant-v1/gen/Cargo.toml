@@ -10,4 +10,5 @@ publish = false
 ed25519-dalek = "3.0.0"
 curve25519-dalek = "5.0.0"
 sha2 = "0.11"
+serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }

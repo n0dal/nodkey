@@ -1,0 +1,65 @@
+{
+  "format": "nodkey.grant-keys.v1",
+  "keys": [
+    {
+      "kid": "4fcf41a3bf742ec7db96e0aaa5047e3a",
+      "alg": "Ed25519",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "iss": "nodkey.authority.test",
+      "purpose": "grant",
+      "not_before": 1767225600,
+      "not_after": 1798761600,
+      "status": "active"
+    },
+    {
+      "kid": "71a5e20f927aef116cd029856cff6f04",
+      "alg": "Ed25519",
+      "public_key": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+      "iss": "nodkey.authority.test",
+      "purpose": "grant",
+      "not_before": 1767225600,
+      "not_after": 1798761600,
+      "status": "revoked"
+    },
+    {
+      "kid": "f54ef1d6a652135a724d2f133af93847",
+      "alg": "Ed25519",
+      "public_key": "278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e",
+      "iss": "nodkey.authority.test",
+      "purpose": "grant",
+      "not_before": 1735689600,
+      "not_after": 1767225600,
+      "status": "active"
+    },
+    {
+      "kid": "e3b1cd9a74a3b174e6883283f00fd618",
+      "alg": "Ed25519",
+      "public_key": "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf",
+      "iss": "nodkey.authority.test",
+      "purpose": "grant",
+      "not_before": 1767225600,
+      "not_after": 1798761600,
+      "status": "active"
+    },
+    {
+      "kid": "62dde12c8cbe91ab974cf83f44b40208",
+      "alg": "Ed25519",
+      "public_key": "dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
+      "iss": "nodkey.authority.test",
+      "purpose": "grant",
+      "not_before": 1798761600,
+      "not_after": 1830297600,
+      "status": "active"
+    },
+    {
+      "kid": "802e7b803bde0de9d26cfa321bfab4d5",
+      "alg": "Ed25519",
+      "public_key": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+      "iss": "nodkey.authority.test",
+      "purpose": "grant",
+      "not_before": 1767225600,
+      "not_after": 9007199254740992,
+      "status": "active"
+    }
+  ]
+}

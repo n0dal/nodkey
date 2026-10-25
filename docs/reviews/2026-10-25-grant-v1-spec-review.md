@@ -411,3 +411,66 @@ entries.
 - `tests/vectors/grant-v1/gen/src/verify.rs:110`: the registry load check uses `is_small_order()` only.
 - `tests/vectors/grant-v1/gen/src/generate.rs:604-605`: ACC-05 uses `iat = T0 − 1`, `nbf = T0 + 1`. Any
   positive `nbf − iat` is accepted.
+
+## Resolution (Draft 2, 2026-10-25)
+
+Recorded by the spec author. Resolved in [`docs/specs/grant-v1.md`](../specs/grant-v1.md) Draft 2 (see its
+§15) and the regenerated vectors. Nothing is rejected outright. GS-13 is partly moot and GS-14 is
+accepted as a documented residual. Re-review requested.
+
+| Id | Severity | Disposition | Where | Vectors |
+|---|---|---|---|---|
+| GS-01 | High | **Fixed.** Step 8b `nbf − iat ≤ skew`; 8c lifetime `exp − iat ≤ max_ttl`; 8d `iat ≤ now + skew`; §9 Authority-clock rule; §8.5 rotation rationale corrected. The residual (an issuer that itself future-dates `iat` escapes earlier `revoked_before` rows) is stated in §11 and pinned by REV-09. | §7.2, §8.5, §9, §11; ADR-0004 Amendment 2 | TIME-13..18, ACC-05 (changed), REV-09 |
+| GS-02 | High | **Fixed** as proposed. Consumption (W10) is the first statement of the effect transaction; denials roll back to a savepoint and commit DENIED in the same transaction; a recording failure returns `unavailable`. | §7.3; ADR-0006 Amendment 1 | RPL-03 (step 3 now `STORED_OUTCOME:DENIED`); failure injection is an integration test (§12.2) |
+| GS-03 | Medium | **Fixed.** `broker_id` is an ID (1–128); one `broker_id` ↔ one replay store and revocation table. | §7.1 | none (deployment rule) |
+| GS-04 | Medium | **Fixed** as recommended. Keys must have order exactly L (`!is_small_order() && is_torsion_free()`); the reference checker implements it; §3.5 states the exact signature rules. | §3.5, §8.3 | REG-18 (B + T8), SIG-40, SIG-41 |
+| GS-05 | Medium | **Fixed, option (a).** Scheduler role removed from v1 (no `role`, no `authority`); ACC-08 is now a rotation-overlap ACCEPT; OP-05/06 and CON-05 removed. A Draft-1 registry with `role` is rejected. | §1, §8.2, §10 | REG-17, ACC-08 |
+| GS-06 | Medium | **Fixed, option (a).** Exactly one `opv` per operation; `request_hash` normative (MUST) with requested `op`, no `opv`; expected hashes published. | §5.4, §6.1 | `request_hash_examples`, OPS-08 |
+| GS-07 | Medium | **Fixed.** Every `rop` entry is checked (declared, read, opv) before any requested-operation check. The role half is moot after GS-05. | §7.4 | OP-14 |
+| GS-08 | Medium | **Fixed.** Closed type set with grammars (§6.2); explicit `destination` flag (must be `exact`); `res` ⇒ `exact`; startup refusals enumerated; reference declaration format. | §6 | OPS-01..19, CON-17..19 |
+| GS-09 | Medium | **Fixed.** Duplicate members rejected at any depth (reference checker made strict); integer grammar; atomic reload that fails closed. | §8.2–8.4 | REG-19..26 |
+| GS-10 | Medium | **Fixed.** C8 states length-first order for text keys with an example; §9 qualified. | §4.1, §9 | ACC-10, PDEC-20, PDEC-21 |
+| GS-11 | Medium | **Fixed.** Transport vectors added; absent vs empty defined. | §2 | TRN-01..11 |
+| GS-12 | Low | **Fixed.** All uints in `res`/`con` and the request `uint` type ≤ 2^53 − 1. | §5.3, §6.2 | PSCH-97, PSCH-98 |
+| GS-13 | Low | **Partly moot, partly fixed.** No roles remain, so "same `iss`, two roles" cannot occur. Cross-registry duplicate keys are now a load error. | §8.3 | none (single registry in vectors) |
+| GS-14 | Low | **Accepted as residual.** Stated in §11; no constant-time requirement. | §11 | none |
+| GS-15 | Low | **Fixed.** Stated in §7.2. | §7.2 | RPL-08 |
+| GS-16 | Low | **Fixed.** `max_ttl` 1–30 s; the Authority's TTL must be ≤ the smallest broker `max_ttl`. | §7.1 | none |
+| GS-17 | Low | **Fixed.** | §3.1 | ACC-11 (2048 bytes), TRN-07 (2731 chars) |
+
+Coverage gaps:
+
+| Gap | Vectors |
+|---|---|
+| 1 | TRN-01..11 |
+| 2 | TIME-13..18 |
+| 3 | moot (no roles) |
+| 4 | OP-14 |
+| 5 | SIG-39 |
+| 6 | PDEC-20, PDEC-21, PSCH-72, PSCH-73 |
+| 7 | REG-18 |
+| 8 | REG-19..26 (REG-24 uppercase kid; the same-`iss` two-roles case is moot) |
+| 9 | KEY-05..07 |
+| 10 | OPS-02..19 |
+| 11 | CON-20..23 |
+| 12 | ACC-11 |
+| 13 | request-hash examples, RPL-08 |
+| 14 | PSCH-90..96, ACC-12, CON-24 |
+| 15 | PSCH-74..76, PSCH-80..89 |
+| 16 | integration test, out of static scope (§12.2) |
+| 17 | SIG-40, SIG-41 |
+
+Independent-implementer issues (`crates/nodkey-grant/SPEC_ISSUES.md`):
+
+| Issue | Resolution | Vectors |
+|---|---|---|
+| SI-1 | §6.2 closed type grammars; manifest `types` | — |
+| SI-2 | §5.4: requested `op`, no `opv` | — |
+| SI-3 | §2 absent vs empty | TRN-09 |
+| SI-4 | §8.3 lists document-level failures and the `kid` format as `registry_entry_invalid` | REG-24, REG-25 |
+| SI-5 | as GS-04 | REG-18 |
+| SI-6 | README corrected | — |
+| SI-7 | W12b/W12c codes stated | CON-20..23 |
+| SI-8 | `destination` flag | OPS-02, OPS-03, OPS-16 |
+
+The SPEC_ISSUES "mixed-order keys vector" item is covered by REG-18.

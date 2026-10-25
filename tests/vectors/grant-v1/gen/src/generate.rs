@@ -17,7 +17,7 @@ pub const T0: u64 = 1_792_886_400; // 2026-10-25T00:00:00Z
 pub const BROKER: &str = "nodkey.broker.ledger-test";
 pub const OTHER_BROKER: &str = "nodkey.broker.other-test";
 pub const ISS: &str = "nodkey.authority.test";
-pub const SCHED_ISS: &str = "nodkey.scheduler.test";
+pub const OTHER_ISS: &str = "nodkey.other-issuer.test";
 pub const APP1: &str = "spiffe://nodkey.test/workload/app1";
 pub const APP2: &str = "spiffe://nodkey.test/workload/app2";
 pub const SUB: &str = "user:u-17";
@@ -32,7 +32,6 @@ pub struct TestKey {
     pub seed: &'static str,
     pub public: &'static str,
     pub iss: &'static str,
-    pub role: &'static str,
     pub status: &'static str,
     pub not_before: u64,
     pub not_after: u64,
@@ -40,14 +39,13 @@ pub struct TestKey {
     pub purpose: &'static str,
 }
 
-pub const KEYS: [TestKey; 5] = [
+pub const KEYS: [TestKey; 6] = [
     TestKey {
         name: "A",
         source: "RFC 8032 section 7.1 TEST 1",
         seed: "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
         public: "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
         iss: ISS,
-        role: "user_authority",
         status: "active",
         not_before: KEY_NB,
         not_after: KEY_NA,
@@ -60,7 +58,6 @@ pub const KEYS: [TestKey; 5] = [
         seed: "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
         public: "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
         iss: ISS,
-        role: "user_authority",
         status: "active",
         not_before: KEY_NB,
         not_after: KEY_NA,
@@ -73,7 +70,6 @@ pub const KEYS: [TestKey; 5] = [
         seed: "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
         public: "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
         iss: ISS,
-        role: "user_authority",
         status: "revoked",
         not_before: KEY_NB,
         not_after: KEY_NA,
@@ -86,7 +82,6 @@ pub const KEYS: [TestKey; 5] = [
         seed: "f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5",
         public: "278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e",
         iss: ISS,
-        role: "user_authority",
         status: "active",
         not_before: 1_735_689_600, // 2025-01-01
         not_after: KEY_NB,         // 2026-01-01: outside its window at T0
@@ -98,13 +93,24 @@ pub const KEYS: [TestKey; 5] = [
         source: "RFC 8032 section 7.1 TEST SHA(abc)",
         seed: "833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42",
         public: "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf",
-        iss: SCHED_ISS,
-        role: "scheduler",
+        iss: ISS,
         status: "active",
         not_before: KEY_NB,
         not_after: KEY_NA,
         in_registry: true,
-        purpose: "the trusted scheduler's grant key (ADR-0009)",
+        purpose: "a second active key of the same issuer (rotation overlap)",
+    },
+    TestKey {
+        name: "F",
+        source: "RFC 8032 section 7.2 (Ed25519ctx test key, used here as a plain Ed25519 key)",
+        seed: "0305334e381af78f141cb666f6199f57bc3495335a256a95bd2a55bf546663f6",
+        public: "dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
+        iss: ISS,
+        status: "active",
+        not_before: KEY_NA,        // 2027-01-01: not yet valid at T0
+        not_after: 1_830_297_600, // 2028-01-01
+        in_registry: true,
+        purpose: "registered active but not yet inside its validity window at the test time",
     },
 ];
 
@@ -229,8 +235,14 @@ impl G {
         G::read(id, &[("ledger.get_balance", 1)])
     }
 
-    fn capture(id: &str) -> G {
-        G::base(id, "E", SCHED_ISS, "orders.capture", map(&[(uint(0), uint(9821))]), map(&[(uint(0), con_bound(4200))]), 0)
+    /// Test-only write op with many exact text256 parameters (used to reach the 2048-byte limit).
+    fn bulk(id: &str, vals: &[String]) -> G {
+        let con: Vec<(Vec<u8>, Vec<u8>)> = vals.iter().enumerate().map(|(i, v)| (uint(i as u64), con_exact(tstr(v)))).collect();
+        G::base(id, "A", ISS, "test.bulk", map(&[(uint(0), tstr("alice"))]), map(&con), 0)
+    }
+
+    fn times(self, iat: u64, nbf: u64, exp: u64) -> G {
+        self.set(4, uint(iat)).set(5, uint(nbf)).set(6, uint(exp))
     }
 
     fn set(mut self, k: u64, v: Vec<u8>) -> G {
@@ -302,8 +314,29 @@ fn balance_req() -> Value {
 fn list_req() -> Value {
     json!({"op": "ledger.list_transfers", "args": {"account": "alice"}})
 }
-fn capture_req(amount: u64) -> Value {
-    json!({"op": "orders.capture", "args": {"order_id": 9821, "amount_cents": amount}})
+fn bulk_req(vals: &[String]) -> Value {
+    let mut args = serde_json::Map::new();
+    args.insert("account".into(), json!("alice"));
+    for (i, v) in vals.iter().enumerate() {
+        args.insert(format!("p{i}"), json!(v));
+    }
+    json!({"op": "test.bulk", "args": args})
+}
+fn peek_req() -> Value {
+    json!({"op": "test.peek", "args": {"account": "alice"}})
+}
+
+/// Base64url without padding (RFC 4648 section 5).
+pub fn b64url(b: &[u8]) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut s = String::new();
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..=c.len() {
+            s.push(A[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+    }
+    s
 }
 
 #[derive(Clone)]
@@ -408,17 +441,25 @@ fn vectors() -> Vec<Vector> {
     o.one("ACC-04-free-param-any-value", "accept",
         "test.hold: the free parameter memo is not bound by the grant; any value passes (published residual).",
         G::hold("ACC-04").build(), st("ACCEPT").req(hold_req(12_500, "EUR", "anything at all")));
-    o.one("ACC-05-iat-before-nbf", "accept", "iat < nbf, exp - nbf = max_ttl (30 s).",
-        G::transfer("ACC-05").set(4, uint(T0 - 2)).build(), st("ACCEPT"));
+    o.one("ACC-05-iat-before-nbf", "accept", "iat = nbf - 2 (within skew), exp - iat = max_ttl (30 s).",
+        G::transfer("ACC-05").times(T0 - 2, T0, T0 + 28).build(), st("ACCEPT"));
     o.one("ACC-06-multi-tenant-workload", "accept", "Workload app2 is registered for tenants acme and globex; grant for globex.",
         G::transfer("ACC-06").set(7, tstr(APP2)).set(8, tstr("globex")).build(), st("ACCEPT").peer(APP2));
     o.one("ACC-07-other-audience-at-its-broker", "accept",
         "Grant signed for audience nodkey.broker.other-test, presented to that broker (control for SIG-07).",
         G::transfer("ACC-07").set(2, tstr(OTHER_BROKER)).aad(aad(AAD_TAG, OTHER_BROKER)).build(),
         st("ACCEPT").broker(OTHER_BROKER));
-    o.one("ACC-08-scheduler-grant", "accept",
-        "Scheduler key E signs orders.capture (authority class scheduler_grant; cfm = 0, confirmation not required).",
-        G::capture("ACC-08").build(), st("ACCEPT").req(capture_req(4200)));
+    o.one("ACC-08-rotation-overlap-second-key", "accept",
+        "Signed by key E, a second active key registered for the same issuer (rotation overlap).",
+        G::transfer("ACC-08").signer("E").kid(kid_of("E")).build(), st("ACCEPT"));
+    o.add("ACC-10-rop-length-first-order", "accept",
+        "Read grant whose rop keys sort differently by encoded bytes (length first: test.peek) than by raw string order.",
+        G::read("ACC-10", &[("test.peek", 1), ("ledger.get_balance", 1)]).build(),
+        vec![st("ACCEPT").req(balance_req()), st("ACCEPT").req(peek_req()).now(T0 + 11)]);
+    o.one("ACC-11-grant-exactly-2048-bytes", "accept", "A valid write grant (test.bulk) of exactly 2048 bytes.",
+        bulk_2048().0, st("ACCEPT").req(bulk_req(&bulk_2048().1)));
+    o.one("ACC-12-tenant-128-bytes", "accept", "ten of 128 bytes (maximum), registered for app2.",
+        G::transfer("ACC-12").set(7, tstr(APP2)).set(8, tstr(LONG_TEN)).build(), st("ACCEPT").peer(APP2));
 
     // ---------------- Step 1-2: size and envelope structure
     let valid = G::transfer("ENV").build();
@@ -779,8 +820,8 @@ fn vectors() -> Vec<Vector> {
     }
 
     // ---------------- Step 8: issuer and time
-    o.one("ISS-01-issuer-of-other-key", "issuer", "iss names the scheduler, but key A is registered for the authority.",
-        G::transfer("ISS-01").set(1, tstr(SCHED_ISS)).build(), st("grant_issuer_mismatch"));
+    o.one("ISS-01-issuer-of-other-key", "issuer", "iss names another issuer than the one registered for key A.",
+        G::transfer("ISS-01").set(1, tstr(OTHER_ISS)).build(), st("grant_issuer_mismatch"));
     o.one("ISS-02-issuer-unknown", "issuer", "iss names an unregistered issuer.",
         G::transfer("ISS-02").set(1, tstr("evil.authority")).build(), st("grant_issuer_mismatch"));
     let exp = T0 + MAX_TTL;
@@ -791,12 +832,26 @@ fn vectors() -> Vec<Vector> {
     o.one("TIME-05-not-yet-valid-boundary", "time", "now = nbf - skew - 1: last rejected second.",
         G::transfer("TIME-05").build(), st("grant_not_yet_valid").now(T0 - SKEW - 1));
     o.one("TIME-06-nbf-boundary-accept", "time", "now = nbf - skew: first accepted second.", G::transfer("TIME-06").build(), st("ACCEPT").now(T0 - SKEW));
-    o.one("TIME-07-ttl-31", "time", "exp - nbf = 31 > max_ttl (30).", G::transfer("TIME-07").set(6, uint(T0 + 31)).build(), st("grant_ttl_exceeded"));
+    o.one("TIME-07-ttl-31", "time", "exp - iat = 31 > max_ttl (30).", G::transfer("TIME-07").set(6, uint(T0 + 31)).build(), st("grant_ttl_exceeded"));
     o.one("TIME-08-nbf-before-iat", "time", "nbf = iat - 1.", G::transfer("TIME-08").set(5, uint(T0 - 1)).build(), st("grant_time_invalid"));
     o.one("TIME-09-exp-equals-nbf", "time", "exp = nbf (empty window).", G::transfer("TIME-09").set(6, uint(T0)).build(), st("grant_time_invalid"));
     o.one("TIME-10-exp-before-nbf", "time", "exp = nbf - 1.", G::transfer("TIME-10").set(6, uint(T0 - 1)).build(), st("grant_time_invalid"));
     o.one("TIME-12-read-grant-expired", "time", "Read grants expire like write grants: now = exp + skew.",
         G::balance("TIME-12").build(), st("grant_expired").req(balance_req()).now(exp + SKEW));
+    const YEAR: u64 = 31_536_000;
+    o.one("TIME-13-nbf-iat-equals-skew", "time", "nbf - iat = skew (5 s), exp - iat = 30: accepted.",
+        G::transfer("TIME-13").times(T0 - 5, T0, T0 + 25).build(), st("ACCEPT"));
+    o.one("TIME-14-nbf-iat-exceeds-skew", "time", "nbf - iat = 6 > skew.",
+        G::transfer("TIME-14").times(T0 - 6, T0, T0 + 24).build(), st("grant_time_invalid"));
+    o.one("TIME-15-future-dated-issuance", "time", "iat = nbf = one year after now (future-dated issuance).",
+        G::transfer("TIME-15").times(T0 + YEAR, T0 + YEAR, T0 + YEAR + 30).build(), st("grant_not_yet_valid"));
+    o.one("TIME-16-nbf-far-beyond-iat", "time",
+        "iat = T, nbf = T + 30 days, exp = nbf + 30, presented inside that window (key still valid): rejected because nbf - iat > skew (GS-01).",
+        G::transfer("TIME-16").times(T0, T0 + 30 * 86_400, T0 + 30 * 86_400 + 30).build(), st("grant_time_invalid").now(T0 + 30 * 86_400 + 1));
+    o.one("TIME-17-ttl-from-iat", "time", "iat = T, nbf = T + 1, exp = T + 31: exp - nbf = 30 but exp - iat = 31.",
+        G::transfer("TIME-17").times(T0, T0 + 1, T0 + 31).build(), st("grant_ttl_exceeded"));
+    o.one("TIME-18-iat-just-beyond-skew", "time", "iat = nbf = now + skew + 1.",
+        G::transfer("TIME-18").build(), st("grant_not_yet_valid").now(T0 - SKEW - 1));
     o.one("TIME-11-long-ttl-far-future", "time", "exp = 2^53 - 1 (would overflow naive arithmetic only if unchecked); TTL exceeded.",
         G::transfer("TIME-11").set(6, uint((1 << 53) - 1)).build(), st("grant_ttl_exceeded"));
 
@@ -842,10 +897,9 @@ fn vectors() -> Vec<Vector> {
         G::transfer("OP-03").set(10, tstr("ledger.delete")).build(), st("grant_op_mismatch"));
     o.one("OP-04-opv-unsupported", "operation", "opv = 2; the broker supports only version 1 of ledger.transfer.",
         G::transfer("OP-04").set(11, uint(2)).build(), st("grant_opv_unsupported"));
-    o.one("OP-05-scheduler-signs-user-op", "operation", "Scheduler key E signs a ledger.transfer (user_grant) grant.",
-        G::transfer("OP-05").signer("E").kid(kid_of("E")).set(1, tstr(SCHED_ISS)).build(), st("grant_issuer_not_permitted"));
-    o.one("OP-06-authority-signs-scheduler-op", "operation", "Authority key A signs an orders.capture (scheduler_grant) grant.",
-        G::capture("OP-06").signer("A").kid(a_kid).set(1, tstr(ISS)).build(), st("grant_issuer_not_permitted").req(capture_req(4200)));
+    o.one("OP-14-rop-unsupported-opv-not-requested", "operation",
+        "Read grant lists get_balance:1 and list_transfers:9; request get_balance. Every rop entry is checked: whole grant rejected.",
+        G::read("OP-14", &[("ledger.get_balance", 1), ("ledger.list_transfers", 9)]).build(), st("grant_opv_unsupported").req(balance_req()));
 
     // ---------------- Step 11: resource and constraints
     o.one("CON-01-amount-exceeds-bound", "constraint", "test.hold: amount_cents = ceiling + 1.",
@@ -860,8 +914,16 @@ fn vectors() -> Vec<Vector> {
         G::transfer("CON-06").build(), st("grant_constraint_mismatch").req(transfer_req_full("alice", "bob", 12_501)));
     o.one("CON-07-exact-amount-lower", "constraint", "ledger.transfer: exact means equal, not at most; request 12499.",
         G::transfer("CON-07").build(), st("grant_constraint_mismatch").req(transfer_req_full("alice", "bob", 12_499)));
-    o.one("CON-05-capture-exceeds-bound", "constraint", "orders.capture amount above the scheduler grant's ceiling.",
-        G::capture("CON-05").build(), st("grant_bound_exceeded").req(capture_req(4201)));
+    o.one("CON-20-request-exact-wrong-type", "constraint", "Request amount_cents is the string \"12500\"; grant binds uint 12500.",
+        G::transfer("CON-20").build(), st("grant_constraint_mismatch").req(json!({"op": "ledger.transfer", "args": {"from": "alice", "to": "bob", "amount_cents": "12500"}})));
+    o.one("CON-21-request-bounded-wrong-type", "constraint", "test.hold request amount_cents is a string: not a uint, so not within the bound.",
+        G::hold("CON-21").build(), st("grant_constraint_mismatch").req(json!({"op": "test.hold", "args": {"account": "alice", "amount_cents": "50", "currency": "EUR", "memo": "rent"}})));
+    o.one("CON-22-request-missing-exact", "constraint", "Request lacks the exact parameter to.",
+        G::transfer("CON-22").build(), st("grant_constraint_mismatch").req(json!({"op": "ledger.transfer", "args": {"from": "alice", "amount_cents": 12500}})));
+    o.one("CON-23-request-missing-resource", "constraint", "Request lacks the resource parameter from.",
+        G::transfer("CON-23").build(), st("grant_resource_mismatch").req(json!({"op": "ledger.transfer", "args": {"to": "bob", "amount_cents": 12500}})));
+    o.one("CON-24-con-text-257", "constraint", "test.bulk con value of 257 bytes (max 256): generic shape check fails first.",
+        G::bulk("CON-24", &["x".repeat(257)]).build(), st("grant_payload_invalid").req(bulk_req(&["x".repeat(257)])));
     let tr = |id: &str, k: u64, v: Vec<u8>| (G::transfer(id).set(k, v), transfer_req());
     let hd = |id: &str, k: u64, v: Vec<u8>| (G::hold(id).set(k, v), hold_req(12_500, "EUR", "rent"));
     let schema: Vec<(&str, &str, (G, Value))> = vec![
@@ -898,13 +960,16 @@ fn vectors() -> Vec<Vector> {
         G::hold("RPL-02").build(),
         vec![st("ACCEPT").req(hold_req(12_500, "EUR", "rent")), st("grant_replayed").req(hold_req(40_000, "EUR", "rent")).now(T0 + 12)]);
     o.add("RPL-03-denied-grant-is-consumed", "replay",
-        "A verified grant denied at the constraint step is consumed: a later in-bound request with it is a replay.",
+        "A verified write grant denied at the constraint step is consumed (DENIED recorded atomically): a different request is a replay, the identical one gets the stored denial.",
         G::hold("RPL-03").build(),
         vec![
             st("grant_bound_exceeded").req(hold_req(60_000, "EUR", "rent")),
             st("grant_replayed").req(hold_req(12_500, "EUR", "rent")).now(T0 + 11),
-            st("grant_bound_exceeded").req(hold_req(60_000, "EUR", "rent")).now(T0 + 12),
+            st("STORED_OUTCOME:DENIED").req(hold_req(60_000, "EUR", "rent")).now(T0 + 12),
         ]);
+    o.add("RPL-08-retry-after-expiry", "replay",
+        "Accepted, then the identical request after exp + skew: steps 1-9 run first, so the result is grant_expired, not the stored outcome.",
+        G::transfer("RPL-08").build(), vec![st("ACCEPT"), st("grant_expired").now(T0 + MAX_TTL + SKEW)]);
     o.add("RPL-07-memo-change-is-replay", "replay",
         "test.hold: a resubmission differing only in the free parameter has a different request hash: replay.",
         G::hold("RPL-07").build(),
@@ -943,9 +1008,121 @@ fn vectors() -> Vec<Vector> {
         ]);
     o.one("REV-07-other-workload", "revocation", "Revocation for (acme, app2) does not affect app1.",
         G::transfer("REV-07").build(), st("ACCEPT").rev(json!({"ten": "acme", "wid": APP2, "before": T0 + 100})));
+    o.one("REV-09-future-iat-escapes-earlier-revocation", "revocation",
+        "RESIDUAL (spec 11): a grant whose iat is later than an earlier revoked_before row is not revoked by it. Prevented only by the issuer clock rule (spec 9) or key revocation.",
+        G::transfer("REV-09").times(T0 + 100, T0 + 100, T0 + 130).build(),
+        st("ACCEPT").now(T0 + 100).rev(json!({"ten": "acme", "before": T0 + 50})));
+
+    // ---------------- Draft 2 additions: rop ordering and limits, read-grant key sets, ID boundaries
+    {
+        let g = G::read("PDEC-20", &[]);
+        let raw = cbor::map_raw(&[(tstr("ledger.get_balance"), uint(1)), (tstr("test.peek"), uint(1))]);
+        o.one("PDEC-20-rop-raw-string-order", "payload-decode",
+            "rop keys in raw string order (ledger.get_balance before test.peek) instead of encoded-bytes order.",
+            g.clone().set(19, raw).build(), st("grant_payload_malformed").req(balance_req()));
+        let dup = cbor::map_raw(&[(tstr("ledger.get_balance"), uint(1)), (tstr("ledger.get_balance"), uint(2))]);
+        o.one("PDEC-21-rop-duplicate-key", "payload-decode", "rop names ledger.get_balance twice with different opv.",
+            G::read("PDEC-21", &[]).set(19, dup).build(), st("grant_payload_malformed").req(balance_req()));
+    }
+    let many: Vec<String> = (0..17).map(|i| format!("ledger.op{i:02}")).collect();
+    let many_ref: Vec<(&str, u64)> = many.iter().map(|n| (n.as_str(), 1)).collect();
+    let read_more: Vec<(&str, &str, G)> = vec![
+        ("PSCH-72-rop-17-entries", "rop with 17 entries (max 16).", G::read("PSCH-72", &many_ref)),
+        ("PSCH-73-rop-name-65", "rop op name of 65 bytes (max 64).", G::read("PSCH-73", &[(&"a".repeat(65), 1)])),
+        ("PSCH-74-read-carrying-opv", "Read grant carrying opv (11).", G::balance("PSCH-74").set(11, uint(1))),
+        ("PSCH-75-read-carrying-res", "Read grant carrying res (12).", G::balance("PSCH-75").set(12, map(&[]))),
+        ("PSCH-76-read-carrying-use", "Read grant carrying use (14).", G::balance("PSCH-76").set(14, uint(1))),
+    ];
+    for (id, desc, g) in read_more {
+        o.one(id, "payload-schema", desc, g.build(), st("grant_payload_invalid").req(balance_req()));
+    }
+    for (k, name) in [(0, "ver"), (1, "iss"), (2, "aud"), (4, "iat"), (5, "nbf"), (6, "exp"), (7, "wid"), (8, "ten"), (9, "sub")] {
+        let id = format!("PSCH-{}-read-missing-{name}", 80 + k);
+        o.one(&id, "payload-schema", &format!("Read grant: required key {k} ({name}) absent."),
+            G::balance(&id).del(k).build(), st("grant_payload_invalid").req(balance_req()));
+    }
+    let ids: Vec<(&str, &str, u64, Vec<u8>)> = vec![
+        ("PSCH-90-ten-del-0x7f", "ten contains 0x7F (DEL).", 8, tstr("ac\u{7f}me")),
+        ("PSCH-91-ten-space-0x20", "ten contains 0x20 (space; IDs exclude it).", 8, tstr("ac me")),
+        ("PSCH-92-ten-129", "ten of 129 bytes (max 128).", 8, tstr(&"t".repeat(129))),
+        ("PSCH-93-aud-129", "aud of 129 bytes (max 128).", 2, tstr(&"b".repeat(129))),
+        ("PSCH-94-iss-129", "iss of 129 bytes (max 128).", 1, tstr(&"i".repeat(129))),
+        ("PSCH-95-wid-257", "wid of 257 bytes (max 256).", 7, tstr(&"w".repeat(257))),
+        ("PSCH-96-opv-65536", "opv = 65536 (max 65535).", 11, uint(65_536)),
+        ("PSCH-97-con-uint-2pow53", "con exact uint value 2^53 (max 2^53 - 1).", 13,
+            map(&[(uint(0), con_exact(tstr("bob"))), (uint(1), con_exact(uint(1 << 53)))])),
+        ("PSCH-98-con-ceiling-2pow53", "Bounded ceiling 2^53 (max 2^53 - 1).", 13, map(&[(uint(0), con_bound(1 << 53)), (uint(1), con_exact(tstr("EUR")))])),
+    ];
+    for (id, desc, k, v) in ids {
+        o.one(id, "payload-schema", desc, G::transfer(id).set(k, v).build(), st("grant_payload_invalid"));
+    }
+
+    // ---------------- Draft 2 additions: signatures and keys
+    {
+        let g = G::balance("SIG-39");
+        let (p, _, s) = g.parts();
+        let altered = g.clone().set(19, map(&[(tstr("ledger.get_balance"), uint(1)), (tstr("ledger.list_transfers"), uint(1))])).payload();
+        o.one("SIG-39-altered-rop", "signature", "Read grant: ledger.list_transfers added to rop (19) after signing.",
+            envelope(&p, &[0xa0], &altered, &s), st("grant_signature_invalid").req(list_req()));
+        // Signatures whose cofactorless equation holds with R = identity: [S]B - [k]A = identity when S = k*a.
+        for (id, r_hex, desc) in [
+            ("SIG-40-small-order-R", "0100000000000000000000000000000000000000000000000000000000000000",
+                "R is the identity (small order) and S = k*a mod L, so [S]B - [k]A = R holds; verify_strict rejects small-order R. STRICT-ONLY: lax verifiers accept."),
+            ("SIG-41-non-canonical-R", "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+                "R = non-canonical encoding of the identity (y = p + 1), S = k*a for that R; the recomputed R encoding differs from the received bytes."),
+        ] {
+            let g = G::transfer(id);
+            let (p, pl, _) = g.parts();
+            let r: [u8; 32] = unhex(r_hex).try_into().unwrap();
+            let s = forge_identity_r(&r, &sig_structure(&p, &g.aad, &pl));
+            o.one(id, "signature", desc, envelope(&p, &[0xa0], &pl, &[r.to_vec(), s.to_vec()].concat()), st("grant_signature_invalid"));
+        }
+    }
+    o.one("KEY-05-key-not-yet-active", "key", "Signed by key F, whose validity window starts after the test time.",
+        G::transfer("KEY-05").signer("F").kid(kid_of("F")).build(), st("grant_key_inactive"));
+    {
+        let t = KEY_NB - 10; // key D's window ends at KEY_NB
+        o.one("KEY-06-key-window-end-boundary", "key", "Key D at now = not_after (window is half-open).",
+            G::transfer("KEY-06").signer("D").kid(kid_of("D")).times(t, t, t + 30).build(), st("grant_key_inactive").now(KEY_NB));
+        o.one("KEY-07-key-window-last-second", "key", "Key D at now = not_after - 1: accepted.",
+            G::transfer("KEY-07").signer("D").kid(kid_of("D")).times(t, t, t + 30).build(), st("ACCEPT").now(KEY_NB - 1));
+    }
 
     o.v
 }
+
+/// For a TEST-ONLY key A = a*B, returns S = k*a mod L with k = SHA-512(R || A || msg) mod L.
+fn forge_identity_r(r: &[u8; 32], msg: &[u8]) -> [u8; 32] {
+    use curve25519_dalek::scalar::Scalar;
+    use sha2::Sha512;
+    let sk = signing_key("A");
+    let mut h = Sha512::new();
+    h.update(r);
+    h.update(sk.verifying_key().as_bytes());
+    h.update(msg);
+    let k = Scalar::from_bytes_mod_order_wide(&h.finalize().into());
+    (k * sk.to_scalar()).to_bytes()
+}
+
+pub const LONG_TEN: &str = "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt";
+
+/// A test.bulk grant of exactly 2048 bytes and the values it binds.
+fn bulk_2048() -> (Vec<u8>, Vec<String>) {
+    for n in (100..=256).rev() {
+        for m in 0..=256 {
+            let vals: Vec<String> = (0..7).map(|i| ((b'a' + i) as char).to_string().repeat(n)).chain(std::iter::once("z".repeat(m))).collect();
+            let g = G::bulk("ACC-11", &vals).build();
+            if g.len() == 2048 {
+                return (g, vals);
+            }
+            if g.len() > 2048 {
+                break;
+            }
+        }
+    }
+    panic!("no 2048-byte bulk grant");
+}
+
 
 // ------------------------------------------------------------------- registries
 
@@ -955,7 +1132,6 @@ fn registry_entry(k: &TestKey) -> Value {
         "alg": "Ed25519",
         "public_key": k.public,
         "iss": k.iss,
-        "role": k.role,
         "purpose": "grant",
         "not_before": k.not_before,
         "not_after": k.not_after,
@@ -967,30 +1143,36 @@ fn registry(entries: Vec<Value>) -> Value {
     json!({"format": "nodkey.grant-keys.v1", "keys": entries})
 }
 
+fn pretty(v: &Value) -> String {
+    serde_json::to_string_pretty(v).unwrap() + "\n"
+}
+
 fn raw_entry(pk: &[u8; 32]) -> Value {
-    let mut e = registry_entry(key("A"));
+    let mut e = registry_entry(key("B"));
     e["public_key"] = json!(hex(pk));
     e["kid"] = json!(hex(&derive_kid(pk)));
     e
 }
 
-fn registry_vectors() -> Vec<(String, String, Value, String)> {
+/// (id, description, registry JSON text, expected)
+fn registry_vectors() -> Vec<(String, String, String, String)> {
     use curve25519_dalek::edwards::CompressedEdwardsY;
     let valid: Vec<Value> = KEYS.iter().filter(|k| k.in_registry).map(registry_entry).collect();
-    let mut out: Vec<(String, String, Value, String)> = Vec::new();
-    let mut add = |id: &str, desc: &str, entries: Vec<Value>, exp: &str| {
-        out.push((id.to_owned(), desc.to_owned(), registry(entries), exp.to_owned()));
+    let mut out: Vec<(String, String, String, String)> = Vec::new();
+    let mut add_text = |id: &str, desc: &str, text: String, exp: &str| {
+        out.push((id.to_owned(), desc.to_owned(), text, exp.to_owned()));
     };
-    let with = |extra: Value| [valid.clone(), vec![extra]].concat();
+    let with = |extra: Value| pretty(&registry([valid.clone(), vec![extra]].concat()));
 
-    add("REG-01-valid", "The registry used by every grant vector (keys A, C, D, E).", valid.clone(), "LOAD_OK");
+    add_text("REG-01-valid", "The registry used by every grant vector (keys A, C, D, E, F).", pretty(&registry(valid.clone())), "LOAD_OK");
     let mut identity = [0u8; 32];
     identity[0] = 1;
     assert!(CompressedEdwardsY(identity).decompress().unwrap().is_small_order());
-    add("REG-02-small-order-identity", "Public key is the identity point (order 1).", with(raw_entry(&identity)), "registry_key_weak");
+    add_text("REG-02-small-order-identity", "Public key is the identity point (order 1).", with(raw_entry(&identity)), "registry_key_weak");
     let order8: [u8; 32] = unhex("c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a").try_into().unwrap();
-    assert!(CompressedEdwardsY(order8).decompress().unwrap().is_small_order());
-    add("REG-03-small-order-8", "Public key is a point of order 8.", with(raw_entry(&order8)), "registry_key_weak");
+    let t8 = CompressedEdwardsY(order8).decompress().unwrap();
+    assert!(t8.is_small_order());
+    add_text("REG-03-small-order-8", "Public key is a point of order 8.", with(raw_entry(&order8)), "registry_key_weak");
     // y = p + y0 (non-canonical) for the smallest y0 that decodes to a point that is not small order.
     let mut noncanon = None;
     for y0 in 2u8..19 {
@@ -998,15 +1180,15 @@ fn registry_vectors() -> Vec<(String, String, Value, String)> {
         b[0] += y0;
         let b: [u8; 32] = b.try_into().unwrap();
         if let Some(pt) = CompressedEdwardsY(b).decompress()
-            && !pt.is_small_order() {
-                assert_ne!(pt.compress().to_bytes(), b);
-                noncanon = Some(b);
-                break;
-            }
+            && !pt.is_small_order()
+        {
+            assert_ne!(pt.compress().to_bytes(), b);
+            noncanon = Some(b);
+            break;
+        }
     }
-    let noncanon = noncanon.expect("no non-canonical encoding found");
-    add("REG-04-non-canonical-encoding", "Public key encodes y >= p (non-canonical encoding of a valid, not small-order point).",
-        with(raw_entry(&noncanon)), "registry_key_invalid");
+    add_text("REG-04-non-canonical-encoding", "Public key encodes y >= p (non-canonical encoding of a valid, not small-order point).",
+        with(raw_entry(&noncanon.expect("no non-canonical encoding"))), "registry_key_invalid");
     let mut not_point = None;
     for y in 2u8..=255 {
         let mut b = [0u8; 32];
@@ -1016,77 +1198,215 @@ fn registry_vectors() -> Vec<(String, String, Value, String)> {
             break;
         }
     }
-    add("REG-05-not-a-point", "Public key bytes do not decode to a curve point.", with(raw_entry(&not_point.unwrap())), "registry_key_invalid");
+    add_text("REG-05-not-a-point", "Public key bytes do not decode to a curve point.", with(raw_entry(&not_point.unwrap())), "registry_key_invalid");
     let mut short = registry_entry(key("B"));
     short["public_key"] = json!(&key("B").public[..62]);
-    add("REG-06-key-31-bytes", "Public key of 31 bytes.", with(short), "registry_key_invalid");
+    add_text("REG-06-key-31-bytes", "Public key of 31 bytes.", with(short), "registry_key_invalid");
     let mut upper = registry_entry(key("B"));
     upper["public_key"] = json!(key("B").public.to_uppercase());
-    add("REG-07-key-uppercase-hex", "Public key in uppercase hex (lowercase required).", with(upper), "registry_key_invalid");
+    add_text("REG-07-key-uppercase-hex", "Public key in uppercase hex (lowercase required).", with(upper), "registry_key_invalid");
     let mut kidm = registry_entry(key("B"));
-    kidm["kid"] = json!(hex(&kid_of("A")).replace(&hex(&kid_of("A"))[..2], "00"));
-    add("REG-08-kid-not-derived", "kid does not equal the derivation from the public key.", with(kidm), "registry_kid_mismatch");
-    add("REG-09-duplicate-entry", "Key A listed twice.", with(registry_entry(key("A"))), "registry_duplicate_key");
+    kidm["kid"] = json!(format!("00{}", &hex(&kid_of("B"))[2..]));
+    add_text("REG-08-kid-not-derived", "kid (well-formed) does not equal the derivation from the public key.", with(kidm), "registry_kid_mismatch");
+    add_text("REG-09-duplicate-entry", "Key A listed twice.", with(registry_entry(key("A"))), "registry_duplicate_key");
     let field = |f: &str, v: Value| {
         let mut e = registry_entry(key("B"));
         e[f] = v;
         e
     };
-    add("REG-10-alg-eddsa", "alg \"EdDSA\" instead of \"Ed25519\".", with(field("alg", json!("EdDSA"))), "registry_entry_invalid");
-    add("REG-11-purpose-receipt", "purpose \"receipt\".", with(field("purpose", json!("receipt"))), "registry_entry_invalid");
-    add("REG-12-status-verify-only", "Undefined status \"verify_only\".", with(field("status", json!("verify_only"))), "registry_entry_invalid");
-    add("REG-13-empty-window", "not_before = not_after.", with(field("not_after", json!(KEY_NB))), "registry_entry_invalid");
-    add("REG-14-unknown-field", "Entry with an extra field \"comment\".", with(field("comment", json!("x"))), "registry_entry_invalid");
+    add_text("REG-10-alg-eddsa", "alg \"EdDSA\" instead of \"Ed25519\".", with(field("alg", json!("EdDSA"))), "registry_entry_invalid");
+    add_text("REG-11-purpose-receipt", "purpose \"receipt\".", with(field("purpose", json!("receipt"))), "registry_entry_invalid");
+    add_text("REG-12-status-verify-only", "Undefined status \"verify_only\".", with(field("status", json!("verify_only"))), "registry_entry_invalid");
+    add_text("REG-13-empty-window", "not_before = not_after.", with(field("not_after", json!(KEY_NB))), "registry_entry_invalid");
+    add_text("REG-14-unknown-field", "Entry with an extra member \"comment\".", with(field("comment", json!("x"))), "registry_entry_invalid");
     let mut missing = registry_entry(key("B"));
     missing.as_object_mut().unwrap().remove("iss");
-    add("REG-15-missing-field", "Entry without iss.", with(missing), "registry_entry_invalid");
-    add("REG-16-no-keys", "Empty keys array.", vec![], "registry_entry_invalid");
-    add("REG-17-role-unknown", "role \"admin\".", with(field("role", json!("admin"))), "registry_entry_invalid");
+    add_text("REG-15-missing-field", "Entry without iss.", with(missing), "registry_entry_invalid");
+    add_text("REG-16-no-keys", "Empty keys array.", pretty(&registry(vec![])), "registry_entry_invalid");
+    add_text("REG-17-role-member", "Entry carrying the Draft 1 member \"role\" (removed in Draft 2).",
+        with(field("role", json!("scheduler"))), "registry_entry_invalid");
+    // Draft 2 additions.
+    let a_pt = CompressedEdwardsY(unhex(key("B").public).try_into().unwrap()).decompress().unwrap();
+    let mixed = (a_pt + t8).compress().to_bytes();
+    let mp = CompressedEdwardsY(mixed).decompress().unwrap();
+    assert!(!mp.is_small_order() && !mp.is_torsion_free());
+    add_text("REG-18-mixed-order-key", "Public key = B + T8 (valid key plus a point of order 8): not small order, but not torsion-free.",
+        with(raw_entry(&mixed)), "registry_key_weak");
+    // Duplicate member: written as text because JSON libraries cannot emit it.
+    let b = registry_entry(key("B"));
+    let dup_text = pretty(&registry([valid.clone(), vec![b.clone()]].concat()))
+        .replacen("\"status\": \"active\"\n    }\n  ]", "\"status\": \"revoked\",\n      \"status\": \"active\"\n    }\n  ]", 1);
+    assert!(dup_text.contains("\"status\": \"revoked\",\n      \"status\": \"active\""));
+    add_text("REG-19-duplicate-member", "Entry with two status members (\"revoked\" then \"active\"); first-wins and last-wins parsers would disagree.",
+        dup_text, "registry_entry_invalid");
+    let nb = KEY_NB.to_string();
+    let base_text = with(registry_entry(key("B")));
+    add_text("REG-20-time-with-fraction", "not_before written as 1767225600.0.",
+        base_text.replacen(&format!("\"not_before\": {nb}"), &format!("\"not_before\": {nb}.0"), 1), "registry_entry_invalid");
+    add_text("REG-21-time-exponent", "not_before written as 1.7672256e9.",
+        base_text.replacen(&format!("\"not_before\": {nb}"), "\"not_before\": 1.7672256e9", 1), "registry_entry_invalid");
+    add_text("REG-22-not-after-2pow53", "not_after = 2^53 (max 2^53 - 1).", with(field("not_after", json!(1u64 << 53))), "registry_entry_invalid");
+    add_text("REG-23-window-inverted", "not_before > not_after.", with(field("not_before", json!(KEY_NA + 1))), "registry_entry_invalid");
+    let mut kup = registry_entry(key("B"));
+    kup["kid"] = json!(hex(&kid_of("B")).to_uppercase());
+    add_text("REG-24-kid-uppercase", "kid in uppercase hex: a member-format error.", with(kup), "registry_entry_invalid");
+    add_text("REG-25-not-json", "The file is not JSON.", "format = nodkey.grant-keys.v1\n".into(), "registry_entry_invalid");
+    add_text("REG-26-negative-time", "not_before = -1.", with(field("not_before", json!(-1))), "registry_entry_invalid");
+    for (id, _, t, _) in &out {
+        assert!(id.starts_with("REG-25") || id.starts_with("REG-19") || serde_json::from_str::<Value>(t).is_ok());
+    }
+    out
+}
+
+// ------------------------------------------------------------------- operation declarations
+
+fn operations() -> Value {
+    json!({"format": "nodkey.operations.v1", "operations": [
+        {"op": "ledger.transfer", "kind": "write", "opv": 1, "requires_confirmation": true, "params": [
+            {"name": "from", "in": "res", "key": 0, "class": "exact", "type": "account_id", "destination": false},
+            {"name": "to", "in": "con", "key": 0, "class": "exact", "type": "account_id", "destination": true},
+            {"name": "amount_cents", "in": "con", "key": 1, "class": "exact", "type": "uint", "destination": false}
+        ]},
+        {"op": "test.hold", "kind": "write", "opv": 1, "requires_confirmation": false, "params": [
+            {"name": "account", "in": "res", "key": 0, "class": "exact", "type": "account_id", "destination": false},
+            {"name": "amount_cents", "in": "con", "key": 0, "class": "bounded", "type": "uint", "destination": false},
+            {"name": "currency", "in": "con", "key": 1, "class": "exact", "type": "currency", "destination": false},
+            {"name": "memo", "in": "con", "key": null, "class": "free", "type": "text64", "destination": false,
+             "justification": "TEST-ONLY operation; display-only note with no effect on authority"}
+        ]},
+        {"op": "test.bulk", "kind": "write", "opv": 1, "requires_confirmation": false, "params":
+            std::iter::once(json!({"name": "account", "in": "res", "key": 0, "class": "exact", "type": "account_id", "destination": false}))
+                .chain((0..8).map(|i| json!({"name": format!("p{i}"), "in": "con", "key": i, "class": "exact", "type": "text256", "destination": false})))
+                .collect::<Vec<_>>()
+        },
+        {"op": "ledger.get_balance", "kind": "read", "opv": 1, "requires_confirmation": false, "params": [
+            {"name": "account", "in": "request", "key": null, "class": "owner_scoped", "type": "account_id", "destination": false}
+        ]},
+        {"op": "ledger.list_transfers", "kind": "read", "opv": 1, "requires_confirmation": false, "params": [
+            {"name": "account", "in": "request", "key": null, "class": "owner_scoped", "type": "account_id", "destination": false}
+        ]},
+        {"op": "test.peek", "kind": "read", "opv": 1, "requires_confirmation": false, "params": [
+            {"name": "account", "in": "request", "key": null, "class": "owner_scoped", "type": "account_id", "destination": false}
+        ]}
+    ]})
+}
+
+/// (id, description, operations JSON text, expected)
+fn ops_vectors() -> Vec<(String, String, String, String)> {
+    let base = operations();
+    let mut out = vec![("OPS-01-valid".to_owned(), "The declarations used by every grant vector.".to_owned(), pretty(&base), "LOAD_OK".to_owned())];
+    let mut m = |id: &str, desc: &str, f: &dyn Fn(&mut Value)| {
+        let mut v = base.clone();
+        f(&mut v);
+        out.push((id.to_owned(), desc.to_owned(), pretty(&v), "ops_declaration_invalid".to_owned()));
+    };
+    m("OPS-02-free-destination", "Destination parameter to declared free.", &|v| {
+        let p = &mut v["operations"][0]["params"][1];
+        p["class"] = json!("free");
+        p["key"] = Value::Null;
+        p["justification"] = json!("x");
+    });
+    m("OPS-03-destination-bounded", "Destination parameter declared bounded (destination implies exact).", &|v| {
+        let p = &mut v["operations"][0]["params"][2];
+        p["destination"] = json!(true);
+        p["class"] = json!("bounded");
+    });
+    m("OPS-04-bounded-non-uint", "Bounded parameter of type currency.", &|v| v["operations"][1]["params"][2]["class"] = json!("bounded"));
+    m("OPS-05-duplicate-con-key", "Two con parameters with key 0.", &|v| v["operations"][0]["params"][2]["key"] = json!(0));
+    m("OPS-06-res-bounded", "res parameter declared bounded.", &|v| v["operations"][0]["params"][0]["class"] = json!("bounded"));
+    m("OPS-07-unclassified", "Parameter without class.", &|v| {
+        v["operations"][0]["params"][1].as_object_mut().unwrap().remove("class");
+    });
+    m("OPS-08-two-opv", "opv as a list of two versions (v1 allows exactly one).", &|v| v["operations"][0]["opv"] = json!([1, 2]));
+    m("OPS-09-confirm-on-read", "requires_confirmation on a read operation.", &|v| v["operations"][3]["requires_confirmation"] = json!(true));
+    m("OPS-10-unknown-type", "Parameter type \"email\".", &|v| v["operations"][0]["params"][1]["type"] = json!("email"));
+    m("OPS-11-free-unjustified", "Free parameter without a justification.", &|v| {
+        v["operations"][1]["params"][3].as_object_mut().unwrap().remove("justification");
+    });
+    m("OPS-12-duplicate-op", "Two declarations named ledger.transfer.", &|v| {
+        let d = v["operations"][0].clone();
+        v["operations"].as_array_mut().unwrap().push(d);
+    });
+    m("OPS-13-read-with-res", "Read operation with a res parameter.", &|v| v["operations"][3]["params"][0]["in"] = json!("res"));
+    m("OPS-14-unknown-param-member", "Parameter with an unknown member \"default\".", &|v| v["operations"][0]["params"][1]["default"] = json!("bob"));
+    m("OPS-15-free-with-key", "Free parameter with a con key.", &|v| v["operations"][1]["params"][3]["key"] = json!(2));
+    m("OPS-16-missing-destination", "Parameter without the destination member.", &|v| {
+        v["operations"][0]["params"][1].as_object_mut().unwrap().remove("destination");
+    });
+    m("OPS-17-write-owner-scoped", "Write operation with an owner_scoped parameter.", &|v| {
+        let p = &mut v["operations"][0]["params"][1];
+        p["in"] = json!("request");
+        p["class"] = json!("owner_scoped");
+        p["key"] = Value::Null;
+    });
+    m("OPS-18-justification-on-exact", "Exact parameter carrying a justification.", &|v| v["operations"][0]["params"][1]["justification"] = json!("x"));
+    let dup = pretty(&base).replacen("\"kind\": \"write\",", "\"kind\": \"read\",\n      \"kind\": \"write\",", 1);
+    out.push(("OPS-19-duplicate-member".to_owned(), "Declaration with two kind members.".to_owned(), dup, "ops_declaration_invalid".to_owned()));
+    out
+}
+
+// ------------------------------------------------------------------- transport
+
+/// (id, description, text, expected, decoded-grant file or None)
+fn transport_vectors() -> Vec<(String, String, String, String, Option<String>)> {
+    // The first positive grant whose length is not a multiple of 3 (so its text has unused bits).
+    let candidates = [
+        (G::transfer("ACC-01").build(), "ACC-01-valid-transfer"),
+        (G::balance("ACC-02").build(), "ACC-02-valid-read-grant"),
+        (G::hold("ACC-03").build(), "ACC-03-amount-equals-bound"),
+        (G::hold("ACC-04").build(), "ACC-04-free-param-any-value"),
+    ];
+    let (acc01, name) = candidates.into_iter().find(|(g, _)| !g.len().is_multiple_of(3)).expect("no candidate");
+    let t = b64url(&acc01);
+    let f = Some(format!("grants/{name}.hex"));
+    let mut out = Vec::new();
+    let mut add = |id: &str, d: &str, text: String, exp: &str, file: Option<String>| out.push((id.into(), d.into(), text, exp.into(), file));
+    add("TRN-01-canonical", &format!("Canonical unpadded base64url of {name}."), t.clone(), "DECODED", f.clone());
+    let padded = format!("{t}{}", "=".repeat((4 - t.len() % 4) % 4));
+    assert_ne!(padded, t);
+    add("TRN-02-padding", &format!("{name} with = padding."), padded, "grant_encoding_invalid", None);
+    let i = t.find(['-', '_']).expect("text has no - or _");
+    let mut std_alpha = t.clone().into_bytes();
+    std_alpha[i] = if std_alpha[i] == b'-' { b'+' } else { b'/' };
+    add("TRN-03-standard-alphabet", &format!("{name} with one - or _ replaced by its standard-alphabet counterpart."),
+        String::from_utf8(std_alpha).unwrap(), "grant_encoding_invalid", None);
+    add("TRN-04-embedded-lf", &format!("{name} with a line feed after 76 characters."), format!("{}\n{}", &t[..76], &t[76..]), "grant_encoding_invalid", None);
+    let k = (t.len() / 4) * 4 + 1;
+    let k = if k <= t.len() { k } else { k - 4 };
+    add("TRN-05-length-1-mod-4", &format!("First 4n+1 characters of {name}."), t[..k].to_owned(), "grant_encoding_invalid", None);
+    let mut tb = t.clone().into_bytes();
+    let last = tb.len() - 1;
+    let alpha = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let pos = alpha.iter().position(|c| *c == tb[last]).unwrap();
+    tb[last] = alpha[pos | 1];
+    assert_ne!(tb[last], t.as_bytes()[last]);
+    add("TRN-06-non-zero-trailing-bits", &format!("{name} with a non-zero unused low bit in the final character."),
+        String::from_utf8(tb).unwrap(), "grant_encoding_invalid", None);
+    let (g2048, _) = bulk_2048();
+    let t2048 = b64url(&g2048);
+    assert_eq!(t2048.len(), 2731);
+    add("TRN-07-2731-chars", "The 2048-byte grant ACC-11: 2731 characters, the maximum.", t2048, "DECODED",
+        Some("grants/ACC-11-grant-exactly-2048-bytes.hex".into()));
+    let t2049 = b64url(&[g2048.clone(), vec![0]].concat());
+    assert_eq!(t2049.len(), 2732);
+    add("TRN-08-2732-chars", "2732 characters (a 2049-byte value): rejected before decoding.", t2049, "grant_too_large", None);
+    add("TRN-09-empty", "Empty string: a supplied grant of zero bytes (then grant_malformed at step 2, see ENV-03).", String::new(), "DECODED", None);
+    add("TRN-10-leading-space", &format!("{name} with a leading space."), format!(" {t}"), "grant_encoding_invalid", None);
+    add("TRN-11-non-ascii", &format!("{name} with a trailing U+00E9."), format!("{t}\u{e9}"), "grant_encoding_invalid", None);
     out
 }
 
 // ------------------------------------------------------------------- manifest
 
-fn operations() -> Value {
-    json!([
-        {"op": "ledger.transfer", "kind": "write", "opv": [1], "authority": "user_grant", "requires_confirmation": true, "params": [
-            {"name": "from", "in": "res", "key": 0, "class": "exact", "type": "account_id"},
-            {"name": "to", "in": "con", "key": 0, "class": "exact", "type": "account_id"},
-            {"name": "amount_cents", "in": "con", "key": 1, "class": "exact", "type": "uint"}
-        ]},
-        {"op": "test.hold", "kind": "write", "opv": [1], "authority": "user_grant", "requires_confirmation": false, "params": [
-            {"name": "account", "in": "res", "key": 0, "class": "exact", "type": "account_id"},
-            {"name": "amount_cents", "in": "con", "key": 0, "class": "bounded", "type": "uint"},
-            {"name": "currency", "in": "con", "key": 1, "class": "exact", "type": "currency"},
-            {"name": "memo", "in": "con", "key": null, "class": "free", "type": "text64",
-             "justification": "TEST-ONLY operation; display-only note with no effect on authority"}
-        ]},
-        {"op": "ledger.get_balance", "kind": "read", "opv": [1], "authority": "user_grant", "requires_confirmation": false, "params": [
-            {"name": "account", "in": "request", "key": null, "class": "owner_scoped", "type": "account_id"}
-        ]},
-        {"op": "ledger.list_transfers", "kind": "read", "opv": [1], "authority": "user_grant", "requires_confirmation": false, "params": [
-            {"name": "account", "in": "request", "key": null, "class": "owner_scoped", "type": "account_id"}
-        ]},
-        {"op": "orders.capture", "kind": "write", "opv": [1], "authority": "scheduler_grant", "requires_confirmation": false, "params": [
-            {"name": "order_id", "in": "res", "key": 0, "class": "exact", "type": "uint"},
-            {"name": "amount_cents", "in": "con", "key": 0, "class": "bounded", "type": "uint"}
-        ]}
-    ])
-}
-
 pub fn run(dir: &Path) {
-    fs::create_dir_all(dir.join("grants")).unwrap();
-    fs::create_dir_all(dir.join("registries")).unwrap();
-    // Remove stale outputs so that the directory reflects exactly this run.
-    for sub in ["grants", "registries"] {
+    for sub in ["grants", "registries", "operations"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+        // Remove stale outputs so that the directory reflects exactly this run.
         for e in fs::read_dir(dir.join(sub)).unwrap() {
             fs::remove_file(e.unwrap().path()).unwrap();
         }
     }
     let write = |rel: &str, s: String| fs::write(dir.join(rel), s).unwrap();
-
-    let valid: Vec<Value> = KEYS.iter().filter(|k| k.in_registry).map(registry_entry).collect();
-    write("registry.json", serde_json::to_string_pretty(&registry(valid)).unwrap() + "\n");
 
     let mut vecs_json = Vec::new();
     for v in vectors() {
@@ -1107,38 +1427,47 @@ pub fn run(dir: &Path) {
             })
             .collect();
         vecs_json.push(json!({
-            "id": v.id,
-            "kind": "grant",
-            "category": v.category,
-            "description": v.description,
-            "registry": "registry.json",
-            "grant": file,
-            "grant_len": v.grant.len(),
-            "steps": steps,
+            "id": v.id, "kind": "grant", "category": v.category, "description": v.description,
+            "registry": "registry.json", "operations": "operations.json",
+            "grant": file, "grant_len": v.grant.len(), "steps": steps,
         }));
     }
-    for (id, desc, reg, exp) in registry_vectors() {
+    for (id, desc, text, exp) in registry_vectors() {
         let file = if id == "REG-01-valid" { "registry.json".to_owned() } else { format!("registries/{id}.json") };
-        if file != "registry.json" {
-            write(&file, serde_json::to_string_pretty(&reg).unwrap() + "\n");
-        }
-        vecs_json.push(json!({
-            "id": id, "kind": "registry", "category": "registry", "description": desc,
-            "registry": file, "expected": exp,
-        }));
+        write(&file, text);
+        vecs_json.push(json!({"id": id, "kind": "registry", "category": "registry", "description": desc, "registry": file, "expected": exp}));
     }
+    for (id, desc, text, exp) in ops_vectors() {
+        let file = if id == "OPS-01-valid" { "operations.json".to_owned() } else { format!("operations/{id}.json") };
+        write(&file, text);
+        vecs_json.push(json!({"id": id, "kind": "operations", "category": "operations", "description": desc, "operations": file, "expected": exp}));
+    }
+    for (id, desc, text, exp, file) in transport_vectors() {
+        vecs_json.push(json!({"id": id, "kind": "transport", "category": "transport", "description": desc,
+            "text": text, "text_len": text.len(), "expected": exp, "decoded": file}));
+    }
+
+    let rh = |req: &Value| {
+        let mut args = BTreeMap::new();
+        for (k, v) in req["args"].as_object().unwrap() {
+            args.insert(k.clone(), match v {
+                Value::String(s) => crate::verify::ReqVal::Text(s.clone()),
+                v => crate::verify::ReqVal::Uint(v.as_u64().unwrap()),
+            });
+        }
+        hex(&crate::verify::request_hash(req["op"].as_str().unwrap(), &args))
+    };
+    let hash_examples: Vec<Value> = [transfer_req(), hold_req(12_500, "EUR", "rent"), balance_req()]
+        .iter()
+        .map(|r| json!({"request": r, "request_hash": rh(r)}))
+        .collect();
 
     let keys: Vec<Value> = KEYS
         .iter()
         .map(|k| {
             json!({
-                "name": k.name,
-                "source": k.source,
-                "secret_seed": k.seed,
-                "public_key": k.public,
-                "kid": hex(&kid_of(k.name)),
-                "in_registry": k.in_registry,
-                "purpose": k.purpose,
+                "name": k.name, "source": k.source, "secret_seed": k.seed, "public_key": k.public,
+                "kid": hex(&kid_of(k.name)), "in_registry": k.in_registry, "purpose": k.purpose,
             })
         })
         .collect();
@@ -1146,23 +1475,33 @@ pub fn run(dir: &Path) {
     let manifest = json!({
         "format": "nodkey.grant-v1.vectors",
         "spec": "docs/specs/grant-v1.md",
+        "spec_draft": 2,
         "warning": "TEST-ONLY. Every key below is a published RFC 8032 test key. Never deploy a registry containing them.",
         "constants": {
             "typ": TYP,
             "external_aad_tag": "nodkey.grant.v1",
             "kid_label": "nodkey.kid.v1",
+            "request_hash_label": "nodkey.rqh.v1",
             "max_grant_bytes": 2048,
+            "max_transport_chars": 2731,
             "skew_seconds": SKEW,
             "max_ttl_seconds": MAX_TTL,
+        },
+        "types": {
+            "uint": "unsigned integer 0..=2^53-1",
+            "account_id": "1-32 bytes of [a-z0-9_]",
+            "currency": "exactly 3 bytes of [A-Z]",
+            "text64": "0-64 bytes of 0x20-0x7E",
+            "text256": "0-256 bytes of 0x20-0x7E",
         },
         "keys": keys,
         "workloads": [
             {"wid": APP1, "tenants": ["acme"]},
-            {"wid": APP2, "tenants": ["acme", "globex"]},
+            {"wid": APP2, "tenants": ["acme", "globex", LONG_TEN]},
         ],
-        "operations": operations(),
+        "request_hash_examples": hash_examples,
         "vectors": vecs_json,
     });
-    write("manifest.json", serde_json::to_string_pretty(&manifest).unwrap() + "\n");
+    write("manifest.json", pretty(&manifest));
     eprintln!("wrote {} vectors to {}", manifest["vectors"].as_array().unwrap().len(), dir.display());
 }

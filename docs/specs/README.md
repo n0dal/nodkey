@@ -6,7 +6,7 @@ accepted ADR and the security invariants take precedence and the spec is correct
 
 | Spec | Version | Status | Implements | Test vectors |
 |---|---|---|---|---|
-| [Nodkey-Grant v1](grant-v1.md) — signed grant format, verification procedure, key registry | v1, Draft 1 (2026-10-25) | Draft, not yet reviewed | ADR-0004 (with Amendment 1), ADR-0003, ADR-0006 | [`tests/vectors/grant-v1/`](../../tests/vectors/grant-v1/README.md) |
+| [Nodkey-Grant v1](grant-v1.md) — signed grant format, verification procedure, key registry, operation declarations | v1, Draft 2 (2026-10-25) | Draft; Draft 1 reviewed (approve with changes), Draft 2 awaiting re-review | ADR-0004 (Amendments 1–2), ADR-0003, ADR-0006 (Amendment 1) | [`tests/vectors/grant-v1/`](../../tests/vectors/grant-v1/README.md) |
 
 Conventions: each spec states its status, the ADRs and invariants it implements, every dependency on an
 ADR that is not yet accepted, and the error code produced by each check. Each spec ships deterministic

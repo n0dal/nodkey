@@ -103,3 +103,27 @@ by [`docs/specs/grant-v1.md`](../specs/grant-v1.md) (Draft 1). The status of thi
 Unchanged: COSE_Sign1 with tag 18, the exact protected header, empty unprotected header, Ed25519 with
 `verify_strict`, the `external_aad` construction, keys 0–14 and their meanings, reserved keys 15–16, and
 `revoked_before` revocation.
+
+## Amendment 2 (2026-10-25)
+
+Specified by [`docs/specs/grant-v1.md`](../specs/grant-v1.md) **Draft 2** after the spec review
+([`docs/reviews/2026-10-25-grant-v1-spec-review.md`](../reviews/2026-10-25-grant-v1-spec-review.md)) and
+the independent implementer's issue list. Status unchanged (Proposed; OQ-07 open). Changes relative to
+the decision and Amendment 1:
+
+1. **Time (GS-01).** `nbf − iat ≤ skew`; lifetime measured from issuance, `exp − iat ≤ max_ttl`
+   (replacing `exp − nbf`); `iat ≤ now + skew`. The Authority sets `iat`/`nbf`/`exp` from its own clock,
+   never from caller-supplied values. `max_ttl` is configurable 1–30 s.
+2. **One issuer role (GS-05).** Amendment 1 item 7's `role` field and the `scheduler` role are withdrawn:
+   SECURITY_INVARIANTS v0.3 defines the Authority as the gateway signer only, and ADR-0009 is deferred to
+   Phase 5. A second issuer role requires a new protocol version.
+3. **Registry keys (GS-04).** A public key must be a canonical encoding of a point of order exactly L
+   (not small order and torsion-free); mixed-order keys are rejected. Strict JSON with duplicate-member
+   rejection; atomic reload that fails closed.
+4. **One `opv` per operation; normative request hash (GS-06).** `request_hash` covers the requested
+   operation and all request parameters, without `opv`.
+5. **Write-grant decisions recorded atomically (GS-02).** Consumption is the first statement of the effect
+   transaction and denials are recorded via a savepoint; see ADR-0006 Amendment 1.
+6. **Operation declarations.** Closed parameter type set, explicit `destination` flag (destinations must
+   be `exact`), `res` parameters must be `exact`, startup refusals enumerated.
+7. **`broker_id`** is an ID, and one `broker_id` maps to exactly one replay store and revocation table.

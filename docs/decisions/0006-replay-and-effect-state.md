@@ -70,3 +70,34 @@ adapter; depends on upstream semantics.
 ## Reversal / migration
 
 Broker-internal; no wire change. SERIALIZABLE can be added on top of counters without loss.
+
+## Amendment 1 (2026-10-25): atomic recording of denials
+
+Source: grant spec review GS-02 ([`docs/reviews/2026-10-25-grant-v1-spec-review.md`](../reviews/2026-10-25-grant-v1-spec-review.md)),
+implemented in [`docs/specs/grant-v1.md`](../specs/grant-v1.md) Draft 2 §7.3. Status of this ADR unchanged
+(Accepted).
+
+**Problem.** Decision 4 recorded `outcome = DENIED` "in a separate short transaction; if that write fails,
+the response is still Deny". This allows two ways for a verified grant that was answered with a denial to
+produce an effect later, which falsifies SI-09. (a) The DENIED write fails; no row exists, and a later
+submission of the same grant can be accepted. (b) The effect transaction rolls back, removing the
+consumption row; before the separate DENIED insert, a concurrent submission inserts its own row and
+commits.
+
+**Decision 4 is replaced by:**
+
+4. **One decision per write grant, recorded atomically.** The consumption insert
+   `consumed_grant(iss, jti, exp, request_hash, outcome = PENDING)` is the first statement of the effect
+   transaction, before the operation, constraint, revocation, policy, state and budget checks. A
+   `SAVEPOINT` follows it. On any denial, the broker rolls back to the savepoint (undoing partial effect
+   work but keeping the consumption row), sets `outcome = DENIED`, and commits the same transaction. If
+   the savepoint rollback, the update or the commit fails, or the commit outcome is unknown, the response
+   is `unavailable` ("nothing was executed"), never a denial. A grant has then received no decision and
+   may be decided by a later submission. Every denial returned for a verified write grant is therefore
+   backed by a committed DENIED row. Later submissions of that `jti` return the stored outcome (same
+   request hash) or are denied as replays (different hash). Unverified grants consume nothing. Read
+   grants are never consumed.
+
+Decision 3 is unchanged except that "in the effect transaction" now means "as its first statement".
+Verification needs an integration test that injects a failure into the DENIED update and the commit, and
+asserts that no ACCEPT ever follows a returned denial for the same grant.

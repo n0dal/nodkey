@@ -1,14 +1,24 @@
 {
   "format": "nodkey.grant-v1.vectors",
   "spec": "docs/specs/grant-v1.md",
+  "spec_draft": 2,
   "warning": "TEST-ONLY. Every key below is a published RFC 8032 test key. Never deploy a registry containing them.",
   "constants": {
     "typ": "application/nodkey-grant+cbor",
     "external_aad_tag": "nodkey.grant.v1",
     "kid_label": "nodkey.kid.v1",
+    "request_hash_label": "nodkey.rqh.v1",
     "max_grant_bytes": 2048,
+    "max_transport_chars": 2731,
     "skew_seconds": 5,
     "max_ttl_seconds": 30
+  },
+  "types": {
+    "uint": "unsigned integer 0..=2^53-1",
+    "account_id": "1-32 bytes of [a-z0-9_]",
+    "currency": "exactly 3 bytes of [A-Z]",
+    "text64": "0-64 bytes of 0x20-0x7E",
+    "text256": "0-256 bytes of 0x20-0x7E"
   },
   "keys": [
     {
@@ -54,7 +64,16 @@
       "public_key": "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf",
       "kid": "e3b1cd9a74a3b174e6883283f00fd618",
       "in_registry": true,
-      "purpose": "the trusted scheduler's grant key (ADR-0009)"
+      "purpose": "a second active key of the same issuer (rotation overlap)"
+    },
+    {
+      "name": "F",
+      "source": "RFC 8032 section 7.2 (Ed25519ctx test key, used here as a plain Ed25519 key)",
+      "secret_seed": "0305334e381af78f141cb666f6199f57bc3495335a256a95bd2a55bf546663f6",
+      "public_key": "dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
+      "kid": "62dde12c8cbe91ab974cf83f44b40208",
+      "in_registry": true,
+      "purpose": "registered active but not yet inside its validity window at the test time"
     }
   ],
   "workloads": [
@@ -68,143 +87,43 @@
       "wid": "spiffe://nodkey.test/workload/app2",
       "tenants": [
         "acme",
-        "globex"
+        "globex",
+        "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
       ]
     }
   ],
-  "operations": [
+  "request_hash_examples": [
     {
-      "op": "ledger.transfer",
-      "kind": "write",
-      "opv": [
-        1
-      ],
-      "authority": "user_grant",
-      "requires_confirmation": true,
-      "params": [
-        {
-          "name": "from",
-          "in": "res",
-          "key": 0,
-          "class": "exact",
-          "type": "account_id"
-        },
-        {
-          "name": "to",
-          "in": "con",
-          "key": 0,
-          "class": "exact",
-          "type": "account_id"
-        },
-        {
-          "name": "amount_cents",
-          "in": "con",
-          "key": 1,
-          "class": "exact",
-          "type": "uint"
+      "request": {
+        "op": "ledger.transfer",
+        "args": {
+          "from": "alice",
+          "to": "bob",
+          "amount_cents": 12500
         }
-      ]
+      },
+      "request_hash": "7d58c02dce96c8c1f0a0e6225ed8c15f61873e6fb14d27900844832aa4209279"
     },
     {
-      "op": "test.hold",
-      "kind": "write",
-      "opv": [
-        1
-      ],
-      "authority": "user_grant",
-      "requires_confirmation": false,
-      "params": [
-        {
-          "name": "account",
-          "in": "res",
-          "key": 0,
-          "class": "exact",
-          "type": "account_id"
-        },
-        {
-          "name": "amount_cents",
-          "in": "con",
-          "key": 0,
-          "class": "bounded",
-          "type": "uint"
-        },
-        {
-          "name": "currency",
-          "in": "con",
-          "key": 1,
-          "class": "exact",
-          "type": "currency"
-        },
-        {
-          "name": "memo",
-          "in": "con",
-          "key": null,
-          "class": "free",
-          "type": "text64",
-          "justification": "TEST-ONLY operation; display-only note with no effect on authority"
+      "request": {
+        "op": "test.hold",
+        "args": {
+          "account": "alice",
+          "amount_cents": 12500,
+          "currency": "EUR",
+          "memo": "rent"
         }
-      ]
+      },
+      "request_hash": "4c1422b1c953f9988bfe88d85f3fb2dbba7543de9ea1b63bb5d3fe523cfdc721"
     },
     {
-      "op": "ledger.get_balance",
-      "kind": "read",
-      "opv": [
-        1
-      ],
-      "authority": "user_grant",
-      "requires_confirmation": false,
-      "params": [
-        {
-          "name": "account",
-          "in": "request",
-          "key": null,
-          "class": "owner_scoped",
-          "type": "account_id"
+      "request": {
+        "op": "ledger.get_balance",
+        "args": {
+          "account": "alice"
         }
-      ]
-    },
-    {
-      "op": "ledger.list_transfers",
-      "kind": "read",
-      "opv": [
-        1
-      ],
-      "authority": "user_grant",
-      "requires_confirmation": false,
-      "params": [
-        {
-          "name": "account",
-          "in": "request",
-          "key": null,
-          "class": "owner_scoped",
-          "type": "account_id"
-        }
-      ]
-    },
-    {
-      "op": "orders.capture",
-      "kind": "write",
-      "opv": [
-        1
-      ],
-      "authority": "scheduler_grant",
-      "requires_confirmation": false,
-      "params": [
-        {
-          "name": "order_id",
-          "in": "res",
-          "key": 0,
-          "class": "exact",
-          "type": "uint"
-        },
-        {
-          "name": "amount_cents",
-          "in": "con",
-          "key": 0,
-          "class": "bounded",
-          "type": "uint"
-        }
-      ]
+      },
+      "request_hash": "c0d63b8cc345c1edbfa9fa472716fbf07e87aef4e63770b42cbf6b693a1bb1ee"
     }
   ],
   "vectors": [
@@ -214,6 +133,7 @@
       "category": "accept",
       "description": "Valid ledger.transfer grant; request within every constraint.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-01-valid-transfer.hex",
       "grant_len": 327,
       "steps": [
@@ -240,6 +160,7 @@
       "category": "accept",
       "description": "Valid read grant (knd = 2) for ledger.get_balance.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-02-valid-read-grant.hex",
       "grant_len": 302,
       "steps": [
@@ -264,6 +185,7 @@
       "category": "accept",
       "description": "One read grant naming two read operations, used three times within its TTL; nothing is consumed.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-09-read-grant-multi-use.hex",
       "grant_len": 325,
       "steps": [
@@ -314,6 +236,7 @@
       "category": "accept",
       "description": "test.hold: bounded parameter equal to its ceiling is accepted (inclusive); cfm = 0 is fine where confirmation is not required.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-03-amount-equals-bound.hex",
       "grant_len": 321,
       "steps": [
@@ -341,6 +264,7 @@
       "category": "accept",
       "description": "test.hold: the free parameter memo is not bound by the grant; any value passes (published residual).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-04-free-param-any-value.hex",
       "grant_len": 321,
       "steps": [
@@ -366,8 +290,9 @@
       "id": "ACC-05-iat-before-nbf",
       "kind": "grant",
       "category": "accept",
-      "description": "iat < nbf, exp - nbf = max_ttl (30 s).",
+      "description": "iat = nbf - 2 (within skew), exp - iat = max_ttl (30 s).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-05-iat-before-nbf.hex",
       "grant_len": 327,
       "steps": [
@@ -394,6 +319,7 @@
       "category": "accept",
       "description": "Workload app2 is registered for tenants acme and globex; grant for globex.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-06-multi-tenant-workload.hex",
       "grant_len": 329,
       "steps": [
@@ -420,6 +346,7 @@
       "category": "accept",
       "description": "Grant signed for audience nodkey.broker.other-test, presented to that broker (control for SIG-07).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ACC-07-other-audience-at-its-broker.hex",
       "grant_len": 326,
       "steps": [
@@ -441,13 +368,14 @@
       ]
     },
     {
-      "id": "ACC-08-scheduler-grant",
+      "id": "ACC-08-rotation-overlap-second-key",
       "kind": "grant",
       "category": "accept",
-      "description": "Scheduler key E signs orders.capture (authority class scheduler_grant; cfm = 0, confirmation not required).",
+      "description": "Signed by key E, a second active key registered for the same issuer (rotation overlap).",
       "registry": "registry.json",
-      "grant": "grants/ACC-08-scheduler-grant.hex",
-      "grant_len": 316,
+      "operations": "operations.json",
+      "grant": "grants/ACC-08-rotation-overlap-second-key.hex",
+      "grant_len": 327,
       "steps": [
         {
           "now": 1792886410,
@@ -455,10 +383,109 @@
           "peer_wid": "spiffe://nodkey.test/workload/app1",
           "revoked_before": [],
           "request": {
-            "op": "orders.capture",
+            "op": "ledger.transfer",
             "args": {
-              "order_id": 9821,
-              "amount_cents": 4200
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-10-rop-length-first-order",
+      "kind": "grant",
+      "category": "accept",
+      "description": "Read grant whose rop keys sort differently by encoded bytes (length first: test.peek) than by raw string order.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/ACC-10-rop-length-first-order.hex",
+      "grant_len": 313,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886411,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.peek",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-11-grant-exactly-2048-bytes",
+      "kind": "grant",
+      "category": "accept",
+      "description": "A valid write grant (test.bulk) of exactly 2048 bytes.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/ACC-11-grant-exactly-2048-bytes.hex",
+      "grant_len": 2048,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.bulk",
+            "args": {
+              "account": "alice",
+              "p0": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "p1": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "p2": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "p3": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "p4": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "p5": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "p6": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+              "p7": "zzzzzz"
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-12-tenant-128-bytes",
+      "kind": "grant",
+      "category": "accept",
+      "description": "ten of 128 bytes (maximum), registered for app2.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/ACC-12-tenant-128-bytes.hex",
+      "grant_len": 453,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app2",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
             }
           },
           "expected": "ACCEPT"
@@ -471,6 +498,7 @@
       "category": "envelope",
       "description": "Validly signed grant of 2049 bytes (limit 2048; padded with unknown key 20); rejected before decoding.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-01-oversized-2049.hex",
       "grant_len": 2049,
       "steps": [
@@ -497,6 +525,7 @@
       "category": "envelope",
       "description": "Validly signed grant of exactly 2048 bytes passes the size check; fails later on its padding key 20.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-02-at-size-limit-2048.hex",
       "grant_len": 2048,
       "steps": [
@@ -523,6 +552,7 @@
       "category": "envelope",
       "description": "Zero-length input.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-03-empty.hex",
       "grant_len": 0,
       "steps": [
@@ -549,6 +579,7 @@
       "category": "envelope",
       "description": "Valid grant with its last byte removed.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-04-truncated.hex",
       "grant_len": 326,
       "steps": [
@@ -575,6 +606,7 @@
       "category": "envelope",
       "description": "Valid grant followed by one 0x00 byte.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-05-trailing-byte.hex",
       "grant_len": 328,
       "steps": [
@@ -601,6 +633,7 @@
       "category": "envelope",
       "description": "COSE_Sign1 array without tag 18.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-06-untagged.hex",
       "grant_len": 326,
       "steps": [
@@ -627,6 +660,7 @@
       "category": "envelope",
       "description": "Tag 17 (COSE_Mac0) instead of 18.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-07-tag-17.hex",
       "grant_len": 327,
       "steps": [
@@ -653,6 +687,7 @@
       "category": "envelope",
       "description": "Tag 98 (COSE_Sign) instead of 18.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-08-tag-98.hex",
       "grant_len": 328,
       "steps": [
@@ -679,6 +714,7 @@
       "category": "envelope",
       "description": "Tag 18 nested twice.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-09-double-tag.hex",
       "grant_len": 328,
       "steps": [
@@ -705,6 +741,7 @@
       "category": "envelope",
       "description": "Tag 18 encoded with a one-byte argument (0xd8 0x12).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-10-tag-non-minimal.hex",
       "grant_len": 328,
       "steps": [
@@ -731,6 +768,7 @@
       "category": "envelope",
       "description": "Array of 3 elements (signature omitted).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-11-array-3.hex",
       "grant_len": 261,
       "steps": [
@@ -757,6 +795,7 @@
       "category": "envelope",
       "description": "Array of 5 elements (extra trailing bstr).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-12-array-5.hex",
       "grant_len": 393,
       "steps": [
@@ -783,6 +822,7 @@
       "category": "envelope",
       "description": "Indefinite-length outer array.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-13-indefinite-array.hex",
       "grant_len": 328,
       "steps": [
@@ -809,6 +849,7 @@
       "category": "envelope",
       "description": "Outer array length encoded as 0x98 0x04.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-14-array-head-non-minimal.hex",
       "grant_len": 328,
       "steps": [
@@ -835,6 +876,7 @@
       "category": "envelope",
       "description": "Payload bstr length encoded with an 8-byte argument.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-15-payload-length-non-minimal.hex",
       "grant_len": 334,
       "steps": [
@@ -861,6 +903,7 @@
       "category": "envelope",
       "description": "Payload as an indefinite-length (chunked) byte string.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-16-payload-indefinite-bstr.hex",
       "grant_len": 330,
       "steps": [
@@ -887,6 +930,7 @@
       "category": "envelope",
       "description": "Signature truncated to 63 bytes.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-17-signature-63-bytes.hex",
       "grant_len": 326,
       "steps": [
@@ -913,6 +957,7 @@
       "category": "envelope",
       "description": "Signature with one extra byte.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-18-signature-65-bytes.hex",
       "grant_len": 328,
       "steps": [
@@ -939,6 +984,7 @@
       "category": "envelope",
       "description": "Detached payload (nil, 0xf6) is not supported.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-19-payload-nil.hex",
       "grant_len": 127,
       "steps": [
@@ -965,6 +1011,7 @@
       "category": "envelope",
       "description": "Unprotected header encoded as an empty bstr instead of a map.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-20-unprotected-not-map.hex",
       "grant_len": 327,
       "steps": [
@@ -991,6 +1038,7 @@
       "category": "envelope",
       "description": "Protected header given as a bare map instead of a bstr.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-21-protected-not-bstr.hex",
       "grant_len": 325,
       "steps": [
@@ -1017,6 +1065,7 @@
       "category": "envelope",
       "description": "Tag 18 wrapping a map.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-22-envelope-is-map.hex",
       "grant_len": 60,
       "steps": [
@@ -1043,6 +1092,7 @@
       "category": "envelope",
       "description": "Payload bstr declares 2^32 bytes; must fail without allocating.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ENV-23-huge-declared-length.hex",
       "grant_len": 69,
       "steps": [
@@ -1069,6 +1119,7 @@
       "category": "header",
       "description": "Unprotected header {1: -19} (label present in both headers).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-01-alg-in-unprotected.hex",
       "grant_len": 329,
       "steps": [
@@ -1095,6 +1146,7 @@
       "category": "header",
       "description": "kid moved from the protected to the unprotected header.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-02-kid-only-in-unprotected.hex",
       "grant_len": 327,
       "steps": [
@@ -1121,6 +1173,7 @@
       "category": "header",
       "description": "Protected header without typ (16).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-03-missing-typ.hex",
       "grant_len": 292,
       "steps": [
@@ -1147,6 +1200,7 @@
       "category": "header",
       "description": "Protected header without kid (4).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-04-missing-kid.hex",
       "grant_len": 309,
       "steps": [
@@ -1173,6 +1227,7 @@
       "category": "header",
       "description": "Protected header without alg (1).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-05-missing-alg.hex",
       "grant_len": 325,
       "steps": [
@@ -1199,6 +1254,7 @@
       "category": "header",
       "description": "Extra protected label 2 (crit).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-06-extra-crit.hex",
       "grant_len": 330,
       "steps": [
@@ -1225,6 +1281,7 @@
       "category": "header",
       "description": "Extra protected label 3 (content type).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-07-extra-content-type.hex",
       "grant_len": 345,
       "steps": [
@@ -1251,6 +1308,7 @@
       "category": "header",
       "description": "Extra protected label 99.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-08-extra-unknown-label.hex",
       "grant_len": 330,
       "steps": [
@@ -1277,6 +1335,7 @@
       "category": "header",
       "description": "typ of another Nodkey object (application/nodkey-receipt+cbor).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-09-typ-receipt.hex",
       "grant_len": 329,
       "steps": [
@@ -1303,6 +1362,7 @@
       "category": "header",
       "description": "typ application/cose.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-10-typ-generic-cose.hex",
       "grant_len": 311,
       "steps": [
@@ -1329,6 +1389,7 @@
       "category": "header",
       "description": "typ given as a CoAP content-format integer.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-11-typ-as-uint.hex",
       "grant_len": 296,
       "steps": [
@@ -1355,6 +1416,7 @@
       "category": "header",
       "description": "kid of 15 bytes.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-12-kid-15-bytes.hex",
       "grant_len": 326,
       "steps": [
@@ -1381,6 +1443,7 @@
       "category": "header",
       "description": "kid of 17 bytes.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-13-kid-17-bytes.hex",
       "grant_len": 328,
       "steps": [
@@ -1407,6 +1470,7 @@
       "category": "header",
       "description": "kid given as tstr (hex of the real kid).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-14-kid-as-text.hex",
       "grant_len": 344,
       "steps": [
@@ -1433,6 +1497,7 @@
       "category": "header",
       "description": "Protected labels in order 4, 1, 16 (not deterministic).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-15-unsorted-labels.hex",
       "grant_len": 327,
       "steps": [
@@ -1459,6 +1524,7 @@
       "category": "header",
       "description": "alg -19 encoded as 0x38 0x12 (non-minimal).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-16-alg-non-minimal.hex",
       "grant_len": 328,
       "steps": [
@@ -1485,6 +1551,7 @@
       "category": "header",
       "description": "Protected header is the zero-length bstr.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-17-protected-empty-bstr.hex",
       "grant_len": 271,
       "steps": [
@@ -1511,6 +1578,7 @@
       "category": "header",
       "description": "Protected header is an encoded empty map.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-18-protected-empty-map.hex",
       "grant_len": 272,
       "steps": [
@@ -1537,6 +1605,7 @@
       "category": "header",
       "description": "Protected header bstr has a byte after the map.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-19-protected-trailing-byte.hex",
       "grant_len": 328,
       "steps": [
@@ -1563,6 +1632,7 @@
       "category": "header",
       "description": "alg given as tstr \"EdDSA\".",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-20-alg-text.hex",
       "grant_len": 332,
       "steps": [
@@ -1589,6 +1659,7 @@
       "category": "header",
       "description": "alg -8 (polymorphic EdDSA) disagrees with the key registry (Ed25519 = -19).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-21-alg-minus-8.hex",
       "grant_len": 327,
       "steps": [
@@ -1615,6 +1686,7 @@
       "category": "header",
       "description": "alg -7 (ES256) disagrees with the key registry.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-22-alg-minus-7.hex",
       "grant_len": 327,
       "steps": [
@@ -1641,6 +1713,7 @@
       "category": "header",
       "description": "alg 0 (reserved) disagrees with the key registry.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/HDR-23-alg-zero.hex",
       "grant_len": 327,
       "steps": [
@@ -1667,6 +1740,7 @@
       "category": "key",
       "description": "Signed by key B under B's own kid; B is not in the registry.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/KEY-01-unknown-kid.hex",
       "grant_len": 327,
       "steps": [
@@ -1693,6 +1767,7 @@
       "category": "key",
       "description": "kid of 16 0x00 bytes, signed by A.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/KEY-02-unknown-kid-random.hex",
       "grant_len": 327,
       "steps": [
@@ -1719,6 +1794,7 @@
       "category": "key",
       "description": "Signed by key C, registered with status revoked.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/KEY-03-revoked-key.hex",
       "grant_len": 327,
       "steps": [
@@ -1745,6 +1821,7 @@
       "category": "key",
       "description": "Signed by key D, whose validity window ended before the test time.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/KEY-04-key-outside-window.hex",
       "grant_len": 327,
       "steps": [
@@ -1771,6 +1848,7 @@
       "category": "signature",
       "description": "kid of key A, signature by key B.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-01-wrong-key.hex",
       "grant_len": 327,
       "steps": [
@@ -1797,6 +1875,7 @@
       "category": "signature",
       "description": "Signed by A under A's kid; kid then replaced by key E's (active, registered).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-02-kid-swapped-post-signing.hex",
       "grant_len": 327,
       "steps": [
@@ -1823,6 +1902,7 @@
       "category": "signature",
       "description": "One bit flipped in R.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-03-signature-R-bitflip.hex",
       "grant_len": 327,
       "steps": [
@@ -1849,6 +1929,7 @@
       "category": "signature",
       "description": "One bit flipped in S.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-04-signature-S-bitflip.hex",
       "grant_len": 327,
       "steps": [
@@ -1875,6 +1956,7 @@
       "category": "signature",
       "description": "S replaced by S + L (non-canonical scalar). Lax verifiers that reduce S mod L accept it; verify_strict must not.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-05-malleable-S-plus-L.hex",
       "grant_len": 327,
       "steps": [
@@ -1901,6 +1983,7 @@
       "category": "signature",
       "description": "Signature of 64 zero bytes.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-06-signature-zero.hex",
       "grant_len": 327,
       "steps": [
@@ -1927,6 +2010,7 @@
       "category": "signature",
       "description": "Grant for nodkey.broker.other-test (aud field and external_aad) presented to nodkey.broker.ledger-test.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-07-signed-for-other-audience.hex",
       "grant_len": 326,
       "steps": [
@@ -1953,6 +2037,7 @@
       "category": "signature",
       "description": "external_aad built with tag nodkey.receipt.v1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-08-aad-wrong-domain-tag.hex",
       "grant_len": 327,
       "steps": [
@@ -1979,6 +2064,7 @@
       "category": "signature",
       "description": "Signed with an empty external_aad.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-09-aad-empty.hex",
       "grant_len": 327,
       "steps": [
@@ -2005,6 +2091,7 @@
       "category": "signature",
       "description": "external_aad without the 0x00 separator.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-10-aad-no-separator.hex",
       "grant_len": 327,
       "steps": [
@@ -2031,6 +2118,7 @@
       "category": "signature",
       "description": "Signed over a COSE_Sign (\"Signature\") structure instead of Sig_structure1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-11-cose-sign-context.hex",
       "grant_len": 327,
       "steps": [
@@ -2057,6 +2145,7 @@
       "category": "signature",
       "description": "Ed25519 signature over the payload bytes alone.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-12-raw-payload-signed.hex",
       "grant_len": 327,
       "steps": [
@@ -2083,6 +2172,7 @@
       "category": "signature",
       "description": "Payload field 0 (ver) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-20-altered-ver.hex",
       "grant_len": 327,
       "steps": [
@@ -2109,6 +2199,7 @@
       "category": "signature",
       "description": "Payload field 1 (iss) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-21-altered-iss.hex",
       "grant_len": 327,
       "steps": [
@@ -2135,6 +2226,7 @@
       "category": "signature",
       "description": "Payload field 2 (aud) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-22-altered-aud.hex",
       "grant_len": 327,
       "steps": [
@@ -2161,6 +2253,7 @@
       "category": "signature",
       "description": "Payload field 3 (jti) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-23-altered-jti.hex",
       "grant_len": 327,
       "steps": [
@@ -2187,6 +2280,7 @@
       "category": "signature",
       "description": "Payload field 4 (iat) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-24-altered-iat.hex",
       "grant_len": 327,
       "steps": [
@@ -2213,6 +2307,7 @@
       "category": "signature",
       "description": "Payload field 5 (nbf) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-25-altered-nbf.hex",
       "grant_len": 327,
       "steps": [
@@ -2239,6 +2334,7 @@
       "category": "signature",
       "description": "Payload field 6 (exp) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-26-altered-exp.hex",
       "grant_len": 327,
       "steps": [
@@ -2265,6 +2361,7 @@
       "category": "signature",
       "description": "Payload field 7 (wid) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-27-altered-wid.hex",
       "grant_len": 327,
       "steps": [
@@ -2291,6 +2388,7 @@
       "category": "signature",
       "description": "Payload field 8 (ten) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-28-altered-ten.hex",
       "grant_len": 329,
       "steps": [
@@ -2317,6 +2415,7 @@
       "category": "signature",
       "description": "Payload field 9 (sub) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-29-altered-sub.hex",
       "grant_len": 327,
       "steps": [
@@ -2343,6 +2442,7 @@
       "category": "signature",
       "description": "Payload field 10 (op) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-30-altered-op.hex",
       "grant_len": 330,
       "steps": [
@@ -2369,6 +2469,7 @@
       "category": "signature",
       "description": "Payload field 11 (opv) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-31-altered-opv.hex",
       "grant_len": 327,
       "steps": [
@@ -2395,6 +2496,7 @@
       "category": "signature",
       "description": "Payload field 12 (res) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-32-altered-res.hex",
       "grant_len": 329,
       "steps": [
@@ -2421,6 +2523,7 @@
       "category": "signature",
       "description": "Payload field 13 (con) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-33-altered-con.hex",
       "grant_len": 329,
       "steps": [
@@ -2447,6 +2550,7 @@
       "category": "signature",
       "description": "Payload field 14 (use) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-34-altered-use.hex",
       "grant_len": 327,
       "steps": [
@@ -2473,6 +2577,7 @@
       "category": "signature",
       "description": "Payload field 17 (knd) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-37-altered-knd.hex",
       "grant_len": 327,
       "steps": [
@@ -2499,6 +2604,7 @@
       "category": "signature",
       "description": "Payload field 18 (cfm) altered after signing.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/SIG-38-altered-cfm.hex",
       "grant_len": 327,
       "steps": [
@@ -2525,6 +2631,7 @@
       "category": "payload-decode",
       "description": "ver encoded as 0x18 0x01.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-01-int-non-minimal.hex",
       "grant_len": 328,
       "steps": [
@@ -2551,6 +2658,7 @@
       "category": "payload-decode",
       "description": "iss (23 bytes) with its length encoded as 0x78 0x17.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-02-text-length-non-minimal.hex",
       "grant_len": 328,
       "steps": [
@@ -2577,6 +2685,7 @@
       "category": "payload-decode",
       "description": "Top-level map count (17) encoded as 0xb8 0x11.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-03-map-head-non-minimal.hex",
       "grant_len": 328,
       "steps": [
@@ -2603,6 +2712,7 @@
       "category": "payload-decode",
       "description": "Keys 1 and 0 swapped.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-04-keys-unsorted.hex",
       "grant_len": 327,
       "steps": [
@@ -2629,6 +2739,7 @@
       "category": "payload-decode",
       "description": "Key 6 (exp) appears twice; the second would widen the window.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-05-duplicate-key-exp.hex",
       "grant_len": 333,
       "steps": [
@@ -2655,6 +2766,7 @@
       "category": "payload-decode",
       "description": "Key 13 (con) appears twice with different values.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-06-duplicate-key-con.hex",
       "grant_len": 340,
       "steps": [
@@ -2681,6 +2793,7 @@
       "category": "payload-decode",
       "description": "Top-level map with indefinite length.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-07-indefinite-map.hex",
       "grant_len": 328,
       "steps": [
@@ -2707,6 +2820,7 @@
       "category": "payload-decode",
       "description": "sub as an indefinite-length text string.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-08-indefinite-text.hex",
       "grant_len": 330,
       "steps": [
@@ -2733,6 +2847,7 @@
       "category": "payload-decode",
       "description": "con entry 0 as an indefinite-length array.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-09-indefinite-array-in-con.hex",
       "grant_len": 328,
       "steps": [
@@ -2759,6 +2874,7 @@
       "category": "payload-decode",
       "description": "exp as a float64 with the correct numeric value.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-10-float-exp.hex",
       "grant_len": 331,
       "steps": [
@@ -2785,6 +2901,7 @@
       "category": "payload-decode",
       "description": "use as float16 1.0 (0xf9 0x3c00).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-11-half-float-use.hex",
       "grant_len": 329,
       "steps": [
@@ -2811,6 +2928,7 @@
       "category": "payload-decode",
       "description": "exp as negative integer -1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-12-negative-int.hex",
       "grant_len": 323,
       "steps": [
@@ -2837,6 +2955,7 @@
       "category": "payload-decode",
       "description": "exp wrapped in tag 1 (epoch time).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-13-tag-in-payload.hex",
       "grant_len": 328,
       "steps": [
@@ -2863,6 +2982,7 @@
       "category": "payload-decode",
       "description": "use as true (0xf5).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-14-bool.hex",
       "grant_len": 327,
       "steps": [
@@ -2889,6 +3009,7 @@
       "category": "payload-decode",
       "description": "res as null (0xf6).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-15-null.hex",
       "grant_len": 320,
       "steps": [
@@ -2915,6 +3036,7 @@
       "category": "payload-decode",
       "description": "Payload map followed by one 0x00 byte.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-16-trailing-byte.hex",
       "grant_len": 328,
       "steps": [
@@ -2941,6 +3063,7 @@
       "category": "payload-decode",
       "description": "Payload map with its last byte removed.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-17-truncated.hex",
       "grant_len": 326,
       "steps": [
@@ -2967,6 +3090,7 @@
       "category": "payload-decode",
       "description": "sub contains the invalid UTF-8 sequence 0xc3 0x28.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-18-invalid-utf8.hex",
       "grant_len": 325,
       "steps": [
@@ -2993,6 +3117,7 @@
       "category": "payload-decode",
       "description": "con entry value nested one array deeper than allowed (depth 4).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PDEC-19-depth-4.hex",
       "grant_len": 322,
       "steps": [
@@ -3019,6 +3144,7 @@
       "category": "payload-schema",
       "description": "Payload is an array.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-01-payload-array.hex",
       "grant_len": 129,
       "steps": [
@@ -3045,6 +3171,7 @@
       "category": "payload-schema",
       "description": "Payload is the integer 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-02-payload-uint.hex",
       "grant_len": 128,
       "steps": [
@@ -3071,6 +3198,7 @@
       "category": "payload-schema",
       "description": "Unknown top-level key 20.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-03-unknown-key-20.hex",
       "grant_len": 329,
       "steps": [
@@ -3097,6 +3225,7 @@
       "category": "payload-schema",
       "description": "Reserved key 15 (removed epo).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-04-reserved-key-15-epo.hex",
       "grant_len": 329,
       "steps": [
@@ -3123,6 +3252,7 @@
       "category": "payload-schema",
       "description": "Reserved key 16 (removed rqh).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-05-reserved-key-16-rqh.hex",
       "grant_len": 362,
       "steps": [
@@ -3149,6 +3279,7 @@
       "category": "payload-schema",
       "description": "Extra text key \"exp\".",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-06-text-key.hex",
       "grant_len": 336,
       "steps": [
@@ -3175,6 +3306,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 0 (ver) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-10-missing-ver.hex",
       "grant_len": 325,
       "steps": [
@@ -3201,6 +3333,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 1 (iss) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-11-missing-iss.hex",
       "grant_len": 302,
       "steps": [
@@ -3227,6 +3360,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 2 (aud) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-12-missing-aud.hex",
       "grant_len": 297,
       "steps": [
@@ -3253,6 +3387,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 3 (jti) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-13-missing-jti.hex",
       "grant_len": 309,
       "steps": [
@@ -3279,6 +3414,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 4 (iat) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-14-missing-iat.hex",
       "grant_len": 321,
       "steps": [
@@ -3305,6 +3441,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 5 (nbf) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-15-missing-nbf.hex",
       "grant_len": 321,
       "steps": [
@@ -3331,6 +3468,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 6 (exp) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-16-missing-exp.hex",
       "grant_len": 321,
       "steps": [
@@ -3357,6 +3495,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 7 (wid) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-17-missing-wid.hex",
       "grant_len": 288,
       "steps": [
@@ -3383,6 +3522,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 8 (ten) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-18-missing-ten.hex",
       "grant_len": 321,
       "steps": [
@@ -3409,6 +3549,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 9 (sub) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-19-missing-sub.hex",
       "grant_len": 316,
       "steps": [
@@ -3435,6 +3576,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 10 (op) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-20-missing-op.hex",
       "grant_len": 310,
       "steps": [
@@ -3461,6 +3603,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 11 (opv) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-21-missing-opv.hex",
       "grant_len": 325,
       "steps": [
@@ -3487,6 +3630,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 12 (res) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-22-missing-res.hex",
       "grant_len": 318,
       "steps": [
@@ -3513,6 +3657,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 13 (con) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-23-missing-con.hex",
       "grant_len": 312,
       "steps": [
@@ -3539,6 +3684,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 14 (use) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-24-missing-use.hex",
       "grant_len": 325,
       "steps": [
@@ -3565,6 +3711,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 17 (knd) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-25-missing-knd.hex",
       "grant_len": 325,
       "steps": [
@@ -3591,6 +3738,7 @@
       "category": "payload-schema",
       "description": "Write grant: required key 18 (cfm) absent.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-26-missing-cfm.hex",
       "grant_len": 325,
       "steps": [
@@ -3617,6 +3765,7 @@
       "category": "payload-schema",
       "description": "exp as tstr.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-30-exp-text.hex",
       "grant_len": 333,
       "steps": [
@@ -3643,6 +3792,7 @@
       "category": "payload-schema",
       "description": "iat as bstr.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-31-iat-bytes.hex",
       "grant_len": 331,
       "steps": [
@@ -3669,6 +3819,7 @@
       "category": "payload-schema",
       "description": "jti of 15 bytes.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-32-jti-15-bytes.hex",
       "grant_len": 326,
       "steps": [
@@ -3695,6 +3846,7 @@
       "category": "payload-schema",
       "description": "jti of 17 bytes.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-33-jti-17-bytes.hex",
       "grant_len": 328,
       "steps": [
@@ -3721,6 +3873,7 @@
       "category": "payload-schema",
       "description": "jti as tstr.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-34-jti-text.hex",
       "grant_len": 327,
       "steps": [
@@ -3747,6 +3900,7 @@
       "category": "payload-schema",
       "description": "ver = 2.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-35-ver-2.hex",
       "grant_len": 327,
       "steps": [
@@ -3773,6 +3927,7 @@
       "category": "payload-schema",
       "description": "ver = 0.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-36-ver-0.hex",
       "grant_len": 327,
       "steps": [
@@ -3799,6 +3954,7 @@
       "category": "payload-schema",
       "description": "ver as tstr \"1\".",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-37-ver-text.hex",
       "grant_len": 328,
       "steps": [
@@ -3825,6 +3981,7 @@
       "category": "payload-schema",
       "description": "use = 0.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-38-use-0.hex",
       "grant_len": 327,
       "steps": [
@@ -3851,6 +4008,7 @@
       "category": "payload-schema",
       "description": "use = 2 (multi-use not supported in v1).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-39-use-2.hex",
       "grant_len": 327,
       "steps": [
@@ -3877,6 +4035,7 @@
       "category": "payload-schema",
       "description": "op with an uppercase letter.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-40-op-uppercase.hex",
       "grant_len": 327,
       "steps": [
@@ -3903,6 +4062,7 @@
       "category": "payload-schema",
       "description": "op empty.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-41-op-empty.hex",
       "grant_len": 312,
       "steps": [
@@ -3929,6 +4089,7 @@
       "category": "payload-schema",
       "description": "ten contains NUL.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-42-ten-nul.hex",
       "grant_len": 328,
       "steps": [
@@ -3955,6 +4116,7 @@
       "category": "payload-schema",
       "description": "ten contains U+00E9 (valid UTF-8, outside the ID alphabet).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-43-ten-non-ascii.hex",
       "grant_len": 328,
       "steps": [
@@ -3981,6 +4143,7 @@
       "category": "payload-schema",
       "description": "ten empty.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-44-ten-empty.hex",
       "grant_len": 323,
       "steps": [
@@ -4007,6 +4170,7 @@
       "category": "payload-schema",
       "description": "iss contains a space.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-45-iss-space.hex",
       "grant_len": 327,
       "steps": [
@@ -4033,6 +4197,7 @@
       "category": "payload-schema",
       "description": "sub of 257 bytes (max 256).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-46-sub-257.hex",
       "grant_len": 578,
       "steps": [
@@ -4059,6 +4224,7 @@
       "category": "payload-schema",
       "description": "exp = 2^53 (max 2^53 - 1).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-47-exp-2pow53.hex",
       "grant_len": 331,
       "steps": [
@@ -4085,6 +4251,7 @@
       "category": "payload-schema",
       "description": "opv = 0.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-48-opv-0.hex",
       "grant_len": 327,
       "steps": [
@@ -4111,6 +4278,7 @@
       "category": "payload-schema",
       "description": "con entry 0 is a bare tstr.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-49-con-value-not-array.hex",
       "grant_len": 319,
       "steps": [
@@ -4137,6 +4305,7 @@
       "category": "payload-schema",
       "description": "con entry 0 is a 3-element array.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-50-con-array-3.hex",
       "grant_len": 322,
       "steps": [
@@ -4163,6 +4332,7 @@
       "category": "payload-schema",
       "description": "con entry with class 2 (undefined).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-51-con-class-2.hex",
       "grant_len": 321,
       "steps": [
@@ -4189,6 +4359,7 @@
       "category": "payload-schema",
       "description": "Bounded (class 1) entry with a tstr ceiling.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-52-con-bounded-text.hex",
       "grant_len": 323,
       "steps": [
@@ -4215,6 +4386,7 @@
       "category": "payload-schema",
       "description": "res value as bstr.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-53-res-value-bytes.hex",
       "grant_len": 327,
       "steps": [
@@ -4241,6 +4413,7 @@
       "category": "payload-schema",
       "description": "res key 16 (max 15).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-54-res-key-16.hex",
       "grant_len": 327,
       "steps": [
@@ -4267,6 +4440,7 @@
       "category": "payload-schema",
       "description": "con with a text key.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-55-con-key-text.hex",
       "grant_len": 323,
       "steps": [
@@ -4293,6 +4467,7 @@
       "category": "payload-schema",
       "description": "res value contains LF.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-56-res-value-control-char.hex",
       "grant_len": 328,
       "steps": [
@@ -4319,6 +4494,7 @@
       "category": "payload-schema",
       "description": "res as an array.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-57-res-not-map.hex",
       "grant_len": 326,
       "steps": [
@@ -4345,6 +4521,7 @@
       "category": "payload-schema",
       "description": "knd = 3 (undefined).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-60-knd-3.hex",
       "grant_len": 327,
       "steps": [
@@ -4369,6 +4546,7 @@
       "category": "payload-schema",
       "description": "cfm = 2.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-61-cfm-2.hex",
       "grant_len": 327,
       "steps": [
@@ -4393,6 +4571,7 @@
       "category": "payload-schema",
       "description": "Read grant carrying con (13).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-62-read-with-con.hex",
       "grant_len": 304,
       "steps": [
@@ -4417,6 +4596,7 @@
       "category": "payload-schema",
       "description": "Read grant carrying cfm (18).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-63-read-with-cfm.hex",
       "grant_len": 304,
       "steps": [
@@ -4441,6 +4621,7 @@
       "category": "payload-schema",
       "description": "Read grant carrying op (10).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-64-read-with-op.hex",
       "grant_len": 322,
       "steps": [
@@ -4465,6 +4646,7 @@
       "category": "payload-schema",
       "description": "Read grant without rop (19).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-65-read-missing-rop.hex",
       "grant_len": 280,
       "steps": [
@@ -4489,6 +4671,7 @@
       "category": "payload-schema",
       "description": "Read grant without jti (3).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-66-read-missing-jti.hex",
       "grant_len": 284,
       "steps": [
@@ -4513,6 +4696,7 @@
       "category": "payload-schema",
       "description": "Read grant with an empty rop map.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-67-read-rop-empty.hex",
       "grant_len": 282,
       "steps": [
@@ -4537,6 +4721,7 @@
       "category": "payload-schema",
       "description": "rop keyed by integer.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-68-read-rop-uint-key.hex",
       "grant_len": 284,
       "steps": [
@@ -4561,6 +4746,7 @@
       "category": "payload-schema",
       "description": "rop entry with opv 0.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-69-read-rop-opv-0.hex",
       "grant_len": 302,
       "steps": [
@@ -4585,6 +4771,7 @@
       "category": "payload-schema",
       "description": "Write grant carrying rop (19).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-70-write-with-rop.hex",
       "grant_len": 349,
       "steps": [
@@ -4609,6 +4796,7 @@
       "category": "payload-schema",
       "description": "Write fields with knd = 2.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/PSCH-71-write-knd-read-fields.hex",
       "grant_len": 327,
       "steps": [
@@ -4631,10 +4819,11 @@
       "id": "ISS-01-issuer-of-other-key",
       "kind": "grant",
       "category": "issuer",
-      "description": "iss names the scheduler, but key A is registered for the authority.",
+      "description": "iss names another issuer than the one registered for key A.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ISS-01-issuer-of-other-key.hex",
-      "grant_len": 327,
+      "grant_len": 331,
       "steps": [
         {
           "now": 1792886410,
@@ -4659,6 +4848,7 @@
       "category": "issuer",
       "description": "iss names an unregistered issuer.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/ISS-02-issuer-unknown.hex",
       "grant_len": 318,
       "steps": [
@@ -4685,6 +4875,7 @@
       "category": "time",
       "description": "now = exp + skew + 100.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-01-expired.hex",
       "grant_len": 327,
       "steps": [
@@ -4711,6 +4902,7 @@
       "category": "time",
       "description": "now = exp + skew: first rejected second.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-02-expired-boundary.hex",
       "grant_len": 327,
       "steps": [
@@ -4737,6 +4929,7 @@
       "category": "time",
       "description": "now = exp + skew - 1: last accepted second.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-03-expiry-boundary-accept.hex",
       "grant_len": 327,
       "steps": [
@@ -4763,6 +4956,7 @@
       "category": "time",
       "description": "now = nbf - 100.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-04-not-yet-valid.hex",
       "grant_len": 327,
       "steps": [
@@ -4789,6 +4983,7 @@
       "category": "time",
       "description": "now = nbf - skew - 1: last rejected second.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-05-not-yet-valid-boundary.hex",
       "grant_len": 327,
       "steps": [
@@ -4815,6 +5010,7 @@
       "category": "time",
       "description": "now = nbf - skew: first accepted second.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-06-nbf-boundary-accept.hex",
       "grant_len": 327,
       "steps": [
@@ -4839,8 +5035,9 @@
       "id": "TIME-07-ttl-31",
       "kind": "grant",
       "category": "time",
-      "description": "exp - nbf = 31 > max_ttl (30).",
+      "description": "exp - iat = 31 > max_ttl (30).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-07-ttl-31.hex",
       "grant_len": 327,
       "steps": [
@@ -4867,6 +5064,7 @@
       "category": "time",
       "description": "nbf = iat - 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-08-nbf-before-iat.hex",
       "grant_len": 327,
       "steps": [
@@ -4893,6 +5091,7 @@
       "category": "time",
       "description": "exp = nbf (empty window).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-09-exp-equals-nbf.hex",
       "grant_len": 327,
       "steps": [
@@ -4919,6 +5118,7 @@
       "category": "time",
       "description": "exp = nbf - 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-10-exp-before-nbf.hex",
       "grant_len": 327,
       "steps": [
@@ -4945,6 +5145,7 @@
       "category": "time",
       "description": "Read grants expire like write grants: now = exp + skew.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-12-read-grant-expired.hex",
       "grant_len": 302,
       "steps": [
@@ -4964,11 +5165,174 @@
       ]
     },
     {
+      "id": "TIME-13-nbf-iat-equals-skew",
+      "kind": "grant",
+      "category": "time",
+      "description": "nbf - iat = skew (5 s), exp - iat = 30: accepted.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/TIME-13-nbf-iat-equals-skew.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "TIME-14-nbf-iat-exceeds-skew",
+      "kind": "grant",
+      "category": "time",
+      "description": "nbf - iat = 6 > skew.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/TIME-14-nbf-iat-exceeds-skew.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_time_invalid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-15-future-dated-issuance",
+      "kind": "grant",
+      "category": "time",
+      "description": "iat = nbf = one year after now (future-dated issuance).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/TIME-15-future-dated-issuance.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_not_yet_valid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-16-nbf-far-beyond-iat",
+      "kind": "grant",
+      "category": "time",
+      "description": "iat = T, nbf = T + 30 days, exp = nbf + 30, presented inside that window (key still valid): rejected because nbf - iat > skew (GS-01).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/TIME-16-nbf-far-beyond-iat.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1795478401,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_time_invalid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-17-ttl-from-iat",
+      "kind": "grant",
+      "category": "time",
+      "description": "iat = T, nbf = T + 1, exp = T + 31: exp - nbf = 30 but exp - iat = 31.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/TIME-17-ttl-from-iat.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_ttl_exceeded"
+        }
+      ]
+    },
+    {
+      "id": "TIME-18-iat-just-beyond-skew",
+      "kind": "grant",
+      "category": "time",
+      "description": "iat = nbf = now + skew + 1.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/TIME-18-iat-just-beyond-skew.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886394,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_not_yet_valid"
+        }
+      ]
+    },
+    {
       "id": "TIME-11-long-ttl-far-future",
       "kind": "grant",
       "category": "time",
       "description": "exp = 2^53 - 1 (would overflow naive arithmetic only if unchecked); TTL exceeded.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/TIME-11-long-ttl-far-future.hex",
       "grant_len": 331,
       "steps": [
@@ -4995,6 +5359,7 @@
       "category": "binding",
       "description": "aud field names another broker; external_aad is this broker's (so the signature verifies).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/BIND-01-audience-field.hex",
       "grant_len": 326,
       "steps": [
@@ -5021,6 +5386,7 @@
       "category": "binding",
       "description": "Grant for app1 presented over app2's socket.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/BIND-02-workload-other-peer.hex",
       "grant_len": 327,
       "steps": [
@@ -5047,6 +5413,7 @@
       "category": "binding",
       "description": "Grant for app2 presented over app1's socket.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/BIND-03-workload-other-grant.hex",
       "grant_len": 327,
       "steps": [
@@ -5073,6 +5440,7 @@
       "category": "binding",
       "description": "Grant for tenant globex presented by app1 (registered for acme only).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/BIND-04-tenant-not-registered.hex",
       "grant_len": 329,
       "steps": [
@@ -5099,6 +5467,7 @@
       "category": "binding",
       "description": "Grant for tenant initech presented by app2 (acme, globex).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/BIND-05-tenant-unknown.hex",
       "grant_len": 330,
       "steps": [
@@ -5125,6 +5494,7 @@
       "category": "binding",
       "description": "Tenant \"Acme\": comparisons are byte-exact, no case folding.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/BIND-06-tenant-case.hex",
       "grant_len": 327,
       "steps": [
@@ -5151,6 +5521,7 @@
       "category": "operation",
       "description": "Read grant for ledger.get_balance presented for ledger.transfer: a read grant never authorizes a write.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-01-read-grant-for-write-op.hex",
       "grant_len": 302,
       "steps": [
@@ -5177,6 +5548,7 @@
       "category": "operation",
       "description": "Read grant whose operation set includes ledger.transfer (a write op), presented for ledger.transfer.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-07-read-grant-lists-write-op.hex",
       "grant_len": 319,
       "steps": [
@@ -5203,6 +5575,7 @@
       "category": "operation",
       "description": "Same malformed read grant presented for the read op ledger.get_balance: the whole grant is rejected.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-08-read-grant-lists-write-op-read-request.hex",
       "grant_len": 319,
       "steps": [
@@ -5227,6 +5600,7 @@
       "category": "operation",
       "description": "Write grant (knd = 1) naming the read op ledger.get_balance.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-09-write-grant-for-read-op.hex",
       "grant_len": 317,
       "steps": [
@@ -5251,6 +5625,7 @@
       "category": "operation",
       "description": "Read grant for ledger.list_transfers presented for ledger.get_balance.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-10-read-op-not-in-set.hex",
       "grant_len": 305,
       "steps": [
@@ -5275,6 +5650,7 @@
       "category": "operation",
       "description": "Read grant whose set includes the undeclared op ledger.audit.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-11-read-undeclared-op-in-set.hex",
       "grant_len": 316,
       "steps": [
@@ -5299,6 +5675,7 @@
       "category": "operation",
       "description": "Read grant naming ledger.get_balance version 2.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-12-read-opv-unsupported.hex",
       "grant_len": 302,
       "steps": [
@@ -5323,6 +5700,7 @@
       "category": "operation",
       "description": "ledger.transfer requires auth-origin confirmation; otherwise valid grant has cfm = 0.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-13-confirmation-required.hex",
       "grant_len": 327,
       "steps": [
@@ -5349,6 +5727,7 @@
       "category": "operation",
       "description": "Grant for ledger.transfer, request ledger.get_balance.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-02-grant-transfer-request-balance.hex",
       "grant_len": 327,
       "steps": [
@@ -5373,6 +5752,7 @@
       "category": "operation",
       "description": "Grant for undeclared op ledger.delete, request ledger.transfer.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-03-undeclared-op.hex",
       "grant_len": 325,
       "steps": [
@@ -5399,6 +5779,7 @@
       "category": "operation",
       "description": "opv = 2; the broker supports only version 1 of ledger.transfer.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/OP-04-opv-unsupported.hex",
       "grant_len": 327,
       "steps": [
@@ -5420,13 +5801,14 @@
       ]
     },
     {
-      "id": "OP-05-scheduler-signs-user-op",
+      "id": "OP-14-rop-unsupported-opv-not-requested",
       "kind": "grant",
       "category": "operation",
-      "description": "Scheduler key E signs a ledger.transfer (user_grant) grant.",
+      "description": "Read grant lists get_balance:1 and list_transfers:9; request get_balance. Every rop entry is checked: whole grant rejected.",
       "registry": "registry.json",
-      "grant": "grants/OP-05-scheduler-signs-user-op.hex",
-      "grant_len": 327,
+      "operations": "operations.json",
+      "grant": "grants/OP-14-rop-unsupported-opv-not-requested.hex",
+      "grant_len": 325,
       "steps": [
         {
           "now": 1792886410,
@@ -5434,39 +5816,12 @@
           "peer_wid": "spiffe://nodkey.test/workload/app1",
           "revoked_before": [],
           "request": {
-            "op": "ledger.transfer",
+            "op": "ledger.get_balance",
             "args": {
-              "from": "alice",
-              "to": "bob",
-              "amount_cents": 12500
+              "account": "alice"
             }
           },
-          "expected": "grant_issuer_not_permitted"
-        }
-      ]
-    },
-    {
-      "id": "OP-06-authority-signs-scheduler-op",
-      "kind": "grant",
-      "category": "operation",
-      "description": "Authority key A signs an orders.capture (scheduler_grant) grant.",
-      "registry": "registry.json",
-      "grant": "grants/OP-06-authority-signs-scheduler-op.hex",
-      "grant_len": 316,
-      "steps": [
-        {
-          "now": 1792886410,
-          "broker_id": "nodkey.broker.ledger-test",
-          "peer_wid": "spiffe://nodkey.test/workload/app1",
-          "revoked_before": [],
-          "request": {
-            "op": "orders.capture",
-            "args": {
-              "order_id": 9821,
-              "amount_cents": 4200
-            }
-          },
-          "expected": "grant_issuer_not_permitted"
+          "expected": "grant_opv_unsupported"
         }
       ]
     },
@@ -5476,6 +5831,7 @@
       "category": "constraint",
       "description": "test.hold: amount_cents = ceiling + 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-01-amount-exceeds-bound.hex",
       "grant_len": 321,
       "steps": [
@@ -5503,6 +5859,7 @@
       "category": "constraint",
       "description": "ledger.transfer: request destination to = mallory; grant binds bob exactly.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-02-exact-to-mismatch.hex",
       "grant_len": 327,
       "steps": [
@@ -5529,6 +5886,7 @@
       "category": "constraint",
       "description": "test.hold: request currency USD; grant binds EUR exactly.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-03-exact-currency-mismatch.hex",
       "grant_len": 321,
       "steps": [
@@ -5556,6 +5914,7 @@
       "category": "constraint",
       "description": "ledger.transfer: request from = carol; grant res binds alice.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-04-resource-mismatch.hex",
       "grant_len": 327,
       "steps": [
@@ -5582,6 +5941,7 @@
       "category": "constraint",
       "description": "ledger.transfer: amount is exact (Phase 3 profile); request 12501 vs bound 12500.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-06-exact-amount-higher.hex",
       "grant_len": 327,
       "steps": [
@@ -5608,6 +5968,7 @@
       "category": "constraint",
       "description": "ledger.transfer: exact means equal, not at most; request 12499.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-07-exact-amount-lower.hex",
       "grant_len": 327,
       "steps": [
@@ -5629,13 +5990,14 @@
       ]
     },
     {
-      "id": "CON-05-capture-exceeds-bound",
+      "id": "CON-20-request-exact-wrong-type",
       "kind": "grant",
       "category": "constraint",
-      "description": "orders.capture amount above the scheduler grant's ceiling.",
+      "description": "Request amount_cents is the string \"12500\"; grant binds uint 12500.",
       "registry": "registry.json",
-      "grant": "grants/CON-05-capture-exceeds-bound.hex",
-      "grant_len": 316,
+      "operations": "operations.json",
+      "grant": "grants/CON-20-request-exact-wrong-type.hex",
+      "grant_len": 327,
       "steps": [
         {
           "now": 1792886410,
@@ -5643,13 +6005,120 @@
           "peer_wid": "spiffe://nodkey.test/workload/app1",
           "revoked_before": [],
           "request": {
-            "op": "orders.capture",
+            "op": "ledger.transfer",
             "args": {
-              "order_id": 9821,
-              "amount_cents": 4201
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": "12500"
             }
           },
-          "expected": "grant_bound_exceeded"
+          "expected": "grant_constraint_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-21-request-bounded-wrong-type",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "test.hold request amount_cents is a string: not a uint, so not within the bound.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/CON-21-request-bounded-wrong-type.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": "50",
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_constraint_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-22-request-missing-exact",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "Request lacks the exact parameter to.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/CON-22-request-missing-exact.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_constraint_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-23-request-missing-resource",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "Request lacks the resource parameter from.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/CON-23-request-missing-resource.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_resource_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-24-con-text-257",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "test.bulk con value of 257 bytes (max 256): generic shape check fails first.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/CON-24-con-text-257.hex",
+      "grant_len": 572,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.bulk",
+            "args": {
+              "account": "alice",
+              "p0": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          },
+          "expected": "grant_payload_invalid"
         }
       ]
     },
@@ -5659,6 +6128,7 @@
       "category": "constraint",
       "description": "ledger.transfer: con lacks the exact parameter amount_cents (key 1).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-10-missing-exact-param.hex",
       "grant_len": 321,
       "steps": [
@@ -5685,6 +6155,7 @@
       "category": "constraint",
       "description": "test.hold: amount (declared bounded) encoded with class 0 (exact).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-11-bounded-encoded-exact.hex",
       "grant_len": 321,
       "steps": [
@@ -5712,6 +6183,7 @@
       "category": "constraint",
       "description": "ledger.transfer: amount (declared exact) encoded as a bounded ceiling; must not be read as a broader grant.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-12-exact-encoded-bounded.hex",
       "grant_len": 327,
       "steps": [
@@ -5738,6 +6210,7 @@
       "category": "constraint",
       "description": "test.hold: con carries key 2 for the free parameter memo, which has no con key.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-13-free-param-in-con.hex",
       "grant_len": 329,
       "steps": [
@@ -5765,6 +6238,7 @@
       "category": "constraint",
       "description": "ledger.transfer: con carries undeclared key 7.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-14-unknown-con-key.hex",
       "grant_len": 331,
       "steps": [
@@ -5791,6 +6265,7 @@
       "category": "constraint",
       "description": "ledger.transfer: res carries undeclared key 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-15-unknown-res-key.hex",
       "grant_len": 332,
       "steps": [
@@ -5817,6 +6292,7 @@
       "category": "constraint",
       "description": "ledger.transfer: res is empty; the declaration has res key 0.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-16-res-empty.hex",
       "grant_len": 320,
       "steps": [
@@ -5843,6 +6319,7 @@
       "category": "constraint",
       "description": "ledger.transfer: res key 0 as uint; declared account_id.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-17-res-wrong-type.hex",
       "grant_len": 322,
       "steps": [
@@ -5869,6 +6346,7 @@
       "category": "constraint",
       "description": "test.hold: currency \"eur\" violates the declared currency type.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-18-currency-lowercase.hex",
       "grant_len": 321,
       "steps": [
@@ -5896,6 +6374,7 @@
       "category": "constraint",
       "description": "ledger.transfer: destination to as uint; declared account_id.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/CON-19-to-wrong-type.hex",
       "grant_len": 324,
       "steps": [
@@ -5922,6 +6401,7 @@
       "category": "replay",
       "description": "Same grant and same request twice: the second returns the stored outcome without a second effect (ADR-0006 section 5).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/RPL-01-identical-resubmission.hex",
       "grant_len": 327,
       "steps": [
@@ -5963,6 +6443,7 @@
       "category": "replay",
       "description": "test.hold grant used twice; the second request differs (amount still within the bound) and is rejected as a replay.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/RPL-02-replay-different-request.hex",
       "grant_len": 321,
       "steps": [
@@ -6004,8 +6485,9 @@
       "id": "RPL-03-denied-grant-is-consumed",
       "kind": "grant",
       "category": "replay",
-      "description": "A verified grant denied at the constraint step is consumed: a later in-bound request with it is a replay.",
+      "description": "A verified write grant denied at the constraint step is consumed (DENIED recorded atomically): a different request is a replay, the identical one gets the stored denial.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/RPL-03-denied-grant-is-consumed.hex",
       "grant_len": 321,
       "steps": [
@@ -6055,7 +6537,49 @@
               "memo": "rent"
             }
           },
-          "expected": "grant_bound_exceeded"
+          "expected": "STORED_OUTCOME:DENIED"
+        }
+      ]
+    },
+    {
+      "id": "RPL-08-retry-after-expiry",
+      "kind": "grant",
+      "category": "replay",
+      "description": "Accepted, then the identical request after exp + skew: steps 1-9 run first, so the result is grant_expired, not the stored outcome.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/RPL-08-retry-after-expiry.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886435,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_expired"
         }
       ]
     },
@@ -6065,6 +6589,7 @@
       "category": "replay",
       "description": "test.hold: a resubmission differing only in the free parameter has a different request hash: replay.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/RPL-07-memo-change-is-replay.hex",
       "grant_len": 321,
       "steps": [
@@ -6108,6 +6633,7 @@
       "category": "replay",
       "description": "Presented first over another workload's socket (not verified, nothing consumed), then by its own workload.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/RPL-04-unverified-grant-not-consumed.hex",
       "grant_len": 327,
       "steps": [
@@ -6149,6 +6675,7 @@
       "category": "replay",
       "description": "Denied by revocation (consumed as DENIED); the identical retry returns the stored denial.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/RPL-05-revoked-then-retried.hex",
       "grant_len": 327,
       "steps": [
@@ -6200,6 +6727,7 @@
       "category": "replay",
       "description": "Accepted, then the tenant is revoked: an identical retry returns the stored ACCEPT; no second effect.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/RPL-06-revocation-after-consumption.hex",
       "grant_len": 327,
       "steps": [
@@ -6246,6 +6774,7 @@
       "category": "revocation",
       "description": "revoked_before for (acme) = iat + 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-01-tenant.hex",
       "grant_len": 327,
       "steps": [
@@ -6277,6 +6806,7 @@
       "category": "revocation",
       "description": "revoked_before for (acme, app1) = iat + 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-02-tenant-workload.hex",
       "grant_len": 327,
       "steps": [
@@ -6309,6 +6839,7 @@
       "category": "revocation",
       "description": "revoked_before for (acme, user:u-17) = iat + 1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-03-tenant-subject.hex",
       "grant_len": 327,
       "steps": [
@@ -6341,6 +6872,7 @@
       "category": "revocation",
       "description": "revoked_before = iat: not revoked (strict less-than).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-04-boundary-equal.hex",
       "grant_len": 327,
       "steps": [
@@ -6372,6 +6904,7 @@
       "category": "revocation",
       "description": "Revocation for tenant globex does not affect acme.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-05-other-tenant.hex",
       "grant_len": 327,
       "steps": [
@@ -6403,6 +6936,7 @@
       "category": "revocation",
       "description": "Revocation for (acme, user:u-18) does not affect user:u-17.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-06-other-subject.hex",
       "grant_len": 327,
       "steps": [
@@ -6435,6 +6969,7 @@
       "category": "revocation",
       "description": "Read grant revoked for (acme, user:u-17): denied every time (read grants record nothing).",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-08-read-grant.hex",
       "grant_len": 302,
       "steps": [
@@ -6484,6 +7019,7 @@
       "category": "revocation",
       "description": "Revocation for (acme, app2) does not affect app1.",
       "registry": "registry.json",
+      "operations": "operations.json",
       "grant": "grants/REV-07-other-workload.hex",
       "grant_len": 327,
       "steps": [
@@ -6511,10 +7047,845 @@
       ]
     },
     {
+      "id": "REV-09-future-iat-escapes-earlier-revocation",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "RESIDUAL (spec 11): a grant whose iat is later than an earlier revoked_before row is not revoked by it. Prevented only by the issuer clock rule (spec 9) or key revocation.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/REV-09-future-iat-escapes-earlier-revocation.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886500,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "before": 1792886450
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-20-rop-raw-string-order",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "rop keys in raw string order (ledger.get_balance before test.peek) instead of encoded-bytes order.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PDEC-20-rop-raw-string-order.hex",
+      "grant_len": 313,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-21-rop-duplicate-key",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "rop names ledger.get_balance twice with different opv.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PDEC-21-rop-duplicate-key.hex",
+      "grant_len": 322,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-72-rop-17-entries",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "rop with 17 entries (max 16).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-72-rop-17-entries.hex",
+      "grant_len": 504,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-73-rop-name-65",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "rop op name of 65 bytes (max 64).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-73-rop-name-65.hex",
+      "grant_len": 350,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-74-read-carrying-opv",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant carrying opv (11).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-74-read-carrying-opv.hex",
+      "grant_len": 304,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-75-read-carrying-res",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant carrying res (12).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-75-read-carrying-res.hex",
+      "grant_len": 304,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-76-read-carrying-use",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant carrying use (14).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-76-read-carrying-use.hex",
+      "grant_len": 304,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-80-read-missing-ver",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 0 (ver) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-80-read-missing-ver.hex",
+      "grant_len": 300,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-81-read-missing-iss",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 1 (iss) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-81-read-missing-iss.hex",
+      "grant_len": 277,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-82-read-missing-aud",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 2 (aud) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-82-read-missing-aud.hex",
+      "grant_len": 272,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-84-read-missing-iat",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 4 (iat) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-84-read-missing-iat.hex",
+      "grant_len": 296,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-85-read-missing-nbf",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 5 (nbf) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-85-read-missing-nbf.hex",
+      "grant_len": 296,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-86-read-missing-exp",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 6 (exp) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-86-read-missing-exp.hex",
+      "grant_len": 296,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-87-read-missing-wid",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 7 (wid) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-87-read-missing-wid.hex",
+      "grant_len": 263,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-88-read-missing-ten",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 8 (ten) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-88-read-missing-ten.hex",
+      "grant_len": 296,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-89-read-missing-sub",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant: required key 9 (sub) absent.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-89-read-missing-sub.hex",
+      "grant_len": 291,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-90-ten-del-0x7f",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ten contains 0x7F (DEL).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-90-ten-del-0x7f.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-91-ten-space-0x20",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ten contains 0x20 (space; IDs exclude it).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-91-ten-space-0x20.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-92-ten-129",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ten of 129 bytes (max 128).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-92-ten-129.hex",
+      "grant_len": 454,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-93-aud-129",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "aud of 129 bytes (max 128).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-93-aud-129.hex",
+      "grant_len": 430,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-94-iss-129",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "iss of 129 bytes (max 128).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-94-iss-129.hex",
+      "grant_len": 435,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-95-wid-257",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "wid of 257 bytes (max 256).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-95-wid-257.hex",
+      "grant_len": 550,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-96-opv-65536",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "opv = 65536 (max 65535).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-96-opv-65536.hex",
+      "grant_len": 331,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-97-con-uint-2pow53",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "con exact uint value 2^53 (max 2^53 - 1).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-97-con-uint-2pow53.hex",
+      "grant_len": 333,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-98-con-ceiling-2pow53",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Bounded ceiling 2^53 (max 2^53 - 1).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/PSCH-98-con-ceiling-2pow53.hex",
+      "grant_len": 333,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-39-altered-rop",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Read grant: ledger.list_transfers added to rop (19) after signing.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/SIG-39-altered-rop.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.list_transfers",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-40-small-order-R",
+      "kind": "grant",
+      "category": "signature",
+      "description": "R is the identity (small order) and S = k*a mod L, so [S]B - [k]A = R holds; verify_strict rejects small-order R. STRICT-ONLY: lax verifiers accept.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/SIG-40-small-order-R.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-41-non-canonical-R",
+      "kind": "grant",
+      "category": "signature",
+      "description": "R = non-canonical encoding of the identity (y = p + 1), S = k*a for that R; the recomputed R encoding differs from the received bytes.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/SIG-41-non-canonical-R.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "KEY-05-key-not-yet-active",
+      "kind": "grant",
+      "category": "key",
+      "description": "Signed by key F, whose validity window starts after the test time.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/KEY-05-key-not-yet-active.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_key_inactive"
+        }
+      ]
+    },
+    {
+      "id": "KEY-06-key-window-end-boundary",
+      "kind": "grant",
+      "category": "key",
+      "description": "Key D at now = not_after (window is half-open).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/KEY-06-key-window-end-boundary.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1767225600,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_key_inactive"
+        }
+      ]
+    },
+    {
+      "id": "KEY-07-key-window-last-second",
+      "kind": "grant",
+      "category": "key",
+      "description": "Key D at now = not_after - 1: accepted.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/KEY-07-key-window-last-second.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1767225599,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
       "id": "REG-01-valid",
       "kind": "registry",
       "category": "registry",
-      "description": "The registry used by every grant vector (keys A, C, D, E).",
+      "description": "The registry used by every grant vector (keys A, C, D, E, F).",
       "registry": "registry.json",
       "expected": "LOAD_OK"
     },
@@ -6570,7 +7941,7 @@
       "id": "REG-08-kid-not-derived",
       "kind": "registry",
       "category": "registry",
-      "description": "kid does not equal the derivation from the public key.",
+      "description": "kid (well-formed) does not equal the derivation from the public key.",
       "registry": "registries/REG-08-kid-not-derived.json",
       "expected": "registry_kid_mismatch"
     },
@@ -6618,7 +7989,7 @@
       "id": "REG-14-unknown-field",
       "kind": "registry",
       "category": "registry",
-      "description": "Entry with an extra field \"comment\".",
+      "description": "Entry with an extra member \"comment\".",
       "registry": "registries/REG-14-unknown-field.json",
       "expected": "registry_entry_invalid"
     },
@@ -6639,12 +8010,346 @@
       "expected": "registry_entry_invalid"
     },
     {
-      "id": "REG-17-role-unknown",
+      "id": "REG-17-role-member",
       "kind": "registry",
       "category": "registry",
-      "description": "role \"admin\".",
-      "registry": "registries/REG-17-role-unknown.json",
+      "description": "Entry carrying the Draft 1 member \"role\" (removed in Draft 2).",
+      "registry": "registries/REG-17-role-member.json",
       "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-18-mixed-order-key",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Public key = B + T8 (valid key plus a point of order 8): not small order, but not torsion-free.",
+      "registry": "registries/REG-18-mixed-order-key.json",
+      "expected": "registry_key_weak"
+    },
+    {
+      "id": "REG-19-duplicate-member",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Entry with two status members (\"revoked\" then \"active\"); first-wins and last-wins parsers would disagree.",
+      "registry": "registries/REG-19-duplicate-member.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-20-time-with-fraction",
+      "kind": "registry",
+      "category": "registry",
+      "description": "not_before written as 1767225600.0.",
+      "registry": "registries/REG-20-time-with-fraction.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-21-time-exponent",
+      "kind": "registry",
+      "category": "registry",
+      "description": "not_before written as 1.7672256e9.",
+      "registry": "registries/REG-21-time-exponent.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-22-not-after-2pow53",
+      "kind": "registry",
+      "category": "registry",
+      "description": "not_after = 2^53 (max 2^53 - 1).",
+      "registry": "registries/REG-22-not-after-2pow53.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-23-window-inverted",
+      "kind": "registry",
+      "category": "registry",
+      "description": "not_before > not_after.",
+      "registry": "registries/REG-23-window-inverted.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-24-kid-uppercase",
+      "kind": "registry",
+      "category": "registry",
+      "description": "kid in uppercase hex: a member-format error.",
+      "registry": "registries/REG-24-kid-uppercase.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-25-not-json",
+      "kind": "registry",
+      "category": "registry",
+      "description": "The file is not JSON.",
+      "registry": "registries/REG-25-not-json.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-26-negative-time",
+      "kind": "registry",
+      "category": "registry",
+      "description": "not_before = -1.",
+      "registry": "registries/REG-26-negative-time.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "OPS-01-valid",
+      "kind": "operations",
+      "category": "operations",
+      "description": "The declarations used by every grant vector.",
+      "operations": "operations.json",
+      "expected": "LOAD_OK"
+    },
+    {
+      "id": "OPS-02-free-destination",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Destination parameter to declared free.",
+      "operations": "operations/OPS-02-free-destination.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-03-destination-bounded",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Destination parameter declared bounded (destination implies exact).",
+      "operations": "operations/OPS-03-destination-bounded.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-04-bounded-non-uint",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Bounded parameter of type currency.",
+      "operations": "operations/OPS-04-bounded-non-uint.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-05-duplicate-con-key",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Two con parameters with key 0.",
+      "operations": "operations/OPS-05-duplicate-con-key.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-06-res-bounded",
+      "kind": "operations",
+      "category": "operations",
+      "description": "res parameter declared bounded.",
+      "operations": "operations/OPS-06-res-bounded.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-07-unclassified",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Parameter without class.",
+      "operations": "operations/OPS-07-unclassified.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-08-two-opv",
+      "kind": "operations",
+      "category": "operations",
+      "description": "opv as a list of two versions (v1 allows exactly one).",
+      "operations": "operations/OPS-08-two-opv.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-09-confirm-on-read",
+      "kind": "operations",
+      "category": "operations",
+      "description": "requires_confirmation on a read operation.",
+      "operations": "operations/OPS-09-confirm-on-read.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-10-unknown-type",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Parameter type \"email\".",
+      "operations": "operations/OPS-10-unknown-type.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-11-free-unjustified",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Free parameter without a justification.",
+      "operations": "operations/OPS-11-free-unjustified.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-12-duplicate-op",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Two declarations named ledger.transfer.",
+      "operations": "operations/OPS-12-duplicate-op.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-13-read-with-res",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Read operation with a res parameter.",
+      "operations": "operations/OPS-13-read-with-res.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-14-unknown-param-member",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Parameter with an unknown member \"default\".",
+      "operations": "operations/OPS-14-unknown-param-member.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-15-free-with-key",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Free parameter with a con key.",
+      "operations": "operations/OPS-15-free-with-key.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-16-missing-destination",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Parameter without the destination member.",
+      "operations": "operations/OPS-16-missing-destination.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-17-write-owner-scoped",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Write operation with an owner_scoped parameter.",
+      "operations": "operations/OPS-17-write-owner-scoped.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-18-justification-on-exact",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Exact parameter carrying a justification.",
+      "operations": "operations/OPS-18-justification-on-exact.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-19-duplicate-member",
+      "kind": "operations",
+      "category": "operations",
+      "description": "Declaration with two kind members.",
+      "operations": "operations/OPS-19-duplicate-member.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "TRN-01-canonical",
+      "kind": "transport",
+      "category": "transport",
+      "description": "Canonical unpadded base64url of ACC-02-valid-read-grant.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
+      "text_len": 403,
+      "expected": "DECODED",
+      "decoded": "grants/ACC-02-valid-read-grant.hex"
+    },
+    {
+      "id": "TRN-02-padding",
+      "kind": "transport",
+      "category": "transport",
+      "description": "ACC-02-valid-read-grant with = padding.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI=",
+      "text_len": 404,
+      "expected": "grant_encoding_invalid",
+      "decoded": null
+    },
+    {
+      "id": "TRN-03-standard-alphabet",
+      "kind": "transport",
+      "category": "transport",
+      "description": "ACC-02-valid-read-grant with one - or _ replaced by its standard-alphabet counterpart.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR+OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
+      "text_len": 403,
+      "expected": "grant_encoding_invalid",
+      "decoded": null
+    },
+    {
+      "id": "TRN-04-embedded-lf",
+      "kind": "transport",
+      "category": "transport",
+      "description": "ACC-02-valid-read-grant with a line feed after 76 characters.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Ni\nb3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
+      "text_len": 404,
+      "expected": "grant_encoding_invalid",
+      "decoded": null
+    },
+    {
+      "id": "TRN-05-length-1-mod-4",
+      "kind": "transport",
+      "category": "transport",
+      "description": "First 4n+1 characters of ACC-02-valid-read-grant.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094O",
+      "text_len": 401,
+      "expected": "grant_encoding_invalid",
+      "decoded": null
+    },
+    {
+      "id": "TRN-06-non-zero-trailing-bits",
+      "kind": "transport",
+      "category": "transport",
+      "description": "ACC-02-valid-read-grant with a non-zero unused low bit in the final character.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQJ",
+      "text_len": 403,
+      "expected": "grant_encoding_invalid",
+      "decoded": null
+    },
+    {
+      "id": "TRN-07-2731-chars",
+      "kind": "transport",
+      "category": "transport",
+      "description": "The 2048-byte grant ACC-11: 2731 characters, the maximum.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWQd_sQABAXdnbGVpcG5pci5hdXRob3JpdHkudGVzdAJ4G2dsZWlwbmlyLmJyb2tlci5sZWRnZXItdGVzdANQo5Ry3ML68lXbTpUoxfdPKgQaat1GgAUaat1GgAYaat1Gngd4JHNwaWZmZTovL2dsZWlwbmlyLnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cml0ZXN0LmJ1bGsLAQyhAGVhbGljZQ2oAIIAePJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQGCAHjyYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmICggB48mNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjA4IAePJkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZASCAHjyZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWUFggB48mZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmBoIAePJnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZweCAGZ6enp6enoOAREBEgBYQDNyfviLD8-AvWppzaqrt9G8aMkfAvXqUT7yZHZ6o6EQ6XvlSYh94wp8hwIJKFwPgXzl4O1S46L0azoL-HD6egg",
+      "text_len": 2731,
+      "expected": "DECODED",
+      "decoded": "grants/ACC-11-grant-exactly-2048-bytes.hex"
+    },
+    {
+      "id": "TRN-08-2732-chars",
+      "kind": "transport",
+      "category": "transport",
+      "description": "2732 characters (a 2049-byte value): rejected before decoding.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWQd_sQABAXdnbGVpcG5pci5hdXRob3JpdHkudGVzdAJ4G2dsZWlwbmlyLmJyb2tlci5sZWRnZXItdGVzdANQo5Ry3ML68lXbTpUoxfdPKgQaat1GgAUaat1GgAYaat1Gngd4JHNwaWZmZTovL2dsZWlwbmlyLnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cml0ZXN0LmJ1bGsLAQyhAGVhbGljZQ2oAIIAePJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQGCAHjyYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmICggB48mNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjA4IAePJkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZASCAHjyZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWUFggB48mZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmBoIAePJnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZweCAGZ6enp6enoOAREBEgBYQDNyfviLD8-AvWppzaqrt9G8aMkfAvXqUT7yZHZ6o6EQ6XvlSYh94wp8hwIJKFwPgXzl4O1S46L0azoL-HD6eggA",
+      "text_len": 2732,
+      "expected": "grant_too_large",
+      "decoded": null
+    },
+    {
+      "id": "TRN-09-empty",
+      "kind": "transport",
+      "category": "transport",
+      "description": "Empty string: a supplied grant of zero bytes (then grant_malformed at step 2, see ENV-03).",
+      "text": "",
+      "text_len": 0,
+      "expected": "DECODED",
+      "decoded": null
+    },
+    {
+      "id": "TRN-10-leading-space",
+      "kind": "transport",
+      "category": "transport",
+      "description": "ACC-02-valid-read-grant with a leading space.",
+      "text": " 0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
+      "text_len": 404,
+      "expected": "grant_encoding_invalid",
+      "decoded": null
+    },
+    {
+      "id": "TRN-11-non-ascii",
+      "kind": "transport",
+      "category": "transport",
+      "description": "ACC-02-valid-read-grant with a trailing U+00E9.",
+      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQIé",
+      "text_len": 405,
+      "expected": "grant_encoding_invalid",
+      "decoded": null
     }
   ]
 }

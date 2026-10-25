@@ -1,116 +1,148 @@
-# Nodkey-Grant v1 test vectors
+# Nodkey-Grant v1 test vectors (spec Draft 2)
 
 > [!WARNING]
-> **TEST-ONLY KEYS.** Every signing key used here is a published test key from RFC 8032 §7.1. Their
-> secret seeds are public (and listed in `manifest.json`). A key registry containing any of them must
+> **TEST-ONLY KEYS.** Every signing key used here is a published RFC 8032 test key, and its secret seed
+> is public. The seeds are listed in `manifest.json`. A key registry containing any of these keys must
 > never be deployed.
 
-Conformance vectors for [`docs/specs/grant-v1.md`](../../../docs/specs/grant-v1.md). An implementation
-conforms if, for every vector, it produces exactly the expected result.
+These are conformance vectors for [`docs/specs/grant-v1.md`](../../../docs/specs/grant-v1.md) Draft 2.
+An implementation conforms if it produces exactly the expected result for every vector.
 
 ## Layout
 
 | Path | Content |
 |---|---|
-| `manifest.json` | Constants, test keys, workload registrations, operation declarations, and every vector with its inputs and expected result |
-| `registry.json` | The key registry (spec §8.2) used by every grant vector: keys A, C, D, E |
-| `grants/<id>.hex` | The grant bytes of one vector: lowercase hex, one line (the decoded form; base64url transport is not exercised) |
-| `registries/<id>.json` | Key registries for the load-time vectors |
-| `gen/` | Rust generator and reference checker (`ed25519-dalek` 3.0.0, `curve25519-dalek` 5.0.0, `sha2`, `serde_json`) |
-| `crosscheck/openssl_verify.py` | Signature cross-check using a separate code path: a Python stdlib reader plus `openssl pkeyutl` |
+| `manifest.json` | Constants, type grammars, test keys, workload registrations, request-hash examples, and every vector with its inputs and expected result |
+| `registry.json` | The key registry (spec §8) used by every grant vector: keys A, C, D, E, F |
+| `operations.json` | The operation declarations (spec §6) used by every grant vector |
+| `grants/<id>.hex` | The grant bytes of one grant vector, as one line of lowercase hex |
+| `registries/<id>.json` | Key registries for the registry-load vectors (some are deliberately not valid JSON or contain duplicate members) |
+| `operations/<id>.json` | Declarations for the operation-load vectors |
+| `gen/` | Rust generator and reference checker (`ed25519-dalek` 3.0.0, `curve25519-dalek` 5.0.0, `sha2`, `serde`, `serde_json`) |
+| `crosscheck/openssl_verify.py` | Signature cross-check through a separate code path: a Python stdlib reader plus `openssl pkeyutl` |
 
 ## Test keys
 
 | Name | Source | Registry entry | Used for |
 |---|---|---|---|
-| A | RFC 8032 TEST 1 | `active`, role `user_authority`, iss `nodkey.authority.test` | every valid user grant |
-| B | RFC 8032 TEST 2 | not registered | wrong-key and unknown-kid vectors |
-| C | RFC 8032 TEST 3 | `revoked` | revoked key |
-| D | RFC 8032 TEST 1024 | `active`, window 2025-01-01 to 2026-01-01 | key outside its validity window |
-| E | RFC 8032 TEST SHA(abc) | `active`, role `scheduler`, iss `nodkey.scheduler.test` | scheduler grants (provisional, spec D-9) |
+| A | RFC 8032 §7.1 TEST 1 | `active`, iss `nodkey.authority.test` | every valid grant |
+| B | RFC 8032 §7.1 TEST 2 | not registered | wrong-key and unknown-kid vectors; base for the mixed-order key |
+| C | RFC 8032 §7.1 TEST 3 | `revoked` | revoked key |
+| D | RFC 8032 §7.1 TEST 1024 | `active`, window 2025-01-01 to 2026-01-01 | key past its window; window-end boundary |
+| E | RFC 8032 §7.1 TEST SHA(abc) | `active`, same iss as A | rotation overlap (ACC-08); kid swap (SIG-02) |
+| F | RFC 8032 §7.2 Ed25519ctx key (used as plain Ed25519) | `active`, window from 2027-01-01 | key not yet valid |
 
-The generator asserts that each seed yields the RFC's public key.
+The generator checks that each seed yields the public key given in the RFC.
 
 ## Manifest format
 
 ```jsonc
 {
-  "format": "nodkey.grant-v1.vectors",
-  "constants": { "typ", "external_aad_tag", "kid_label", "max_grant_bytes": 2048, "skew_seconds": 5, "max_ttl_seconds": 30 },
+  "format": "nodkey.grant-v1.vectors", "spec_draft": 2,
+  "constants": { "typ", "external_aad_tag", "kid_label", "request_hash_label", "max_grant_bytes": 2048,
+                 "max_transport_chars": 2731, "skew_seconds": 5, "max_ttl_seconds": 30 },
+  "types": { "uint", "account_id", "currency", "text64", "text256" },   // grammars (spec §6.2)
   "keys": [ { "name", "source", "secret_seed", "public_key", "kid", "in_registry", "purpose" } ],
-  "workloads": [ { "wid", "tenants": [...] } ],          // workload registrations (spec step 9c)
-  "operations": [ { "op", "kind", "opv": [...], "authority", "requires_confirmation", "params": [...] } ],
-  "vectors": [
-    { "id", "kind": "grant", "category", "description",
-      "registry": "registry.json", "grant": "grants/<id>.hex", "grant_len",
-      "steps": [ { "now", "broker_id", "peer_wid", "revoked_before": [...], "request": { "op", "args" }, "expected" } ] },
-    { "id", "kind": "registry", "category": "registry", "description", "registry": "registries/<id>.json", "expected" }
-  ]
+  "workloads": [ { "wid", "tenants": [...] } ],             // workload registrations (spec step 9c)
+  "request_hash_examples": [ { "request", "request_hash" } ], // spec §5.4
+  "vectors": [ ... ]                                          // four kinds, below
 }
 ```
 
-- **Grant vectors.** Load `registry`, start with an **empty replay store**, then submit the grant once per
-  step, in order, with that step's trusted context: `now` (broker clock, Unix seconds), `broker_id` (the
-  broker's own identifier, used for `external_aad` and the `aud` check), `peer_wid` (the workload identity
-  of the submitting socket), and `revoked_before` rows (`{"ten"}`, `{"ten","wid"}`, or `{"ten","sub"}`
-  plus `"before"`). The replay store persists across the steps of one vector only.
-- **`request`** is the already strictly parsed request the broker is asked to authorize: operation name
-  and typed arguments (strings or unsigned integers), keyed by parameter name from `operations`.
-- **`expected`** is one of `ACCEPT`; `STORED_OUTCOME:ACCEPT` / `STORED_OUTCOME:DENIED` (spec §7.2 step 12:
-  same grant, same request hash, no second effect); or an exact broker-facing error code from spec §7.2.
-  Policy, state and budget checks (step 14) are out of scope: `ACCEPT` means "passes every grant check".
-- **Registry vectors** expect `LOAD_OK` or a load error code from spec §8.3. A failing registry stops the
-  broker; every non-valid registry here contains the four valid keys plus one bad entry (or no keys).
+| `kind` | Fields | Expected |
+|---|---|---|
+| `grant` | `registry`, `operations`, `grant` (hex file), `grant_len`, `steps[]` | per step |
+| `registry` | `registry` (file) | `LOAD_OK` or a spec §8.3 code |
+| `operations` | `operations` (file) | `LOAD_OK` or `ops_declaration_invalid` |
+| `transport` | `text`, `text_len`, `decoded` (hex file, or `null` for zero bytes) | `DECODED` (the decoded bytes equal `decoded`) or a spec §2 / step 1 code |
+
+**Running a grant vector.**
+
+1. Load `registry` and `operations`, and start with an empty replay store.
+2. Submit the grant once per step, in order, with that step's trusted context:
+   - `now`: broker clock, in Unix seconds;
+   - `broker_id`: used for `external_aad` and for the `aud` check;
+   - `peer_wid`: the identity of the submitting workload;
+   - `revoked_before`: rows of the form `{"ten"}`, `{"ten","wid"}` or `{"ten","sub"}`, each plus `"before"`.
+3. Each step's `request` is the strictly parsed request: the operation name and arguments keyed by
+   parameter name. A few constraint vectors (CON-20..23) deliberately pass a missing argument or one of
+   the wrong type.
+4. The replay store persists across the steps of one vector only.
+
+**Expected results for a step.**
+
+- `ACCEPT`: the grant passes every grant check. Step W14 / R14 preconditions are out of scope.
+- `STORED_OUTCOME:ACCEPT` or `STORED_OUTCOME:DENIED`: spec step W10, same grant and same request hash.
+- Otherwise, an exact broker-facing error code from spec §7.
+
+Descriptions that contain **STRICT-ONLY** mark signatures that satisfy the cofactorless equation but must
+be rejected by the strict rules of spec §3.5. A lax verifier such as OpenSSL accepts them.
 
 ## Operations
 
-`ledger.transfer` (write, confirmation required, `from` res, `to` and `amount_cents` exact) and
-`ledger.get_balance` (read) match the ADR-0003 Phase 3 profile. `test.hold` (bounded amount, exact
-currency, free memo) and `ledger.list_transfers` (read) exist only to exercise the format.
-`orders.capture` (scheduler-signed) depends on ADR-0009, which is being revised.
+`ledger.transfer` is a write operation:
+- it requires confirmation;
+- `from` is its `res` parameter;
+- `to` (the destination) and `amount_cents` are `exact` constraints.
+
+`ledger.get_balance` is a read operation. These two match the ADR-0003 Phase 3 profile.
+
+The other operations exist only to exercise the format:
+- `test.hold`: bounded, exact and free parameters;
+- `test.bulk`: eight `text256` parameters, used to reach the 2048-byte limit;
+- `ledger.list_transfers` and `test.peek`: read operations; `test.peek` tests text-key ordering.
 
 ## Categories
 
-| Prefix | Spec step | Vectors |
+| Prefix | Spec step | Count |
 |---|---|---|
-| ACC | positive controls (write, read multi-use, inclusive bound, free param, other audience at its own broker, multi-tenant workload, scheduler) | 9 |
-| ENV | 1–2 size and envelope structure (2048/2049 bytes, truncation, trailing bytes, tags, arity, indefinite and non-minimal encodings, signature length, nil payload, huge declared length) | 23 |
-| HDR | 3–4b protected/unprotected header, `alg` disagreement (−8, −7, 0) | 23 |
-| KEY | 4 unknown kid, revoked key, key outside window | 4 |
-| SIG | 5 wrong key, kid swap, R/S bit flips, S + L malleability, wrong audience/domain tag/empty aad, wrong COSE context, and every payload field altered after signing (SIG-20..38) | 29 |
-| PDEC | 6 non-canonical ints/lengths, unsorted and duplicate keys, indefinite lengths, floats, negative ints, tags, simple values, trailing bytes, truncation, invalid UTF-8, depth | 19 |
-| PSCH | 7 unknown/reserved/text keys, each missing field, wrong types and ranges, version, kind and kind-specific key sets | 63 |
-| ISS, TIME | 8 issuer, expiry/not-before with ±1 s skew boundaries, TTL, ordering | 14 |
-| BIND | 9 audience field, workload, tenant | 6 |
-| OP | 10 operation, kind (read grant for a write op, and the reverse), opv, issuer role, missing confirmation (OP-13) | 13 |
-| CON | 11 resource, exact and bounded constraints, schema/class disagreement | 17 |
-| RPL | 12 replay sequences (stored outcome, different request, consumed denial, unverified not consumed, revocation interplay) | 7 |
-| REV | 13 `revoked_before` scopes and boundary, read grant revoked | 8 |
-| REG | key registry load (small-order and non-canonical keys, kid mismatch, duplicates, shape) | 17 |
+| ACC | positive controls | 12 |
+| ENV | 1–2 size and envelope | 23 |
+| HDR | 3–4b headers, `alg` | 23 |
+| KEY | 4 key lookup, status, window (incl. boundaries) | 7 |
+| SIG | 5 signatures; every field altered after signing (SIG-20..39); small-order and non-canonical R | 32 |
+| PDEC | 6 strict payload decoding | 21 |
+| PSCH | 7 payload schema, kinds, ID and value limits | 86 |
+| ISS, TIME | 8 issuer, time window, lifetime from `iat` | 20 |
+| BIND | 9 audience, workload, tenant | 6 |
+| OP | W11 / R11 operation, kind, opv, confirmation | 12 |
+| CON | W12 resource, constraints, declared types | 21 |
+| RPL | W10 replay sequences | 8 |
+| REV | W13 / R13 `revoked_before` | 9 |
+| REG | key-registry load | 26 |
+| OPS | operation-declaration load | 19 |
+| TRN | transport text | 11 |
 
 ## Regenerating and checking
 
-Requires a Rust toolchain (edition 2024) and, for the cross-check, Python 3 and OpenSSL ≥ 3.0.
+You need a Rust toolchain (edition 2024). The cross-check also needs Python 3 and OpenSSL 3.0 or later.
 
 ```sh
 cd tests/vectors/grant-v1/gen
-cargo run -q -- generate ..        # rewrites manifest.json, registry.json, grants/, registries/
-cargo run -q -- check ..           # reference verifier: every step must match "expected"
+cargo run -q -- generate ..        # rewrites manifest.json, registry.json, operations.json, grants/, registries/, operations/
+cargo run -q -- check ..           # reference verifier: every result must match "expected"
 python3 -I ../crosscheck/openssl_verify.py ..
 ```
 
-Output is deterministic (Ed25519 signatures are deterministic; `jti` = first 16 bytes of
-SHA-256(`"nodkey.test.jti" ‖ 0x00 ‖ vector-id`)), so regeneration must reproduce the committed files
-byte for byte.
+The output is deterministic. Regeneration must reproduce the committed files byte for byte, because:
+- Ed25519 signatures are deterministic;
+- `jti` is the first 16 bytes of SHA-256(`"nodkey.test.jti"` ‖ 0x00 ‖ *seed*), where *seed* is a
+  generator-internal string. Usually that is the vector id's short prefix (for example `ACC-01`), but
+  not always (for example `ENV` for several envelope vectors).
 
-The reference checker reads only the committed files, but it shares the CBOR module (the generator
-uses its encoder, the checker its strict decoder) and the kid, `external_aad` and `Sig_structure`
-helpers with the generator. It is a consistency check by the same author, not an independent
-implementation; the OpenSSL cross-check is the only independent code path for signatures; the broker's
-verifier is expected to be the second implementation run against these files. Its JSON parsing of
-registries is not strict about duplicate members (the spec requires strict parsing).
+An implementation that wants to reproduce a grant byte for byte should take `jti` from the grant itself.
+`jti` has no other significance in the vectors.
+
+**Limits of the reference checker.**
+- It reads only the committed files. However, it shares the CBOR module, the kid, `external_aad` and
+  `Sig_structure` helpers, and the `request_hash` function with the generator.
+- It is therefore a consistency check by the same author, not an independent implementation. The
+  OpenSSL cross-check is the independent code path for signatures, and the `nodkey-grant` crate is the
+  independent second implementation.
 
 ## Not covered
 
-Base64url transport encoding; concurrency, restart and replay-store failure (integration tests);
-read-ownership and step-14 preconditions; signatures with a small-order `R`. See spec §12.2.
+- concurrency, restart, and failure injection into denial recording (integration tests, spec §12.2);
+- registry reload;
+- read ownership and W14 preconditions;
+- the `broker_id` sharing rule.
