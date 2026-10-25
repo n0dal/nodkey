@@ -1,0 +1,13 @@
+{"format":"nodkey.broker.v2","profile":"phase3","broker_id":"nodkey.broker.demo2",
+ "auth_origin":"https://auth.localhost:8443","ledger_currency":"EUR",
+ "db":{"host":"db","port":5432,"dbname":"ledger","user":"nodkey_broker","password_file":"/run/secrets/db_broker_password"},
+ "registry_path":"/etc/nodkey/keys.json","operations_path":"/etc/nodkey/operations.json",
+ "authority_workloads_path":"/etc/nodkey/workloads.json",
+ "limits":{"pending_per_wid":32,"pending_per_approver":32,"proposals_per_min":120,"proposal_burst":60,"status_per_min":1200,"pending_lifetime_s":60},
+ "gateway":{"socket_path":"/run/nodkey/gw-broker/broker.sock","uid":10005},
+ "authority":{"socket_path":"/run/nodkey/au-broker/broker.sock","uid":10004},
+ "workloads":[
+  {"wid":"spiffe://nodkey.demo/workload/ledger-app","display_name":"Alice's ledger app (demo)","socket_path":"/run/nodkey/wl/app/broker.sock","uid":10001,
+   "tenants":["acme"],"approver_source":{"kind":"enrolled","ten":"acme","sub":"user:alice"},"allowed_ops":["ledger.transfer","ledger.get_balance"]},
+  {"wid":"spiffe://nodkey.demo/workload/ledger-app2","display_name":"Carol's ledger app (demo)","socket_path":"/run/nodkey/wl/app2/broker.sock","uid":10003,
+   "tenants":["globex"],"approver_source":{"kind":"enrolled","ten":"globex","sub":"user:carol"},"allowed_ops":["ledger.transfer","ledger.get_balance"]}]}

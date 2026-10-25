@@ -1,0 +1,222 @@
+# =================================================================================================
+#  Demo 2 — confirmed transfers (effect protocol v2 Draft 2: propose -> confirm -> execute).
+#  INTENTIONALLY VULNERABLE, LOCAL ONLY: the PHP app exposes POST /debug/eval (remote code
+#  execution) to model attacker C. The gateway runs the TEST LOGIN (no credentials). The only
+#  published port is bound to 127.0.0.1. Never expose this stack to a network.
+#
+#  Start/stop only through tests/demo2/run.sh: it generates the DB secrets, the authority signing
+#  key (`nodkey-authority keygen`), the broker's key registry and the authority config into
+#  ../../var/demo2/ (Git-ignored) before `up`.
+#
+#  Trust domains and channels (spec §1.2):
+#    gateway  (TCB)  : publishes 127.0.0.1:8443; mounts G (client), I (client), app-http (client)
+#    app domain      : nginx (network none, Unix socket for the gateway only) + php-fpm (network
+#                      none, P0 hardening, broker socket W only); app2 = a second workload (W2)
+#    broker   (TCB)  : listens W, W2, G, A; the only service on the DB network
+#    authority(TCB)  : network none; listens I, connects A; key file 0400 in its own volume
+#    db              : pg_hba accepts only the broker role from the broker's fixed address
+# =================================================================================================
+name: nodkey-demo2
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]   # default seccomp + AppArmor apply; never "unconfined"
+  ipc: private
+  pids_limit: 256
+  privileged: false
+  logging:
+    driver: json-file
+    options: { max-size: "5m", max-file: "3" }
+
+services:
+  gateway:                      # TRUSTED (TCB). TEST LOGIN compiled in and enabled: LOCAL ONLY.
+    <<: *hardening
+    image: nodkey/demo2-gateway:dev
+    build: { context: ../.., dockerfile: examples/confirmed-transfer/docker/gateway.Dockerfile }
+    user: "10005:10005"
+    labels:
+      org.nodkey.warning: "TEST LOGIN ENABLED - local demo only"
+    networks: [edge]
+    ports: ["127.0.0.1:8443:8443"]          # the ONLY published port (served by gateway-port)
+    stop_signal: SIGINT                     # the gateway exits on SIGINT (ctrl_c)
+    tmpfs: ["/run/gw-tls:rw,noexec,nosuid,nodev,size=1m,uid=10005,gid=10005,mode=0700"]
+    volumes:
+      - ./config/gateway.json:/etc/nodkey/gateway.json:ro
+      - sock-gw-broker:/run/nodkey/gw-broker           # G (client)
+      - sock-gw-authority:/run/nodkey/gw-authority     # I (client)
+      - app-http:/run/app-http                           # untrusted app web server (client)
+    depends_on:
+      broker: { condition: service_healthy }
+      authority: { condition: service_healthy }
+      web: { condition: service_healthy }
+
+  gateway-port:                 # DEV-ONLY TCP relay inside the gateway's network namespace
+    <<: *hardening
+    image: nginxinc/nginx-unprivileged:1.28-alpine@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
+    user: "101:101"
+    network_mode: "service:gateway"
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=1m,uid=101,gid=101"]
+    volumes:
+      - ./docker/nginx/relay.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gateway: { condition: service_started }
+
+  web:                          # UNTRUSTED (app trust domain): receives traffic only from the gateway
+    <<: *hardening
+    image: nginxinc/nginx-unprivileged:1.28-alpine@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
+    user: "101:101"
+    network_mode: "none"
+    # umask 000 so the gateway (group of the 0750 socket directory) can connect; the directory,
+    # not the socket mode, is the access boundary.
+    entrypoint: ["sh", "-c", "umask 000; rm -f /run/app-http/nginx.sock; exec nginx -g 'daemon off;'"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,uid=101,gid=101"]
+    volumes:
+      - ./docker/nginx/app.conf:/etc/nginx/nginx.conf:ro
+      - fcgi:/run/fcgi
+      - app-http:/run/app-http
+    depends_on:
+      app: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/app-http/nginx.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  app:                          # UNTRUSTED workload W (INTENTIONALLY VULNERABLE: /debug/eval)
+    <<: *hardening
+    image: nodkey/demo2-app:dev
+    build: { context: ../.., dockerfile: examples/confirmed-transfer/docker/php/Dockerfile }
+    user: "10001:10001"
+    network_mode: "none"
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700"]
+    volumes:
+      - fcgi:/run/fcgi
+      - sock-wl-app:/run/nodkey:ro      # broker socket W for THIS workload only
+    environment: {}                        # no secrets
+    mem_limit: 512m
+    cpus: 1.0
+    depends_on:
+      broker: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/fcgi/php.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  app2:                         # UNTRUSTED second workload W2 (tenant globex), driven by the harness
+    <<: *hardening
+    image: nodkey/demo2-app:dev
+    user: "10003:10003"
+    network_mode: "none"
+    command: ["php", "-r", "while (true) { sleep(3600); }"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=4m,uid=10003,gid=10003,mode=0700"]
+    volumes:
+      - sock-wl-app2:/run/nodkey:ro
+    environment: {}
+    depends_on:
+      broker: { condition: service_healthy }
+
+  broker:                       # TRUSTED (TCB)
+    <<: *hardening
+    image: nodkey/broker:dev
+    build: { context: ../.., dockerfile: broker/Dockerfile }
+    user: "10002:10002"
+    command: ["--config", "/etc/nodkey/broker.json", "--mounts-verified-externally"]
+    networks:
+      data: { ipv4_address: 172.30.20.10 }
+    volumes:
+      - ./config/broker.json:/etc/nodkey/broker.json:ro
+      - ./config/operations.json:/etc/nodkey/operations.json:ro
+      - ./config/workloads.json:/etc/nodkey/workloads.json:ro
+      - ../../var/demo2/config/keys.json:/etc/nodkey/keys.json:ro
+      - sock-wl-app:/run/nodkey/wl/app            # W  (listener)
+      - sock-wl-app2:/run/nodkey/wl/app2          # W2 (listener)
+      - sock-gw-broker:/run/nodkey/gw-broker      # G  (listener)
+      - sock-au-broker:/run/nodkey/au-broker      # A  (listener)
+    secrets:
+      - source: db_broker_password
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nodkey-broker", "--healthcheck", "/etc/nodkey/broker.json"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  authority:                    # TRUSTED (TCB): the only grant signer; no network
+    <<: *hardening
+    image: nodkey/demo2-authority:dev
+    build: { context: ../.., dockerfile: examples/confirmed-transfer/docker/authority.Dockerfile }
+    user: "10004:10004"
+    network_mode: "none"
+    volumes:
+      - ../../var/demo2/config/authority.json:/etc/nodkey/authority.json:ro
+      - ./config/operations.json:/etc/nodkey/operations.json:ro
+      - ./config/workloads.json:/etc/nodkey/workloads.json:ro
+      - authority-state:/var/lib/nodkey-authority  # signing key (0400) + issuance store
+      - sock-gw-authority:/run/nodkey/gw-authority # I (listener)
+      - sock-au-broker:/run/nodkey/au-broker       # A (client)
+    depends_on:
+      broker: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/nodkey/gw-authority/authority.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  db:                           # PROTECTED RESOURCE
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    networks:
+      data: { ipv4_address: 172.30.20.20 }
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf", "-c", "password_encryption=scram-sha-256"]
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
+    secrets: [db_broker_password, db_superuser_password]
+    volumes:
+      - ./docker/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ../php-ledger/docker/postgres/initdb/01-ledger.sh:/docker-entrypoint-initdb.d/01-ledger.sh:ro
+      - ../php-ledger/docker/postgres/initdb/02-effects-v2.sh:/docker-entrypoint-initdb.d/02-effects-v2.sh:ro
+      - ./docker/postgres/03-demo2-seed.sh:/docker-entrypoint-initdb.d/03-demo2-seed.sh:ro
+      - dbdata:/var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "3" }
+    healthcheck:
+      # TCP readiness: the init-time server listens on the Unix socket only, so this passes only
+      # after every initdb script (including the seed) has run.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "ledger"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+networks:
+  edge: {}
+  data:
+    internal: true
+    ipam: { config: [{ subnet: 172.30.20.0/24 }] }
+
+# Socket volumes are tmpfs-backed (non-persistent, noexec). Each socket has its own directory
+# (the volume root) with no "other" bits: owner = listener, group = the one permitted client.
+# The I directory is setgid so the authority's 0660 socket gets the gateway's group.
+volumes:
+  sock-wl-app:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10001,mode=0750" }
+  sock-wl-app2:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10003,mode=0750" }
+  sock-gw-broker:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10005,mode=0750" }
+  sock-au-broker:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10004,mode=0750" }
+  sock-gw-authority:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10004,gid=10005,mode=2750" }
+  app-http:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=101,gid=10005,mode=0750" }
+  fcgi:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755" }
+  authority-state: {}           # persistent: the key and the issuance store survive restarts
+  dbdata: {}
+
+secrets:
+  db_broker_password: { file: ../../var/demo2/secrets/db_broker_password }
+  db_superuser_password: { file: ../../var/demo2/secrets/db_superuser_password }
