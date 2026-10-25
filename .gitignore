@@ -1,0 +1,27 @@
+# Internal AI-assistant orchestration (never published; see docs/CONTRIBUTING notes)
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.internal/
+
+# Build outputs
+/target/
+**/target/
+/vendor/
+**/vendor/
+node_modules/
+
+# Local runtime state and secrets
+*.env
+.env*
+!.env.example
+/var/
+*.pem
+*.key
+!tests/vectors/**/*.key
+
+# OS/editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
