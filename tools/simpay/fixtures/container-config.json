@@ -1,0 +1,7 @@
+{
+  "api_listen": "0.0.0.0:8080",
+  "admin_listen": "0.0.0.0:8081",
+  "seed": "nodkey-demo-p",
+  "clock": { "mode": "system" },
+  "fixture_path": "demo-fixture.json"
+}

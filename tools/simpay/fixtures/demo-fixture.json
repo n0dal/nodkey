@@ -1,0 +1,22 @@
+{
+  "accounts": [
+    {
+      "id": "acct_demomerchant01",
+      "keys": [
+        { "secret": "sk_sim_DEMOunrestricted00000001" },
+        {
+          "secret": "rk_sim_DEMOrefundsWriteChargesRead",
+          "permissions": { "refunds": "write", "charges": "read" },
+          "allowed_cidrs": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+        }
+      ],
+      "webhook_endpoints": []
+    }
+  ],
+  "charges": [
+    { "id": "ch_demoorder0001", "account": "acct_demomerchant01", "amount_minor": 5000, "currency": "usd" },
+    { "id": "ch_demoorder0002", "account": "acct_demomerchant01", "amount_minor": 1000, "currency": "jpy" },
+    { "id": "ch_demoorder0003", "account": "acct_demomerchant01", "amount_minor": 12000, "currency": "eur",
+      "refund_initial_status": "pending" }
+  ]
+}
