@@ -1,7 +1,7 @@
 # Security Invariants
 
 > [!IMPORTANT]
-> Status: **DRAFT v0.3** (2026-10-25; see [Changelog](#changelog)). These invariants are the project's non-negotiable security
+> Status: **DRAFT v0.4** (2026-10-25; see [Changelog](#changelog)). These invariants are the project's non-negotiable security
 > requirements. Changing one requires an accepted ADR. Implementation that cannot satisfy an
 > invariant blocks the affected milestone; it does not justify reinterpreting the invariant.
 
@@ -62,8 +62,8 @@ for grants never enter the workload's trust domain.
 **SI-06 — Full binding.** A grant is accepted only for the exact (protocol version, issuer, audience,
 workload identity, tenant, subject, operation, resource, constraints, validity window) it encodes.
 Every operation parameter is classified `exact`, `bounded`, or `free` in its declaration; `exact`
-parameters are bound to a value in the grant from a declared binding source (request path, query,
-or body; route constant; or broker-checked trusted state), `bounded` to a ceiling, and `free` parameters are
+parameters are bound to a value in the grant from a declared binding source (for confirmed writes: the
+approved immutable pending effect, ADR-0011; otherwise a route constant or broker-checked trusted state), `bounded` to a ceiling, and `free` parameters are
 justified and published as residuals (destination-like parameters are never `free`). Subject and
 tenant are *sourced* from the verified grant; every other bound field is compared with an
 independent trusted value (socket identity, broker id, clock, registry) or with the submitted request.
@@ -159,19 +159,25 @@ permits neither (ADR-0009).
 *Falsified by:* any other effect without a verified grant; a `workload` operation in a multi-tenant
 workload or touching a user-owned row; a `derived` transition taking any value from the workload.
 
-**SI-20 — Confirmed intent.** For an operation the route map marks `confirm`, no grant is issued
-unless the subject approved a summary of the exact bound values, rendered by the gateway on the auth
-origin, with a user-verifying WebAuthn assertion whose challenge commits to those values; the grant
-binds exactly the confirmed values.
-*Falsified by:* a grant for a `confirm` operation without such an approval, or with any bound value
-differing from the approved summary.
+**SI-20 — Confirmed intent.** For an operation that requires confirmation, no write grant is issued
+unless the pending effect's **intended approver** — named in the proposal and satisfying the
+operation's trusted-fact checks (e.g. owns the order; is the agent's registered principal) — approved
+it on the auth origin, and the approval commits to a digest of exactly the values displayed, which must
+equal the immutable stored pending effect. The grant binds exactly those values. *Full strength requires
+a user-verifying WebAuthn assertion whose challenge commits to the digest; with session-only approval
+(Phase 3 test login) this invariant is* **PARTIALLY MET** *and must be reported as such.*
+*Falsified by:* a grant for a confirmation-required operation without such an approval; an approval by
+anyone other than the intended approver; or any bound value differing from what was displayed.
 
-**SI-21 — Request provenance.** A write grant is issued only for a non-safe HTTP method with
-`Sec-Fetch-Site: same-origin`, or, when that header is absent, an `Origin` exactly equal to the app
-origin; requests with neither are denied. Read grants are never issued for non-same-origin requests other than
-top-level navigations.
-*Falsified by:* a write grant issued for a safe method, a cross-origin or same-site-sibling request,
-or a request lacking both provenance headers.
+**SI-21 — Request provenance.** Write grants are never issued in response to a workload-origin HTTP
+request; they are issued only by the authority after an SI-20 approval. The approval endpoint accepts
+only non-safe requests with `Sec-Fetch-Site: same-origin` relative to the **auth origin** (or, when the
+header is absent, an `Origin` exactly equal to the auth origin) carrying a single-use approval token bound
+to the session, the pending id, and the displayed-values digest. Read grants are never issued for
+non-same-origin requests other than top-level document navigations.
+*Falsified by:* a write grant issued without an approval; an approval accepted from the app origin, a
+same-site sibling, or without a valid single-use approval token; a read grant for another cross-origin
+request.
 
 ### Honesty
 
@@ -213,6 +219,8 @@ profile and assumptions and links to a test or explicitly says *NOT TESTED*.
 
 ## Changelog
 
+
+- **v0.4 (2026-10-25):** SI-20 and SI-21 rewritten for ADR-0011 (propose → confirm → execute): intended approver, digest-committed approval of immutable pending effects, auth-origin provenance with approval tokens; write grants never issued from workload-origin requests. SI-20 marked PARTIALLY MET without WebAuthn. SI-06 binding source for confirmed writes is the approved pending effect.
 - **v0.3 (2026-10-25):** Gateway term (edge/proxy); Authority = gateway signer only (scheduler
   removed); SI-06 binding sources and read grants; SI-09 limited to write grants; SI-18 reworded
   (enrollment/recovery, no silent re-issue, duplicate-cookie rejection, session-swap residual); SI-19
