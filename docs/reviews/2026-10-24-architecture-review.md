@@ -1,5 +1,7 @@
 # Architecture Review — ADR-0001…0008, Threat Model, Architecture (DRAFT v0.1)
 
+> Historical review record. "PBE" refers to the project now named **Nodkey**.
+
 - **Date:** 2026-10-24
 - **Type:** Independent adversarial design review (fresh context; reviewer did not author the design)
 - **Scope:** `docs/SECURITY_INVARIANTS.md`, `docs/THREAT_MODEL.md`, `docs/ARCHITECTURE.md`,

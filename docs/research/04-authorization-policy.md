@@ -3,7 +3,7 @@
 > [!NOTE]
 > Status: **research note, 2026-10-24**. Ranks below accepted ADRs and specs. No ADR has been
 > accepted yet, so nothing here is a decision. Markers: **[F]** means an established fact with a
-> cited primary source. **[H]** means a hypothesis or design proposal, untested in PBE. **[A]** means
+> cited primary source. **[H]** means a hypothesis or design proposal, untested in Nodkey. **[A]** means
 > an assumption that a deployment profile has to state.
 
 Scope: open question OQ-04 and research questions Q3, Q7, Q8, Q9 and Q13 from the owner directive.
@@ -283,7 +283,7 @@ needs its own test under a profile.
 4. **Evidence.** A tamper-evident log of every outbound protected call that the app cannot erase.
 5. **DB access is not contained** if the app keeps a direct DB credential. The best honest
    statement: "a compromised app retains all authority of its DB role". Narrowing that role (a
-   least-privilege DB user) is ordinary hygiene and not PBE.
+   least-privilege DB user) is ordinary hygiene and not Nodkey.
 
 **Claim to publish:** Legacy mode reduces the blast radius of compromise from "everything reachable
 plus every secret" to "what the app's existing channels allow". It does **not** prevent misuse of

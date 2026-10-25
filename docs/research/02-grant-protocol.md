@@ -50,7 +50,7 @@ Single use, instant revocation, no crypto parsing; but the Authority must be onl
 with value 3). This is the OAuth reference-token vs self-contained-token trade-off
 (RFC 7662 introspection) [F].
 
-**Conclusion [H].** In PBE the grant must be **necessary, never sufficient**. The Broker computes
+**Conclusion [H].** In Nodkey the grant must be **necessary, never sufficient**. The Broker computes
 `effect_allowed = verify(grant) ∧ policy(trusted facts, request) ∧ state_preconditions`. The
 grant sets an upper bound and the Broker's policy narrows it further; neither can widen the other.
 For the containment PoC (Demo 1), use the baseline with no grant. Demo 2 explicitly requires signed
@@ -62,7 +62,7 @@ currently needs it, and it is the main source of complexity in Biscuit and Macar
 
 ### 3.1 Comparison table
 
-| Option | Integrity primitive | Attenuation | Workload binding | Replay | Ambiguity risk | Rust maturity (as of 2026-10-24) | Fit for PBE v1 |
+| Option | Integrity primitive | Attenuation | Workload binding | Replay | Ambiguity risk | Rust maturity (as of 2026-10-24) | Fit for Nodkey v1 |
 |---|---|---|---|---|---|---|---|
 | **Biscuit** v3 | Ed25519 or P-256 signature chain per block [F] | Yes: offline, Datalog checks; any holder can append blocks [F] | Through Datalog facts or third-party blocks; no native PoP [F/H] | Revocation IDs only; no single-use mechanism [F] | Low at the encoding level (protobuf, signed bytes). High at the semantic level (Datalog policy correctness) [H] | `biscuit-auth` 6.0.0, released 2025-07-16, no release in 15 months; repo moved to `eclipse-biscuit`, last push 2026-10-08; depends on `ed25519-dalek ^2`, `prost 0.10` [O]. Advisory GHSA-p9w4-585h-g3c7 / CVE-2024-41949 (third-party block key confusion) [F] | Strong if delegation is needed later. Too much for v1 |
 | **Macaroons** | HMAC-SHA256 chain [F] | Yes: first- and third-party caveats [F] | Through caveats [F] | None built in [F] | Caveat language is application-defined and not standardized [F] | `macaroon` 0.3.0 (2022-10-13), repo last push 2023-01 [O] | **Reject.** The verifier must hold the root HMAC key, so whoever verifies can mint grants. That merges Broker and Authority keys [F/H] |
@@ -70,7 +70,7 @@ currently needs it, and it is the main source of complexity in Biscuit and Macar
 | **COSE_Sign1 / CWT** (RFC 9052, 8392) | Ed25519 (alg −19, RFC 9864) over `Sig_structure` [F] | No | `cnf` claim (RFC 8747) [F] | `cti` claim; store is up to the application [F] | Medium: header maps and protected/unprotected duplication need a strict profile [F/H] | `coset` 0.4.2 (2026-03-02, Google), pre-1.0, built on `ciborium` 0.2.2 (last release 2024-01) [O]. Ed25519 = −19 is in coset `main` [O] | **Recommended, with a restricted profile** |
 | **JWS / JWT** | many algorithms [F] | No | `cnf` (RFC 7800), DPoP [F] | `jti` [F] | High: `alg` confusion, `none`, cross-JWT confusion (RFC 8725 §2) [F]; real Rust bug: `jsonwebtoken` < 10.3.0 skipped `nbf`/`exp` checks on mistyped claims, CVE-2026-25537 [F] | `jsonwebtoken` 11.1.0 (2026-09-16), active [O] | **Reject** for grants; too many ways to get verification wrong |
 | **Custom envelope**: deterministic CBOR (RFC 8949 §4.2) or fixed-field binary + Ed25519 | Ed25519, `verify_strict` [F] | No | Field + transport identity [H] | `jti` + store [H] | Lowest if fixed-field. Everything is our own spec and needs review [H] | `ed25519-dalek` 3.0.0 (2026-07-06), active; RUSTSEC-2022-0093 fixed in ≥ 2 [O/F] | Viable fallback if the COSE profile is still too loose |
-| **DPoP** (RFC 9449) | per-request JWS by a holder key [F] | n/a | Proof of possession of a holder key [F] | `jti` per proof, server-side store, nonces [F] | Inherits JWS pitfalls [F] | n/a | Not suitable for PBE workload binding (see §3.3) |
+| **DPoP** (RFC 9449) | per-request JWS by a holder key [F] | n/a | Proof of possession of a holder key [F] | `jti` per proof, server-side store, nonces [F] | Inherits JWS pitfalls [F] | n/a | Not suitable for Nodkey workload binding (see §3.3) |
 | **RFC 9421 HTTP Message Signatures** | signature over selected HTTP components [F] | n/a | Holder key [F] | `created`/`nonce` parameters; store is up to the application [F] | Component selection and canonicalization [F] | several young crates [H, not surveyed] | Not needed. Use it only if the Broker is reached over HTTP across a trust boundary without mTLS |
 | **SPIFFE SVIDs** | X.509-SVID (mTLS), JWT-SVID [F] | n/a | **Transport identity**, which is the right layer [F/H] | JWT-SVIDs are bearer tokens and replayable; the spec advises audience restriction [F] | — | SPIRE is a CNCF graduated project [F] | **Use for workload identity**, not as the grant itself |
 
@@ -97,7 +97,7 @@ signature: bstr]`, CBOR tag 18. The signature covers
 appearing in both the protected and unprotected headers. RFC 9596 defines the COSE `typ` header
 (label 16) for explicit typing. RFC 9864 deprecates the polymorphic `EdDSA` (−8) and assigns
 `Ed25519` = −19. CWT (RFC 8392) defines claim keys (iss 1, sub 2, aud 3, exp 4, nbf 5, iat 6,
-cti 7). Main risk [H]: general COSE libraries accept far more than PBE needs, so the §4 profile accepts
+cti 7). Main risk [H]: general COSE libraries accept far more than Nodkey needs, so the §4 profile accepts
 **exactly one shape**.
 
 **JWT [F].** RFC 8725 lists algorithm substitution, `none`, HMAC/public-key confusion and
@@ -113,7 +113,7 @@ only by strict verification, and `jti` is the defined identifier.
 
 ### 3.3 Workload binding: proof of possession does not help against the main attacker
 
-DPoP (RFC 9449) and RFC 9421 bind a token to a key the *holder* controls. In PBE the holder is
+DPoP (RFC 9449) and RFC 9421 bind a token to a key the *holder* controls. In Nodkey the holder is
 the workload, and actors C and D own its memory. **A PoP private key held by a compromised
 workload gives no protection against that workload [H, follows from the threat model].** PoP only
 stops a *different* party from using a stolen grant (leaked logs, another workload, a network
@@ -129,9 +129,9 @@ profile that must be labeled as such.
 
 ## 4. Recommendation (v1 draft)
 
-**Recommendation [H].** A **restricted COSE_Sign1 profile**, "PBE-Grant v1":
+**Recommendation [H].** A **restricted COSE_Sign1 profile**, "Nodkey-Grant v1":
 - signed with Ed25519 (COSE alg −19), verified with `ed25519-dalek` `verify_strict`;
-- the payload is a **deterministic-CBOR map with small integer keys**, using PBE-private claim
+- the payload is a **deterministic-CBOR map with small integer keys**, using Nodkey-private claim
   numbering. CWT claim numbers are not reused, to avoid partial CWT-library interpretation;
 - issued by the Authority;
 - verified by the Broker with a **hand-written strict validator**. `coset` may be used for
@@ -139,7 +139,7 @@ profile that must be labeled as such.
 
 Preferred over PASETO for its integer-native binary payload, a structure reviewers know, and
 `external_aad`. Fallback if the profile proves too loose: a fixed-field binary envelope signed over
-`"PBE-GRANT-v1\0" || body`, same fields.
+`"Nodkey-GRANT-v1\0" || body`, same fields.
 
 Rule: **the PHP SDK never parses grants**. It treats them as opaque base64url strings with a
 length cap.
@@ -277,8 +277,8 @@ this publicly and leave compensation to workflow design (Demo 3).
 
 1. **Typed signing contexts [F/H].** COSE context `"Signature1"`, protected `typ`
    `application/pbe-grant+cbor`, `external_aad` `"pbe.grant.v1" ‖ 0x00 ‖ aud`, and per-purpose
-   keys all apply. Any other PBE signed object differs in `typ` and aad and always uses another key.
-2. **Version locks the algorithm (PASETO model) [F for PASETO; H for PBE].** v1 = Ed25519 only.
+   keys all apply. Any other Nodkey signed object differs in `typ` and aad and always uses another key.
+2. **Version locks the algorithm (PASETO model) [F for PASETO; H for Nodkey].** v1 = Ed25519 only.
    A new algorithm (e.g. ML-DSA, once standardized COSE identifiers and maintained Rust crates
    exist) is introduced as **protocol v2** with its own `typ`/aad, never as a new value in v1.
 3. **The key determines the algorithm.** The verifier never selects an algorithm from attacker
@@ -312,7 +312,7 @@ an independent second implementation where possible [H].
 11. Unknown `kid`; known `kid` with a different key's signature; `kid` from a `revoked` or
     `receipt` purpose key; key outside its validity window.
 12. A grant signed for audience B presented to broker A (fails through `external_aad`).
-13. Cross-type confusion: a receipt or other PBE object signed with the right key type but the
+13. Cross-type confusion: a receipt or other Nodkey object signed with the right key type but the
     wrong `typ`/aad.
 
 **Payload / semantics** (each one valid-signed by the real issuer key unless noted)

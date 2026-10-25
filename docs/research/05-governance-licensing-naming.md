@@ -1,5 +1,7 @@
 # Research 05 — Governance, Licensing, Naming, Export, Authorship, Privacy
 
+> Written before the project was renamed: "PBE" / "Proof-Bound Execution" refers to the project now called **Nodkey**. The name analysis below is kept as the historical record behind that decision.
+
 > [!NOTE]
 > Status: research note (2026-10-24). This ranks below accepted ADRs (see the
 > [source-of-truth hierarchy](../README.md)). **This is not legal advice.** It collects

@@ -2,11 +2,11 @@
 
 | ID | Question | Owner area | Status |
 |---|---|---|---|
-| OQ-01 | Does an existing open-source project already provide credential-less workload + typed effect broker + independently verified per-effect authorization? If so, should PBE exist? | Research | Open |
+| OQ-01 | Does an existing open-source project already provide credential-less workload + typed effect broker + independently verified per-effect authorization? If so, should Nodkey exist? | Research | Open |
 | OQ-02 | Project name. | Owner | **Resolved 2026-10-25:** "Nodkey" (owner decision; replaces provisional "Proof-Bound Execution"/"PBE"). Trademark clearance by counsel still required before public release. |
 | OQ-03 | Copyright holder for LICENSE/NOTICE. | Owner | **Resolved 2026-10-24:** "Henry Cuevas" (owner decision) |
 | OQ-04 | How can the broker derive operation-specific authority for browser users without trusting the app's description of the user? (Gateway-verified session vs. app claim.) | Protocol | Open |
 | OQ-05 | Grant format: reuse Biscuit / COSE / PASETO, or a minimal custom envelope over a standard signature? | Protocol | Open |
 | OQ-06 | Do workflow receipts add security beyond broker-owned state machines? | Research | Open |
-| OQ-07 | Should PBE's grant format interoperate with or reuse an existing execution-edge proof protocol (e.g. Actenon) instead of defining its own COSE profile? | Protocol | Open |
+| OQ-07 | Should Nodkey's grant format interoperate with or reuse an existing execution-edge proof protocol (e.g. Actenon) instead of defining its own COSE profile? | Protocol | Open |
 | OQ-08 | Gateway and broker may parse the same HTTP request differently (route-mapping divergence). How is a single canonical request representation guaranteed? | Protocol | Open |

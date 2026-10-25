@@ -58,8 +58,8 @@ architecture as a whole is a well-known pattern, not an invention:
   audience [F, self-published; not reviewed in depth]. It is a document, not an enforcement
   implementation.
 
-**Should PBE exist?** [H] Only as a **composition and verification project**, not as a new
-security mechanism. PBE could add:
+**Should Nodkey exist?** [H] Only as a **composition and verification project**, not as a new
+security mechanism. Nodkey could add:
 1. a packaged, reproducible *deployment profile* that enforces (a) at the OS and network level,
    for legacy server apps (PHP first), not just agents;
 2. a broker with *narrowly typed effect adapters* (SI-16), instead of credential injection into
@@ -70,7 +70,7 @@ security mechanism. PBE could add:
    project that ships "assume RCE in the app; here are the tests showing what the attacker still
    cannot do" as its main artifact.
 
-If PBE cannot keep its novelty to these four points while reusing established parts, it should
+If Nodkey cannot keep its novelty to these four points while reusing established parts, it should
 not exist as a separate framework. In that case it should become documentation and test suites for
 a PostgREST/Envoy/SPIFFE/Linux-isolation composition [H]. **Recommendation:** before committing to
 a custom broker, run a spike that builds Demo 1 from off-the-shelf parts (network-namespace
@@ -79,7 +79,7 @@ it cannot meet.
 
 ## 2. Comparative matrix
 
-Columns a/b/c refer to the PBE goals above. ✔ = provided, ◐ = partial or conditional, ✘ = not
+Columns a/b/c refer to the Nodkey goals above. ✔ = provided, ◐ = partial or conditional, ✘ = not
 provided. Maturity is our assessment [H] unless cited.
 
 | System | Purpose | Enforcement boundary | Trust assumptions | a | b | c | License | Maturity |
@@ -126,12 +126,12 @@ provided. Maturity is our assessment [H] unless cited.
 - Evidence: an append-only log plus, if needed, a transparency-log library (Trillian or Sigstore
   Rekor style). Do not build new Merkle code.
 
-**Integrate (PBE calls them or sits beside them)**
+**Integrate (Nodkey calls them or sits beside them)**
 - An Envoy (or Pomerium) gateway in front of the app that verifies the user session and issues
   *gateway-attested user context* to the broker. This is the BeyondProd EUC pattern, and it answers
   OQ-04. The OAuth Transaction Tokens draft (`draft-ietf-oauth-transaction-tokens-11`, WG consensus,
   IESG submission milestone Dec 2026 [F]) is the standards-track format for exactly this: an
-  immutable `tctx` carried down a call chain. PBE should adopt it, or stay compatible with it,
+  immutable `tctx` carried down a call chain. Nodkey should adopt it, or stay compatible with it,
   rather than invent one [H].
 - Temporal or plain DB state machines for workflow orchestration, *outside* the TCB. They provide
   durability and retries. They do not provide authority (see §4).
@@ -159,7 +159,7 @@ provided. Maturity is our assessment [H] unless cited.
 
 ### Closest prior art
 
-| Prior art | What it already gives | Relation to PBE effect chains |
+| Prior art | What it already gives | Relation to Nodkey effect chains |
 |---|---|---|
 | **Privsep monitors** (OpenSSH) | Monitor keeps a state machine; the unprivileged child can only request transitions valid in the current state [F: Provos et al.] | The essential mechanism: a trusted state machine gating transitions requested by an untrusted caller |
 | **Workflow authorization constraints** (Bertino, Ferrari & Atluri 1999) | Formal specification and enforcement of who may execute which task in a workflow, including separation-of-duty constraints [F] | Academic precedent for authorizing *state transitions*, not just accesses |
@@ -174,10 +174,10 @@ provided. Maturity is our assessment [H] unless cited.
 | **Zanzibar zookies** | Consistency tokens so ACL checks are evaluated at least as fresh as a given snapshot [F] | Precedent for the stale-state problem (SI-11) |
 | **Proof-carrying authorization** (Appel & Felten 1999; Bauer et al. "Grey") | The requester supplies a proof; the guard only *checks* it [F] | Precedent for "the broker verifies, it does not trust". Also a caution: the proofs are of *logical authorization*, not of state freshness |
 | **IFC/DIFC** (Jif, Flume, HiStar, Laminar) | Labels on data; declassification only by trusted gates [F] | The broker is a "trusted gate"; IFC also tackles the *laundering* concern formally |
-| **Smart contracts** | State-transition functions with authorization checked by a replicated verifier [H: general knowledge] | Shows the cost of decentralizing the state machine. PBE does not need that cost: the broker owns state |
+| **Smart contracts** | State-transition functions with authorization checked by a replicated verifier [H: general knowledge] | Shows the cost of decentralizing the state machine. Nodkey does not need that cost: the broker owns state |
 | **CaMeL** | Capabilities (provenance metadata) on values; policies checked at tool-call time by a trusted interpreter [F] | The agent analogue: untrusted computation, trusted mediator. Shows the "laundering via data flow" problem is real |
 
-### Explicitly NOT novel in PBE's effect-chain idea [H, based on above]
+### Explicitly NOT novel in Nodkey's effect-chain idea [H, based on above]
 - Gating workflow transitions on a trusted, server-owned state machine.
 - At-most-once effects via idempotency keys or single-use grants.
 - Binding authorization to exact operation parameters (amount, payee, resource).
@@ -200,19 +200,19 @@ surface: replay, cross-tenant reuse, and laundering. Receipts help only in three
 Recommendation: v0 should use broker-owned state machines only. Treat receipts as an *evidence*
 output, and defer cross-broker receipt chains until a concrete multi-broker deployment needs them.
 
-## 5. Implications for PBE architecture [H]
+## 5. Implications for Nodkey architecture [H]
 
-1. **Position PBE as "privilege separation for application effects," and credit its lineage
+1. **Position Nodkey as "privilege separation for application effects," and credit its lineage
    openly** (OpenSSH privsep, Chromium broker, BeyondProd EUC). Do not claim the pattern as new.
    Also revisit the name with OQ-02: "proof" suggests PCC/PCA formal proofs, which PBE does not
    provide.
 2. **Goal (c) is the differentiator, and its hard part is OQ-04.** Every credential-injector
    reviewed fails (c), because the broker cannot tell a legitimate request from an
    attacker-initiated one made through the same compromised app. User context must come from a
-   gateway the app cannot forge (EUC / Txn-Token pattern). Without it, PBE degrades to "Secretless
+   gateway the app cannot forge (EUC / Txn-Token pattern). Without it, Nodkey degrades to "Secretless
    with typed operations": still useful (it limits blast radius to the declared operations, per the
    SI "does not promise" section) but no longer meeting (c) for user-scoped effects.
-3. **Typed adapters are what separates PBE from L7 proxies.** Generic HTTP/SQL passthrough (Envoy,
+3. **Typed adapters are what separates Nodkey from L7 proxies.** Generic HTTP/SQL passthrough (Envoy,
    Secretless, ProxySQL, Agent Vault) cannot meet SI-16. The adapter contract (§3) is where most of
    the real engineering goes. Keep it small.
 4. **Do not build** a policy language, token format, signature scheme, workload identity system,
@@ -224,16 +224,16 @@ output, and defer cross-broker receipt chains until a concrete multi-broker depl
    not help legacy PHP.
 6. **Agents are the market with momentum.** Most 2025–2026 activity (Agent Vault, nono,
    AgentCordon, AgentCore Policy, MCP gateways, CaMeL) targets agents. Those projects mostly stop
-   at credential injection plus host/tool allow-lists. PBE's trusted-facts and typed-effect
+   at credential injection plus host/tool allow-lists. Nodkey's trusted-facts and typed-effect
    discipline would add value there. Keep the protocol language-neutral so an MCP-gateway adapter is
    possible later (research Q15).
 7. **Licensing landscape.** Several close neighbours are not Apache-2.0-compatible for embedding:
-   Vault/Boundary (BUSL-1.1), AgentCordon and Teleport (AGPL). PBE can *interoperate* with them over
+   Vault/Boundary (BUSL-1.1), AgentCordon and Teleport (AGPL). Nodkey can *interoperate* with them over
    the network but should not vendor them. The licensing workstream needs to confirm this.
 8. **Next step (falsification spike).** Build Demo 1 from off-the-shelf parts: netns isolation,
    Envoy ext_authz + Cedar, PostgREST RPC-only + RLS, and DB auth restricted to the API's role. Run
-   the SI-01…SI-16 tests against it. Every invariant it meets is one PBE should *not* reimplement.
-   The invariants it fails define PBE's real scope.
+   the SI-01…SI-16 tests against it. Every invariant it meets is one Nodkey should *not* reimplement.
+   The invariants it fails define Nodkey's real scope.
 
 ### Gaps in this note
 - Teleport's current licence and DB-permission features, nono's licence, and the exact MCP

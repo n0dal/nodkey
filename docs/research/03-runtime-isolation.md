@@ -67,7 +67,7 @@ over the one path that remains (SI-05..SI-16). This note covers only the first q
   `seccomp=unconfined` removes all of this [F, 8].
 - **seccomp user notification must not enforce policy.** `seccomp_unotify(2)`: "this mechanism
   must not be used to make security policy decisions about the system call", because "there is a
-  time-of-check, time-of-use race" [F, 9]. The owner directive also forbids it. PBE uses seccomp only
+  time-of-check, time-of-use race" [F, 9]. The owner directive also forbids it. Nodkey uses seccomp only
   in its kernel-decided `ERRNO`/`KILL` forms.
 - **User namespaces.** The Docker daemon supports remapping container root to an unprivileged host
   UID, but "This facility is available but not enabled by default" [F, 6]. Rootless Docker runs the
@@ -105,11 +105,11 @@ ABI history from the kernel documentation [F, 15]:
 | 11 | `RESTRICT_SELF_NO_NEW_PRIVS` |
 
 The fetched document does not map ABIs 2–11 to kernel releases. The commonly cited mapping (ABI 4 =
-Linux 6.7, ABI 6 = 6.12) is [F\*]. Limits that matter for PBE [F, 15]: network rules are **port-based
+Linux 6.7, ABI 6 = 6.12) is [F\*]. Limits that matter for Nodkey [F, 15]: network rules are **port-based
 only** (no destination address), and only TCP and, from ABI 10, UDP are covered. Sockets reachable
 through `/proc/<pid>/fd/*` "cannot currently be explicitly restricted". Scoping has no exceptions.
 
-Assessment [H]: Landlock is a useful **inner** layer that a PBE launcher could apply to the PHP
+Assessment [H]: Landlock is a useful **inner** layer that a Nodkey launcher could apply to the PHP
 process, for example to deny all TCP connect and limit files to the docroot. It cannot be the
 **primary** network boundary, for three reasons: it has no address rules, it depends on the kernel
 ABI available, and it is opt-in by the process (the launcher, not the app, must apply it before
@@ -150,7 +150,7 @@ ends up holding cloud credentials it does not need.
   the socket into one workload only** makes the mount the capability: a per-workload socket
   authenticates by construction [H]. TCP needs a network path, which reintroduces everything in §2.1.
 - **Abstract UNIX sockets** have no permission model ("Socket permissions have no meaning for abstract
-  sockets") [F, 23]. They are scoped per network namespace [F\*, 23]. PBE must never use them for the
+  sockets") [F, 23]. They are scoped per network namespace [F\*, 23]. Nodkey must never use them for the
   broker, and the workload must not share a network namespace with the broker or the DB.
 - **`SO_PEERCRED`** returns the peer's credentials "in effect at the time of the call to connect(2),
   listen(2), or socketpair(2)" [F, 23]. Across containers, the PID is translated relative to the
@@ -255,7 +255,7 @@ Authority(W) = Net(W) ∪ FS(W) ∪ IPC(W) ∪ Kern(W) ∪ ⋃_{d ∈ Deputies(W
 - **Ops_d:** for each deputy reachable through IPC/Net (the broker, the nginx gateway), the operations
   it will perform for W. For the broker this is bounded by SI-16 and current grants.
 
-The PBE claim is then: `Authority(W) ∩ ProtectedResources ⊆ Ops_broker(W)`.
+The Nodkey claim is then: `Authority(W) ∩ ProtectedResources ⊆ Ops_broker(W)`.
 
 **Testability:**
 - *Statically*, Net/FS/IPC can be derived from the deployment spec (`docker inspect` output) under a

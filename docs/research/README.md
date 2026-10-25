@@ -16,8 +16,8 @@ Each note separates **established facts** (cited) from **hypotheses**. Notes are
 
 - **2026-10-24 — Actenon (verified via GitHub API):** `github.com/Actenon/actenon-kernel`, Apache-2.0,
   created 2026-06-05, last push 2026-10-08, describes itself as "the open verifier for proof-bound
-  consequential execution… issues no grants; runs no policy decisions." It overlaps PBE's grant
+  consequential execution… issues no grants; runs no policy decisions." It overlaps Nodkey's grant
   *verification* layer only; it does not address workload credential custody or isolation. It is part
   of a vendor ecosystem with separate commercial components. Implications: (1) the name
   "proof-bound" is effectively taken; (2) its protocol should be evaluated for interoperability
-  before PBE finalizes a grant format (OQ-07).
+  before Nodkey finalizes a grant format (OQ-07).
