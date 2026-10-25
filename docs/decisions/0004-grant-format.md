@@ -66,3 +66,40 @@ AR-17, AR-20 (format closes known confusion classes).
 
 Codec swap (PASETO, fixed-field, or an OQ-07 outcome) keeps payload semantics; `typ`/`ver` versioned,
 no downgrade.
+
+## Amendment 1 (2026-10-25)
+
+Required by ADR-0003 rev. 3 (Accepted), Phase 3 implementation profile items 5–7, and specified in full
+by [`docs/specs/grant-v1.md`](../specs/grant-v1.md) (Draft 1). The status of this ADR is unchanged
+(Proposed; OQ-07 still open). Changes relative to the decision above:
+
+1. **Grant kinds (new payload key 17 `knd`).** `1` = write: one write operation, single use, `jti`
+   consumed in the effect transaction. `2` = read: a set of read operations in new key 19 `rop`
+   (`{op name: opv}`, 1–16 entries), multi-use within the validity window, never consumed, never valid
+   for a write operation; the broker checks ownership of every read resource by the grant's
+   `(ten, sub)` against trusted state. Read grants omit keys 10–14 and 18. The kind is signed and the
+   broker checks the operation's declared kind before dispatch.
+2. **Confirmation marker (new payload key 18 `cfm`, write grants only).** `1` = the user approved the
+   exact bound values on the auth origin; `0` otherwise. An operation may require it; `ledger.transfer`
+   does. A grant for such an operation with `cfm = 0` is denied.
+3. **`con` encoding.** Each entry is `[class, value]` with class `0` = exact, `1` = bounded (inclusive
+   uint ceiling); the class must equal the broker's declaration. `free` parameters never appear in
+   `con`.
+4. **Sizes and limits.** Grant ≤ 2048 bytes (replacing research 02's 4096-byte envelope and 2048-byte
+   payload caps); times ≤ 2^53 − 1; IDs printable ASCII without space; `max_ttl` = 30 s broker-wide for
+   both kinds (the per-route longer TTL above is not supported in v1); skew ≤ 5 s.
+5. **Verification order.** Research 02 §4.3 is superseded by spec §7, which fixes the order of checks
+   and a broker-facing error code per step; the workload receives only `grant_denied`. A grant that
+   passes the binding checks (step 9) is *verified*; denials of verified write grants are recorded so
+   each grant receives one decision (ADR-0006 §4).
+6. **Tenant check.** `ten` remains sourced from the grant and must additionally be one of the tenants in
+   the presenting workload's registration.
+7. **Key registry.** JSON file format with `kid = SHA-256("nodkey.kid.v1" ‖ 0x00 ‖ pk)[0..16]`,
+   load-time rejection of weak, non-canonical, duplicate or mis-derived keys, and a `role` field
+   (`user_authority` | `scheduler`) matched against the operation's authority class. The `scheduler`
+   role is provisional until ADR-0009 is revised.
+8. **No grantless operations** in v1: every operation requires a grant.
+
+Unchanged: COSE_Sign1 with tag 18, the exact protected header, empty unprotected header, Ed25519 with
+`verify_strict`, the `external_aad` construction, keys 0–14 and their meanings, reserved keys 15–16, and
+`revoked_before` revocation.

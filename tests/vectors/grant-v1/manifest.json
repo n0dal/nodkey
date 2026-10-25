@@ -1,0 +1,6650 @@
+{
+  "format": "nodkey.grant-v1.vectors",
+  "spec": "docs/specs/grant-v1.md",
+  "warning": "TEST-ONLY. Every key below is a published RFC 8032 test key. Never deploy a registry containing them.",
+  "constants": {
+    "typ": "application/nodkey-grant+cbor",
+    "external_aad_tag": "nodkey.grant.v1",
+    "kid_label": "nodkey.kid.v1",
+    "max_grant_bytes": 2048,
+    "skew_seconds": 5,
+    "max_ttl_seconds": 30
+  },
+  "keys": [
+    {
+      "name": "A",
+      "source": "RFC 8032 section 7.1 TEST 1",
+      "secret_seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+      "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "kid": "4fcf41a3bf742ec7db96e0aaa5047e3a",
+      "in_registry": true,
+      "purpose": "the authority's active grant key; signs every valid user grant"
+    },
+    {
+      "name": "B",
+      "source": "RFC 8032 section 7.1 TEST 2",
+      "secret_seed": "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+      "public_key": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+      "kid": "802e7b803bde0de9d26cfa321bfab4d5",
+      "in_registry": false,
+      "purpose": "NOT in the registry; wrong-key and unknown-kid cases"
+    },
+    {
+      "name": "C",
+      "source": "RFC 8032 section 7.1 TEST 3",
+      "secret_seed": "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
+      "public_key": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+      "kid": "71a5e20f927aef116cd029856cff6f04",
+      "in_registry": true,
+      "purpose": "registered with status revoked"
+    },
+    {
+      "name": "D",
+      "source": "RFC 8032 section 7.1 TEST 1024",
+      "secret_seed": "f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5",
+      "public_key": "278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e",
+      "kid": "f54ef1d6a652135a724d2f133af93847",
+      "in_registry": true,
+      "purpose": "registered active but outside its validity window at the test time"
+    },
+    {
+      "name": "E",
+      "source": "RFC 8032 section 7.1 TEST SHA(abc)",
+      "secret_seed": "833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42",
+      "public_key": "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf",
+      "kid": "e3b1cd9a74a3b174e6883283f00fd618",
+      "in_registry": true,
+      "purpose": "the trusted scheduler's grant key (ADR-0009)"
+    }
+  ],
+  "workloads": [
+    {
+      "wid": "spiffe://nodkey.test/workload/app1",
+      "tenants": [
+        "acme"
+      ]
+    },
+    {
+      "wid": "spiffe://nodkey.test/workload/app2",
+      "tenants": [
+        "acme",
+        "globex"
+      ]
+    }
+  ],
+  "operations": [
+    {
+      "op": "ledger.transfer",
+      "kind": "write",
+      "opv": [
+        1
+      ],
+      "authority": "user_grant",
+      "requires_confirmation": true,
+      "params": [
+        {
+          "name": "from",
+          "in": "res",
+          "key": 0,
+          "class": "exact",
+          "type": "account_id"
+        },
+        {
+          "name": "to",
+          "in": "con",
+          "key": 0,
+          "class": "exact",
+          "type": "account_id"
+        },
+        {
+          "name": "amount_cents",
+          "in": "con",
+          "key": 1,
+          "class": "exact",
+          "type": "uint"
+        }
+      ]
+    },
+    {
+      "op": "test.hold",
+      "kind": "write",
+      "opv": [
+        1
+      ],
+      "authority": "user_grant",
+      "requires_confirmation": false,
+      "params": [
+        {
+          "name": "account",
+          "in": "res",
+          "key": 0,
+          "class": "exact",
+          "type": "account_id"
+        },
+        {
+          "name": "amount_cents",
+          "in": "con",
+          "key": 0,
+          "class": "bounded",
+          "type": "uint"
+        },
+        {
+          "name": "currency",
+          "in": "con",
+          "key": 1,
+          "class": "exact",
+          "type": "currency"
+        },
+        {
+          "name": "memo",
+          "in": "con",
+          "key": null,
+          "class": "free",
+          "type": "text64",
+          "justification": "TEST-ONLY operation; display-only note with no effect on authority"
+        }
+      ]
+    },
+    {
+      "op": "ledger.get_balance",
+      "kind": "read",
+      "opv": [
+        1
+      ],
+      "authority": "user_grant",
+      "requires_confirmation": false,
+      "params": [
+        {
+          "name": "account",
+          "in": "request",
+          "key": null,
+          "class": "owner_scoped",
+          "type": "account_id"
+        }
+      ]
+    },
+    {
+      "op": "ledger.list_transfers",
+      "kind": "read",
+      "opv": [
+        1
+      ],
+      "authority": "user_grant",
+      "requires_confirmation": false,
+      "params": [
+        {
+          "name": "account",
+          "in": "request",
+          "key": null,
+          "class": "owner_scoped",
+          "type": "account_id"
+        }
+      ]
+    },
+    {
+      "op": "orders.capture",
+      "kind": "write",
+      "opv": [
+        1
+      ],
+      "authority": "scheduler_grant",
+      "requires_confirmation": false,
+      "params": [
+        {
+          "name": "order_id",
+          "in": "res",
+          "key": 0,
+          "class": "exact",
+          "type": "uint"
+        },
+        {
+          "name": "amount_cents",
+          "in": "con",
+          "key": 0,
+          "class": "bounded",
+          "type": "uint"
+        }
+      ]
+    }
+  ],
+  "vectors": [
+    {
+      "id": "ACC-01-valid-transfer",
+      "kind": "grant",
+      "category": "accept",
+      "description": "Valid ledger.transfer grant; request within every constraint.",
+      "registry": "registry.json",
+      "grant": "grants/ACC-01-valid-transfer.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-02-valid-read-grant",
+      "kind": "grant",
+      "category": "accept",
+      "description": "Valid read grant (knd = 2) for ledger.get_balance.",
+      "registry": "registry.json",
+      "grant": "grants/ACC-02-valid-read-grant.hex",
+      "grant_len": 302,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-09-read-grant-multi-use",
+      "kind": "grant",
+      "category": "accept",
+      "description": "One read grant naming two read operations, used three times within its TTL; nothing is consumed.",
+      "registry": "registry.json",
+      "grant": "grants/ACC-09-read-grant-multi-use.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886411,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.list_transfers",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886412,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-03-amount-equals-bound",
+      "kind": "grant",
+      "category": "accept",
+      "description": "test.hold: bounded parameter equal to its ceiling is accepted (inclusive); cfm = 0 is fine where confirmation is not required.",
+      "registry": "registry.json",
+      "grant": "grants/ACC-03-amount-equals-bound.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 50000,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-04-free-param-any-value",
+      "kind": "grant",
+      "category": "accept",
+      "description": "test.hold: the free parameter memo is not bound by the grant; any value passes (published residual).",
+      "registry": "registry.json",
+      "grant": "grants/ACC-04-free-param-any-value.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "anything at all"
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-05-iat-before-nbf",
+      "kind": "grant",
+      "category": "accept",
+      "description": "iat < nbf, exp - nbf = max_ttl (30 s).",
+      "registry": "registry.json",
+      "grant": "grants/ACC-05-iat-before-nbf.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-06-multi-tenant-workload",
+      "kind": "grant",
+      "category": "accept",
+      "description": "Workload app2 is registered for tenants acme and globex; grant for globex.",
+      "registry": "registry.json",
+      "grant": "grants/ACC-06-multi-tenant-workload.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app2",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-07-other-audience-at-its-broker",
+      "kind": "grant",
+      "category": "accept",
+      "description": "Grant signed for audience nodkey.broker.other-test, presented to that broker (control for SIG-07).",
+      "registry": "registry.json",
+      "grant": "grants/ACC-07-other-audience-at-its-broker.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.other-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ACC-08-scheduler-grant",
+      "kind": "grant",
+      "category": "accept",
+      "description": "Scheduler key E signs orders.capture (authority class scheduler_grant; cfm = 0, confirmation not required).",
+      "registry": "registry.json",
+      "grant": "grants/ACC-08-scheduler-grant.hex",
+      "grant_len": 316,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "orders.capture",
+            "args": {
+              "order_id": 9821,
+              "amount_cents": 4200
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "ENV-01-oversized-2049",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Validly signed grant of 2049 bytes (limit 2048; padded with unknown key 20); rejected before decoding.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-01-oversized-2049.hex",
+      "grant_len": 2049,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_too_large"
+        }
+      ]
+    },
+    {
+      "id": "ENV-02-at-size-limit-2048",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Validly signed grant of exactly 2048 bytes passes the size check; fails later on its padding key 20.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-02-at-size-limit-2048.hex",
+      "grant_len": 2048,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "ENV-03-empty",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Zero-length input.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-03-empty.hex",
+      "grant_len": 0,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-04-truncated",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Valid grant with its last byte removed.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-04-truncated.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-05-trailing-byte",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Valid grant followed by one 0x00 byte.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-05-trailing-byte.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-06-untagged",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "COSE_Sign1 array without tag 18.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-06-untagged.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-07-tag-17",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Tag 17 (COSE_Mac0) instead of 18.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-07-tag-17.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-08-tag-98",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Tag 98 (COSE_Sign) instead of 18.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-08-tag-98.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-09-double-tag",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Tag 18 nested twice.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-09-double-tag.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-10-tag-non-minimal",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Tag 18 encoded with a one-byte argument (0xd8 0x12).",
+      "registry": "registry.json",
+      "grant": "grants/ENV-10-tag-non-minimal.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-11-array-3",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Array of 3 elements (signature omitted).",
+      "registry": "registry.json",
+      "grant": "grants/ENV-11-array-3.hex",
+      "grant_len": 261,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-12-array-5",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Array of 5 elements (extra trailing bstr).",
+      "registry": "registry.json",
+      "grant": "grants/ENV-12-array-5.hex",
+      "grant_len": 393,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-13-indefinite-array",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Indefinite-length outer array.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-13-indefinite-array.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-14-array-head-non-minimal",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Outer array length encoded as 0x98 0x04.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-14-array-head-non-minimal.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-15-payload-length-non-minimal",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Payload bstr length encoded with an 8-byte argument.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-15-payload-length-non-minimal.hex",
+      "grant_len": 334,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-16-payload-indefinite-bstr",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Payload as an indefinite-length (chunked) byte string.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-16-payload-indefinite-bstr.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-17-signature-63-bytes",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Signature truncated to 63 bytes.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-17-signature-63-bytes.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-18-signature-65-bytes",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Signature with one extra byte.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-18-signature-65-bytes.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-19-payload-nil",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Detached payload (nil, 0xf6) is not supported.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-19-payload-nil.hex",
+      "grant_len": 127,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-20-unprotected-not-map",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Unprotected header encoded as an empty bstr instead of a map.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-20-unprotected-not-map.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-21-protected-not-bstr",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Protected header given as a bare map instead of a bstr.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-21-protected-not-bstr.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-22-envelope-is-map",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Tag 18 wrapping a map.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-22-envelope-is-map.hex",
+      "grant_len": 60,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "ENV-23-huge-declared-length",
+      "kind": "grant",
+      "category": "envelope",
+      "description": "Payload bstr declares 2^32 bytes; must fail without allocating.",
+      "registry": "registry.json",
+      "grant": "grants/ENV-23-huge-declared-length.hex",
+      "grant_len": 69,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_malformed"
+        }
+      ]
+    },
+    {
+      "id": "HDR-01-alg-in-unprotected",
+      "kind": "grant",
+      "category": "header",
+      "description": "Unprotected header {1: -19} (label present in both headers).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-01-alg-in-unprotected.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-02-kid-only-in-unprotected",
+      "kind": "grant",
+      "category": "header",
+      "description": "kid moved from the protected to the unprotected header.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-02-kid-only-in-unprotected.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-03-missing-typ",
+      "kind": "grant",
+      "category": "header",
+      "description": "Protected header without typ (16).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-03-missing-typ.hex",
+      "grant_len": 292,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-04-missing-kid",
+      "kind": "grant",
+      "category": "header",
+      "description": "Protected header without kid (4).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-04-missing-kid.hex",
+      "grant_len": 309,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-05-missing-alg",
+      "kind": "grant",
+      "category": "header",
+      "description": "Protected header without alg (1).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-05-missing-alg.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-06-extra-crit",
+      "kind": "grant",
+      "category": "header",
+      "description": "Extra protected label 2 (crit).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-06-extra-crit.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-07-extra-content-type",
+      "kind": "grant",
+      "category": "header",
+      "description": "Extra protected label 3 (content type).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-07-extra-content-type.hex",
+      "grant_len": 345,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-08-extra-unknown-label",
+      "kind": "grant",
+      "category": "header",
+      "description": "Extra protected label 99.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-08-extra-unknown-label.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-09-typ-receipt",
+      "kind": "grant",
+      "category": "header",
+      "description": "typ of another Nodkey object (application/nodkey-receipt+cbor).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-09-typ-receipt.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-10-typ-generic-cose",
+      "kind": "grant",
+      "category": "header",
+      "description": "typ application/cose.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-10-typ-generic-cose.hex",
+      "grant_len": 311,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-11-typ-as-uint",
+      "kind": "grant",
+      "category": "header",
+      "description": "typ given as a CoAP content-format integer.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-11-typ-as-uint.hex",
+      "grant_len": 296,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-12-kid-15-bytes",
+      "kind": "grant",
+      "category": "header",
+      "description": "kid of 15 bytes.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-12-kid-15-bytes.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-13-kid-17-bytes",
+      "kind": "grant",
+      "category": "header",
+      "description": "kid of 17 bytes.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-13-kid-17-bytes.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-14-kid-as-text",
+      "kind": "grant",
+      "category": "header",
+      "description": "kid given as tstr (hex of the real kid).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-14-kid-as-text.hex",
+      "grant_len": 344,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-15-unsorted-labels",
+      "kind": "grant",
+      "category": "header",
+      "description": "Protected labels in order 4, 1, 16 (not deterministic).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-15-unsorted-labels.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-16-alg-non-minimal",
+      "kind": "grant",
+      "category": "header",
+      "description": "alg -19 encoded as 0x38 0x12 (non-minimal).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-16-alg-non-minimal.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-17-protected-empty-bstr",
+      "kind": "grant",
+      "category": "header",
+      "description": "Protected header is the zero-length bstr.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-17-protected-empty-bstr.hex",
+      "grant_len": 271,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-18-protected-empty-map",
+      "kind": "grant",
+      "category": "header",
+      "description": "Protected header is an encoded empty map.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-18-protected-empty-map.hex",
+      "grant_len": 272,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-19-protected-trailing-byte",
+      "kind": "grant",
+      "category": "header",
+      "description": "Protected header bstr has a byte after the map.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-19-protected-trailing-byte.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-20-alg-text",
+      "kind": "grant",
+      "category": "header",
+      "description": "alg given as tstr \"EdDSA\".",
+      "registry": "registry.json",
+      "grant": "grants/HDR-20-alg-text.hex",
+      "grant_len": 332,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_header_invalid"
+        }
+      ]
+    },
+    {
+      "id": "HDR-21-alg-minus-8",
+      "kind": "grant",
+      "category": "header",
+      "description": "alg -8 (polymorphic EdDSA) disagrees with the key registry (Ed25519 = -19).",
+      "registry": "registry.json",
+      "grant": "grants/HDR-21-alg-minus-8.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_alg_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "HDR-22-alg-minus-7",
+      "kind": "grant",
+      "category": "header",
+      "description": "alg -7 (ES256) disagrees with the key registry.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-22-alg-minus-7.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_alg_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "HDR-23-alg-zero",
+      "kind": "grant",
+      "category": "header",
+      "description": "alg 0 (reserved) disagrees with the key registry.",
+      "registry": "registry.json",
+      "grant": "grants/HDR-23-alg-zero.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_alg_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "KEY-01-unknown-kid",
+      "kind": "grant",
+      "category": "key",
+      "description": "Signed by key B under B's own kid; B is not in the registry.",
+      "registry": "registry.json",
+      "grant": "grants/KEY-01-unknown-kid.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_unknown_kid"
+        }
+      ]
+    },
+    {
+      "id": "KEY-02-unknown-kid-random",
+      "kind": "grant",
+      "category": "key",
+      "description": "kid of 16 0x00 bytes, signed by A.",
+      "registry": "registry.json",
+      "grant": "grants/KEY-02-unknown-kid-random.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_unknown_kid"
+        }
+      ]
+    },
+    {
+      "id": "KEY-03-revoked-key",
+      "kind": "grant",
+      "category": "key",
+      "description": "Signed by key C, registered with status revoked.",
+      "registry": "registry.json",
+      "grant": "grants/KEY-03-revoked-key.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_key_revoked"
+        }
+      ]
+    },
+    {
+      "id": "KEY-04-key-outside-window",
+      "kind": "grant",
+      "category": "key",
+      "description": "Signed by key D, whose validity window ended before the test time.",
+      "registry": "registry.json",
+      "grant": "grants/KEY-04-key-outside-window.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_key_inactive"
+        }
+      ]
+    },
+    {
+      "id": "SIG-01-wrong-key",
+      "kind": "grant",
+      "category": "signature",
+      "description": "kid of key A, signature by key B.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-01-wrong-key.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-02-kid-swapped-post-signing",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Signed by A under A's kid; kid then replaced by key E's (active, registered).",
+      "registry": "registry.json",
+      "grant": "grants/SIG-02-kid-swapped-post-signing.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-03-signature-R-bitflip",
+      "kind": "grant",
+      "category": "signature",
+      "description": "One bit flipped in R.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-03-signature-R-bitflip.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-04-signature-S-bitflip",
+      "kind": "grant",
+      "category": "signature",
+      "description": "One bit flipped in S.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-04-signature-S-bitflip.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-05-malleable-S-plus-L",
+      "kind": "grant",
+      "category": "signature",
+      "description": "S replaced by S + L (non-canonical scalar). Lax verifiers that reduce S mod L accept it; verify_strict must not.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-05-malleable-S-plus-L.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-06-signature-zero",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Signature of 64 zero bytes.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-06-signature-zero.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-07-signed-for-other-audience",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Grant for nodkey.broker.other-test (aud field and external_aad) presented to nodkey.broker.ledger-test.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-07-signed-for-other-audience.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-08-aad-wrong-domain-tag",
+      "kind": "grant",
+      "category": "signature",
+      "description": "external_aad built with tag nodkey.receipt.v1.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-08-aad-wrong-domain-tag.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-09-aad-empty",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Signed with an empty external_aad.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-09-aad-empty.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-10-aad-no-separator",
+      "kind": "grant",
+      "category": "signature",
+      "description": "external_aad without the 0x00 separator.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-10-aad-no-separator.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-11-cose-sign-context",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Signed over a COSE_Sign (\"Signature\") structure instead of Sig_structure1.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-11-cose-sign-context.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-12-raw-payload-signed",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Ed25519 signature over the payload bytes alone.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-12-raw-payload-signed.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-20-altered-ver",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 0 (ver) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-20-altered-ver.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-21-altered-iss",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 1 (iss) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-21-altered-iss.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-22-altered-aud",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 2 (aud) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-22-altered-aud.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-23-altered-jti",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 3 (jti) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-23-altered-jti.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-24-altered-iat",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 4 (iat) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-24-altered-iat.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-25-altered-nbf",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 5 (nbf) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-25-altered-nbf.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-26-altered-exp",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 6 (exp) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-26-altered-exp.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-27-altered-wid",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 7 (wid) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-27-altered-wid.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-28-altered-ten",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 8 (ten) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-28-altered-ten.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-29-altered-sub",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 9 (sub) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-29-altered-sub.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-30-altered-op",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 10 (op) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-30-altered-op.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-31-altered-opv",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 11 (opv) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-31-altered-opv.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-32-altered-res",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 12 (res) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-32-altered-res.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-33-altered-con",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 13 (con) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-33-altered-con.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-34-altered-use",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 14 (use) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-34-altered-use.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-37-altered-knd",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 17 (knd) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-37-altered-knd.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "SIG-38-altered-cfm",
+      "kind": "grant",
+      "category": "signature",
+      "description": "Payload field 18 (cfm) altered after signing.",
+      "registry": "registry.json",
+      "grant": "grants/SIG-38-altered-cfm.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-01-int-non-minimal",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "ver encoded as 0x18 0x01.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-01-int-non-minimal.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-02-text-length-non-minimal",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "iss (23 bytes) with its length encoded as 0x78 0x17.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-02-text-length-non-minimal.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-03-map-head-non-minimal",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "Top-level map count (17) encoded as 0xb8 0x11.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-03-map-head-non-minimal.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-04-keys-unsorted",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "Keys 1 and 0 swapped.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-04-keys-unsorted.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-05-duplicate-key-exp",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "Key 6 (exp) appears twice; the second would widen the window.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-05-duplicate-key-exp.hex",
+      "grant_len": 333,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-06-duplicate-key-con",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "Key 13 (con) appears twice with different values.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-06-duplicate-key-con.hex",
+      "grant_len": 340,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-07-indefinite-map",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "Top-level map with indefinite length.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-07-indefinite-map.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-08-indefinite-text",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "sub as an indefinite-length text string.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-08-indefinite-text.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-09-indefinite-array-in-con",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "con entry 0 as an indefinite-length array.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-09-indefinite-array-in-con.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-10-float-exp",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "exp as a float64 with the correct numeric value.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-10-float-exp.hex",
+      "grant_len": 331,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-11-half-float-use",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "use as float16 1.0 (0xf9 0x3c00).",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-11-half-float-use.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-12-negative-int",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "exp as negative integer -1.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-12-negative-int.hex",
+      "grant_len": 323,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-13-tag-in-payload",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "exp wrapped in tag 1 (epoch time).",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-13-tag-in-payload.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-14-bool",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "use as true (0xf5).",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-14-bool.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-15-null",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "res as null (0xf6).",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-15-null.hex",
+      "grant_len": 320,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-16-trailing-byte",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "Payload map followed by one 0x00 byte.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-16-trailing-byte.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-17-truncated",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "Payload map with its last byte removed.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-17-truncated.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-18-invalid-utf8",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "sub contains the invalid UTF-8 sequence 0xc3 0x28.",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-18-invalid-utf8.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PDEC-19-depth-4",
+      "kind": "grant",
+      "category": "payload-decode",
+      "description": "con entry value nested one array deeper than allowed (depth 4).",
+      "registry": "registry.json",
+      "grant": "grants/PDEC-19-depth-4.hex",
+      "grant_len": 322,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_malformed"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-01-payload-array",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Payload is an array.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-01-payload-array.hex",
+      "grant_len": 129,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-02-payload-uint",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Payload is the integer 1.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-02-payload-uint.hex",
+      "grant_len": 128,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-03-unknown-key-20",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Unknown top-level key 20.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-03-unknown-key-20.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-04-reserved-key-15-epo",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Reserved key 15 (removed epo).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-04-reserved-key-15-epo.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-05-reserved-key-16-rqh",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Reserved key 16 (removed rqh).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-05-reserved-key-16-rqh.hex",
+      "grant_len": 362,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-06-text-key",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Extra text key \"exp\".",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-06-text-key.hex",
+      "grant_len": 336,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-10-missing-ver",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 0 (ver) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-10-missing-ver.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-11-missing-iss",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 1 (iss) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-11-missing-iss.hex",
+      "grant_len": 302,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-12-missing-aud",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 2 (aud) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-12-missing-aud.hex",
+      "grant_len": 297,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-13-missing-jti",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 3 (jti) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-13-missing-jti.hex",
+      "grant_len": 309,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-14-missing-iat",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 4 (iat) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-14-missing-iat.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-15-missing-nbf",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 5 (nbf) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-15-missing-nbf.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-16-missing-exp",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 6 (exp) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-16-missing-exp.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-17-missing-wid",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 7 (wid) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-17-missing-wid.hex",
+      "grant_len": 288,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-18-missing-ten",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 8 (ten) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-18-missing-ten.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-19-missing-sub",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 9 (sub) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-19-missing-sub.hex",
+      "grant_len": 316,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-20-missing-op",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 10 (op) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-20-missing-op.hex",
+      "grant_len": 310,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-21-missing-opv",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 11 (opv) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-21-missing-opv.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-22-missing-res",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 12 (res) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-22-missing-res.hex",
+      "grant_len": 318,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-23-missing-con",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 13 (con) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-23-missing-con.hex",
+      "grant_len": 312,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-24-missing-use",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 14 (use) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-24-missing-use.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-25-missing-knd",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 17 (knd) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-25-missing-knd.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-26-missing-cfm",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant: required key 18 (cfm) absent.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-26-missing-cfm.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-30-exp-text",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "exp as tstr.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-30-exp-text.hex",
+      "grant_len": 333,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-31-iat-bytes",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "iat as bstr.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-31-iat-bytes.hex",
+      "grant_len": 331,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-32-jti-15-bytes",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "jti of 15 bytes.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-32-jti-15-bytes.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-33-jti-17-bytes",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "jti of 17 bytes.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-33-jti-17-bytes.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-34-jti-text",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "jti as tstr.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-34-jti-text.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-35-ver-2",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ver = 2.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-35-ver-2.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_version_unsupported"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-36-ver-0",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ver = 0.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-36-ver-0.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_version_unsupported"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-37-ver-text",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ver as tstr \"1\".",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-37-ver-text.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-38-use-0",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "use = 0.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-38-use-0.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-39-use-2",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "use = 2 (multi-use not supported in v1).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-39-use-2.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-40-op-uppercase",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "op with an uppercase letter.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-40-op-uppercase.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-41-op-empty",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "op empty.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-41-op-empty.hex",
+      "grant_len": 312,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-42-ten-nul",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ten contains NUL.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-42-ten-nul.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-43-ten-non-ascii",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ten contains U+00E9 (valid UTF-8, outside the ID alphabet).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-43-ten-non-ascii.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-44-ten-empty",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "ten empty.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-44-ten-empty.hex",
+      "grant_len": 323,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-45-iss-space",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "iss contains a space.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-45-iss-space.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-46-sub-257",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "sub of 257 bytes (max 256).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-46-sub-257.hex",
+      "grant_len": 578,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-47-exp-2pow53",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "exp = 2^53 (max 2^53 - 1).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-47-exp-2pow53.hex",
+      "grant_len": 331,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-48-opv-0",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "opv = 0.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-48-opv-0.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-49-con-value-not-array",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "con entry 0 is a bare tstr.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-49-con-value-not-array.hex",
+      "grant_len": 319,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-50-con-array-3",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "con entry 0 is a 3-element array.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-50-con-array-3.hex",
+      "grant_len": 322,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-51-con-class-2",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "con entry with class 2 (undefined).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-51-con-class-2.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-52-con-bounded-text",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Bounded (class 1) entry with a tstr ceiling.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-52-con-bounded-text.hex",
+      "grant_len": 323,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-53-res-value-bytes",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "res value as bstr.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-53-res-value-bytes.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-54-res-key-16",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "res key 16 (max 15).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-54-res-key-16.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-55-con-key-text",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "con with a text key.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-55-con-key-text.hex",
+      "grant_len": 323,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-56-res-value-control-char",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "res value contains LF.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-56-res-value-control-char.hex",
+      "grant_len": 328,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-57-res-not-map",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "res as an array.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-57-res-not-map.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-60-knd-3",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "knd = 3 (undefined).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-60-knd-3.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-61-cfm-2",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "cfm = 2.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-61-cfm-2.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-62-read-with-con",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant carrying con (13).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-62-read-with-con.hex",
+      "grant_len": 304,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-63-read-with-cfm",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant carrying cfm (18).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-63-read-with-cfm.hex",
+      "grant_len": 304,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-64-read-with-op",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant carrying op (10).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-64-read-with-op.hex",
+      "grant_len": 322,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-65-read-missing-rop",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant without rop (19).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-65-read-missing-rop.hex",
+      "grant_len": 280,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-66-read-missing-jti",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant without jti (3).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-66-read-missing-jti.hex",
+      "grant_len": 284,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-67-read-rop-empty",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Read grant with an empty rop map.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-67-read-rop-empty.hex",
+      "grant_len": 282,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-68-read-rop-uint-key",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "rop keyed by integer.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-68-read-rop-uint-key.hex",
+      "grant_len": 284,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-69-read-rop-opv-0",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "rop entry with opv 0.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-69-read-rop-opv-0.hex",
+      "grant_len": 302,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-70-write-with-rop",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write grant carrying rop (19).",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-70-write-with-rop.hex",
+      "grant_len": 349,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "PSCH-71-write-knd-read-fields",
+      "kind": "grant",
+      "category": "payload-schema",
+      "description": "Write fields with knd = 2.",
+      "registry": "registry.json",
+      "grant": "grants/PSCH-71-write-knd-read-fields.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "ISS-01-issuer-of-other-key",
+      "kind": "grant",
+      "category": "issuer",
+      "description": "iss names the scheduler, but key A is registered for the authority.",
+      "registry": "registry.json",
+      "grant": "grants/ISS-01-issuer-of-other-key.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_issuer_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "ISS-02-issuer-unknown",
+      "kind": "grant",
+      "category": "issuer",
+      "description": "iss names an unregistered issuer.",
+      "registry": "registry.json",
+      "grant": "grants/ISS-02-issuer-unknown.hex",
+      "grant_len": 318,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_issuer_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "TIME-01-expired",
+      "kind": "grant",
+      "category": "time",
+      "description": "now = exp + skew + 100.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-01-expired.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886535,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_expired"
+        }
+      ]
+    },
+    {
+      "id": "TIME-02-expired-boundary",
+      "kind": "grant",
+      "category": "time",
+      "description": "now = exp + skew: first rejected second.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-02-expired-boundary.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886435,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_expired"
+        }
+      ]
+    },
+    {
+      "id": "TIME-03-expiry-boundary-accept",
+      "kind": "grant",
+      "category": "time",
+      "description": "now = exp + skew - 1: last accepted second.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-03-expiry-boundary-accept.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886434,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "TIME-04-not-yet-valid",
+      "kind": "grant",
+      "category": "time",
+      "description": "now = nbf - 100.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-04-not-yet-valid.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886300,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_not_yet_valid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-05-not-yet-valid-boundary",
+      "kind": "grant",
+      "category": "time",
+      "description": "now = nbf - skew - 1: last rejected second.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-05-not-yet-valid-boundary.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886394,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_not_yet_valid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-06-nbf-boundary-accept",
+      "kind": "grant",
+      "category": "time",
+      "description": "now = nbf - skew: first accepted second.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-06-nbf-boundary-accept.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886395,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "TIME-07-ttl-31",
+      "kind": "grant",
+      "category": "time",
+      "description": "exp - nbf = 31 > max_ttl (30).",
+      "registry": "registry.json",
+      "grant": "grants/TIME-07-ttl-31.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_ttl_exceeded"
+        }
+      ]
+    },
+    {
+      "id": "TIME-08-nbf-before-iat",
+      "kind": "grant",
+      "category": "time",
+      "description": "nbf = iat - 1.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-08-nbf-before-iat.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_time_invalid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-09-exp-equals-nbf",
+      "kind": "grant",
+      "category": "time",
+      "description": "exp = nbf (empty window).",
+      "registry": "registry.json",
+      "grant": "grants/TIME-09-exp-equals-nbf.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_time_invalid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-10-exp-before-nbf",
+      "kind": "grant",
+      "category": "time",
+      "description": "exp = nbf - 1.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-10-exp-before-nbf.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_time_invalid"
+        }
+      ]
+    },
+    {
+      "id": "TIME-12-read-grant-expired",
+      "kind": "grant",
+      "category": "time",
+      "description": "Read grants expire like write grants: now = exp + skew.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-12-read-grant-expired.hex",
+      "grant_len": 302,
+      "steps": [
+        {
+          "now": 1792886435,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_expired"
+        }
+      ]
+    },
+    {
+      "id": "TIME-11-long-ttl-far-future",
+      "kind": "grant",
+      "category": "time",
+      "description": "exp = 2^53 - 1 (would overflow naive arithmetic only if unchecked); TTL exceeded.",
+      "registry": "registry.json",
+      "grant": "grants/TIME-11-long-ttl-far-future.hex",
+      "grant_len": 331,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_ttl_exceeded"
+        }
+      ]
+    },
+    {
+      "id": "BIND-01-audience-field",
+      "kind": "grant",
+      "category": "binding",
+      "description": "aud field names another broker; external_aad is this broker's (so the signature verifies).",
+      "registry": "registry.json",
+      "grant": "grants/BIND-01-audience-field.hex",
+      "grant_len": 326,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_audience_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "BIND-02-workload-other-peer",
+      "kind": "grant",
+      "category": "binding",
+      "description": "Grant for app1 presented over app2's socket.",
+      "registry": "registry.json",
+      "grant": "grants/BIND-02-workload-other-peer.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app2",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_workload_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "BIND-03-workload-other-grant",
+      "kind": "grant",
+      "category": "binding",
+      "description": "Grant for app2 presented over app1's socket.",
+      "registry": "registry.json",
+      "grant": "grants/BIND-03-workload-other-grant.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_workload_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "BIND-04-tenant-not-registered",
+      "kind": "grant",
+      "category": "binding",
+      "description": "Grant for tenant globex presented by app1 (registered for acme only).",
+      "registry": "registry.json",
+      "grant": "grants/BIND-04-tenant-not-registered.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_tenant_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "BIND-05-tenant-unknown",
+      "kind": "grant",
+      "category": "binding",
+      "description": "Grant for tenant initech presented by app2 (acme, globex).",
+      "registry": "registry.json",
+      "grant": "grants/BIND-05-tenant-unknown.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app2",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_tenant_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "BIND-06-tenant-case",
+      "kind": "grant",
+      "category": "binding",
+      "description": "Tenant \"Acme\": comparisons are byte-exact, no case folding.",
+      "registry": "registry.json",
+      "grant": "grants/BIND-06-tenant-case.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_tenant_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-01-read-grant-for-write-op",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Read grant for ledger.get_balance presented for ledger.transfer: a read grant never authorizes a write.",
+      "registry": "registry.json",
+      "grant": "grants/OP-01-read-grant-for-write-op.hex",
+      "grant_len": 302,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_kind_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-07-read-grant-lists-write-op",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Read grant whose operation set includes ledger.transfer (a write op), presented for ledger.transfer.",
+      "registry": "registry.json",
+      "grant": "grants/OP-07-read-grant-lists-write-op.hex",
+      "grant_len": 319,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_kind_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-08-read-grant-lists-write-op-read-request",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Same malformed read grant presented for the read op ledger.get_balance: the whole grant is rejected.",
+      "registry": "registry.json",
+      "grant": "grants/OP-08-read-grant-lists-write-op-read-request.hex",
+      "grant_len": 319,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_kind_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-09-write-grant-for-read-op",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Write grant (knd = 1) naming the read op ledger.get_balance.",
+      "registry": "registry.json",
+      "grant": "grants/OP-09-write-grant-for-read-op.hex",
+      "grant_len": 317,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_kind_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-10-read-op-not-in-set",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Read grant for ledger.list_transfers presented for ledger.get_balance.",
+      "registry": "registry.json",
+      "grant": "grants/OP-10-read-op-not-in-set.hex",
+      "grant_len": 305,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_op_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-11-read-undeclared-op-in-set",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Read grant whose set includes the undeclared op ledger.audit.",
+      "registry": "registry.json",
+      "grant": "grants/OP-11-read-undeclared-op-in-set.hex",
+      "grant_len": 316,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_op_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-12-read-opv-unsupported",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Read grant naming ledger.get_balance version 2.",
+      "registry": "registry.json",
+      "grant": "grants/OP-12-read-opv-unsupported.hex",
+      "grant_len": 302,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_opv_unsupported"
+        }
+      ]
+    },
+    {
+      "id": "OP-13-confirmation-required",
+      "kind": "grant",
+      "category": "operation",
+      "description": "ledger.transfer requires auth-origin confirmation; otherwise valid grant has cfm = 0.",
+      "registry": "registry.json",
+      "grant": "grants/OP-13-confirmation-required.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_confirmation_required"
+        }
+      ]
+    },
+    {
+      "id": "OP-02-grant-transfer-request-balance",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Grant for ledger.transfer, request ledger.get_balance.",
+      "registry": "registry.json",
+      "grant": "grants/OP-02-grant-transfer-request-balance.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_op_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-03-undeclared-op",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Grant for undeclared op ledger.delete, request ledger.transfer.",
+      "registry": "registry.json",
+      "grant": "grants/OP-03-undeclared-op.hex",
+      "grant_len": 325,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "OP-04-opv-unsupported",
+      "kind": "grant",
+      "category": "operation",
+      "description": "opv = 2; the broker supports only version 1 of ledger.transfer.",
+      "registry": "registry.json",
+      "grant": "grants/OP-04-opv-unsupported.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_opv_unsupported"
+        }
+      ]
+    },
+    {
+      "id": "OP-05-scheduler-signs-user-op",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Scheduler key E signs a ledger.transfer (user_grant) grant.",
+      "registry": "registry.json",
+      "grant": "grants/OP-05-scheduler-signs-user-op.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_issuer_not_permitted"
+        }
+      ]
+    },
+    {
+      "id": "OP-06-authority-signs-scheduler-op",
+      "kind": "grant",
+      "category": "operation",
+      "description": "Authority key A signs an orders.capture (scheduler_grant) grant.",
+      "registry": "registry.json",
+      "grant": "grants/OP-06-authority-signs-scheduler-op.hex",
+      "grant_len": 316,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "orders.capture",
+            "args": {
+              "order_id": 9821,
+              "amount_cents": 4200
+            }
+          },
+          "expected": "grant_issuer_not_permitted"
+        }
+      ]
+    },
+    {
+      "id": "CON-01-amount-exceeds-bound",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "test.hold: amount_cents = ceiling + 1.",
+      "registry": "registry.json",
+      "grant": "grants/CON-01-amount-exceeds-bound.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 50001,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_bound_exceeded"
+        }
+      ]
+    },
+    {
+      "id": "CON-02-exact-to-mismatch",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: request destination to = mallory; grant binds bob exactly.",
+      "registry": "registry.json",
+      "grant": "grants/CON-02-exact-to-mismatch.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "mallory",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_constraint_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-03-exact-currency-mismatch",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "test.hold: request currency USD; grant binds EUR exactly.",
+      "registry": "registry.json",
+      "grant": "grants/CON-03-exact-currency-mismatch.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "USD",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_constraint_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-04-resource-mismatch",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: request from = carol; grant res binds alice.",
+      "registry": "registry.json",
+      "grant": "grants/CON-04-resource-mismatch.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "carol",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_resource_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-06-exact-amount-higher",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: amount is exact (Phase 3 profile); request 12501 vs bound 12500.",
+      "registry": "registry.json",
+      "grant": "grants/CON-06-exact-amount-higher.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12501
+            }
+          },
+          "expected": "grant_constraint_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-07-exact-amount-lower",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: exact means equal, not at most; request 12499.",
+      "registry": "registry.json",
+      "grant": "grants/CON-07-exact-amount-lower.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12499
+            }
+          },
+          "expected": "grant_constraint_mismatch"
+        }
+      ]
+    },
+    {
+      "id": "CON-05-capture-exceeds-bound",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "orders.capture amount above the scheduler grant's ceiling.",
+      "registry": "registry.json",
+      "grant": "grants/CON-05-capture-exceeds-bound.hex",
+      "grant_len": 316,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "orders.capture",
+            "args": {
+              "order_id": 9821,
+              "amount_cents": 4201
+            }
+          },
+          "expected": "grant_bound_exceeded"
+        }
+      ]
+    },
+    {
+      "id": "CON-10-missing-exact-param",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: con lacks the exact parameter amount_cents (key 1).",
+      "registry": "registry.json",
+      "grant": "grants/CON-10-missing-exact-param.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-11-bounded-encoded-exact",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "test.hold: amount (declared bounded) encoded with class 0 (exact).",
+      "registry": "registry.json",
+      "grant": "grants/CON-11-bounded-encoded-exact.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-12-exact-encoded-bounded",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: amount (declared exact) encoded as a bounded ceiling; must not be read as a broader grant.",
+      "registry": "registry.json",
+      "grant": "grants/CON-12-exact-encoded-bounded.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-13-free-param-in-con",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "test.hold: con carries key 2 for the free parameter memo, which has no con key.",
+      "registry": "registry.json",
+      "grant": "grants/CON-13-free-param-in-con.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-14-unknown-con-key",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: con carries undeclared key 7.",
+      "registry": "registry.json",
+      "grant": "grants/CON-14-unknown-con-key.hex",
+      "grant_len": 331,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-15-unknown-res-key",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: res carries undeclared key 1.",
+      "registry": "registry.json",
+      "grant": "grants/CON-15-unknown-res-key.hex",
+      "grant_len": 332,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-16-res-empty",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: res is empty; the declaration has res key 0.",
+      "registry": "registry.json",
+      "grant": "grants/CON-16-res-empty.hex",
+      "grant_len": 320,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-17-res-wrong-type",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: res key 0 as uint; declared account_id.",
+      "registry": "registry.json",
+      "grant": "grants/CON-17-res-wrong-type.hex",
+      "grant_len": 322,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-18-currency-lowercase",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "test.hold: currency \"eur\" violates the declared currency type.",
+      "registry": "registry.json",
+      "grant": "grants/CON-18-currency-lowercase.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "CON-19-to-wrong-type",
+      "kind": "grant",
+      "category": "constraint",
+      "description": "ledger.transfer: destination to as uint; declared account_id.",
+      "registry": "registry.json",
+      "grant": "grants/CON-19-to-wrong-type.hex",
+      "grant_len": 324,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_op_schema_invalid"
+        }
+      ]
+    },
+    {
+      "id": "RPL-01-identical-resubmission",
+      "kind": "grant",
+      "category": "replay",
+      "description": "Same grant and same request twice: the second returns the stored outcome without a second effect (ADR-0006 section 5).",
+      "registry": "registry.json",
+      "grant": "grants/RPL-01-identical-resubmission.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886412,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "STORED_OUTCOME:ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "RPL-02-replay-different-request",
+      "kind": "grant",
+      "category": "replay",
+      "description": "test.hold grant used twice; the second request differs (amount still within the bound) and is rejected as a replay.",
+      "registry": "registry.json",
+      "grant": "grants/RPL-02-replay-different-request.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886412,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 40000,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_replayed"
+        }
+      ]
+    },
+    {
+      "id": "RPL-03-denied-grant-is-consumed",
+      "kind": "grant",
+      "category": "replay",
+      "description": "A verified grant denied at the constraint step is consumed: a later in-bound request with it is a replay.",
+      "registry": "registry.json",
+      "grant": "grants/RPL-03-denied-grant-is-consumed.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 60000,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_bound_exceeded"
+        },
+        {
+          "now": 1792886411,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_replayed"
+        },
+        {
+          "now": 1792886412,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 60000,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_bound_exceeded"
+        }
+      ]
+    },
+    {
+      "id": "RPL-07-memo-change-is-replay",
+      "kind": "grant",
+      "category": "replay",
+      "description": "test.hold: a resubmission differing only in the free parameter has a different request hash: replay.",
+      "registry": "registry.json",
+      "grant": "grants/RPL-07-memo-change-is-replay.hex",
+      "grant_len": 321,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886412,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "other"
+            }
+          },
+          "expected": "grant_replayed"
+        }
+      ]
+    },
+    {
+      "id": "RPL-04-unverified-grant-not-consumed",
+      "kind": "grant",
+      "category": "replay",
+      "description": "Presented first over another workload's socket (not verified, nothing consumed), then by its own workload.",
+      "registry": "registry.json",
+      "grant": "grants/RPL-04-unverified-grant-not-consumed.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app2",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_workload_mismatch"
+        },
+        {
+          "now": 1792886411,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "RPL-05-revoked-then-retried",
+      "kind": "grant",
+      "category": "replay",
+      "description": "Denied by revocation (consumed as DENIED); the identical retry returns the stored denial.",
+      "registry": "registry.json",
+      "grant": "grants/RPL-05-revoked-then-retried.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "before": 1792886401
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_revoked"
+        },
+        {
+          "now": 1792886411,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "before": 1792886401
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "STORED_OUTCOME:DENIED"
+        }
+      ]
+    },
+    {
+      "id": "RPL-06-revocation-after-consumption",
+      "kind": "grant",
+      "category": "replay",
+      "description": "Accepted, then the tenant is revoked: an identical retry returns the stored ACCEPT; no second effect.",
+      "registry": "registry.json",
+      "grant": "grants/RPL-06-revocation-after-consumption.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        },
+        {
+          "now": 1792886412,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "before": 1792886411
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "STORED_OUTCOME:ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "REV-01-tenant",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "revoked_before for (acme) = iat + 1.",
+      "registry": "registry.json",
+      "grant": "grants/REV-01-tenant.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "before": 1792886401
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_revoked"
+        }
+      ]
+    },
+    {
+      "id": "REV-02-tenant-workload",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "revoked_before for (acme, app1) = iat + 1.",
+      "registry": "registry.json",
+      "grant": "grants/REV-02-tenant-workload.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "wid": "spiffe://nodkey.test/workload/app1",
+              "before": 1792886401
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_revoked"
+        }
+      ]
+    },
+    {
+      "id": "REV-03-tenant-subject",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "revoked_before for (acme, user:u-17) = iat + 1.",
+      "registry": "registry.json",
+      "grant": "grants/REV-03-tenant-subject.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "sub": "user:u-17",
+              "before": 1792886401
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_revoked"
+        }
+      ]
+    },
+    {
+      "id": "REV-04-boundary-equal",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "revoked_before = iat: not revoked (strict less-than).",
+      "registry": "registry.json",
+      "grant": "grants/REV-04-boundary-equal.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "before": 1792886400
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "REV-05-other-tenant",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "Revocation for tenant globex does not affect acme.",
+      "registry": "registry.json",
+      "grant": "grants/REV-05-other-tenant.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "globex",
+              "before": 1792886500
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "REV-06-other-subject",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "Revocation for (acme, user:u-18) does not affect user:u-17.",
+      "registry": "registry.json",
+      "grant": "grants/REV-06-other-subject.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "sub": "user:u-18",
+              "before": 1792886500
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "REV-08-read-grant",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "Read grant revoked for (acme, user:u-17): denied every time (read grants record nothing).",
+      "registry": "registry.json",
+      "grant": "grants/REV-08-read-grant.hex",
+      "grant_len": 302,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "sub": "user:u-17",
+              "before": 1792886401
+            }
+          ],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_revoked"
+        },
+        {
+          "now": 1792886411,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "sub": "user:u-17",
+              "before": 1792886401
+            }
+          ],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_revoked"
+        }
+      ]
+    },
+    {
+      "id": "REV-07-other-workload",
+      "kind": "grant",
+      "category": "revocation",
+      "description": "Revocation for (acme, app2) does not affect app1.",
+      "registry": "registry.json",
+      "grant": "grants/REV-07-other-workload.hex",
+      "grant_len": 327,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [
+            {
+              "ten": "acme",
+              "wid": "spiffe://nodkey.test/workload/app2",
+              "before": 1792886500
+            }
+          ],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "REG-01-valid",
+      "kind": "registry",
+      "category": "registry",
+      "description": "The registry used by every grant vector (keys A, C, D, E).",
+      "registry": "registry.json",
+      "expected": "LOAD_OK"
+    },
+    {
+      "id": "REG-02-small-order-identity",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Public key is the identity point (order 1).",
+      "registry": "registries/REG-02-small-order-identity.json",
+      "expected": "registry_key_weak"
+    },
+    {
+      "id": "REG-03-small-order-8",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Public key is a point of order 8.",
+      "registry": "registries/REG-03-small-order-8.json",
+      "expected": "registry_key_weak"
+    },
+    {
+      "id": "REG-04-non-canonical-encoding",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Public key encodes y >= p (non-canonical encoding of a valid, not small-order point).",
+      "registry": "registries/REG-04-non-canonical-encoding.json",
+      "expected": "registry_key_invalid"
+    },
+    {
+      "id": "REG-05-not-a-point",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Public key bytes do not decode to a curve point.",
+      "registry": "registries/REG-05-not-a-point.json",
+      "expected": "registry_key_invalid"
+    },
+    {
+      "id": "REG-06-key-31-bytes",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Public key of 31 bytes.",
+      "registry": "registries/REG-06-key-31-bytes.json",
+      "expected": "registry_key_invalid"
+    },
+    {
+      "id": "REG-07-key-uppercase-hex",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Public key in uppercase hex (lowercase required).",
+      "registry": "registries/REG-07-key-uppercase-hex.json",
+      "expected": "registry_key_invalid"
+    },
+    {
+      "id": "REG-08-kid-not-derived",
+      "kind": "registry",
+      "category": "registry",
+      "description": "kid does not equal the derivation from the public key.",
+      "registry": "registries/REG-08-kid-not-derived.json",
+      "expected": "registry_kid_mismatch"
+    },
+    {
+      "id": "REG-09-duplicate-entry",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Key A listed twice.",
+      "registry": "registries/REG-09-duplicate-entry.json",
+      "expected": "registry_duplicate_key"
+    },
+    {
+      "id": "REG-10-alg-eddsa",
+      "kind": "registry",
+      "category": "registry",
+      "description": "alg \"EdDSA\" instead of \"Ed25519\".",
+      "registry": "registries/REG-10-alg-eddsa.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-11-purpose-receipt",
+      "kind": "registry",
+      "category": "registry",
+      "description": "purpose \"receipt\".",
+      "registry": "registries/REG-11-purpose-receipt.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-12-status-verify-only",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Undefined status \"verify_only\".",
+      "registry": "registries/REG-12-status-verify-only.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-13-empty-window",
+      "kind": "registry",
+      "category": "registry",
+      "description": "not_before = not_after.",
+      "registry": "registries/REG-13-empty-window.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-14-unknown-field",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Entry with an extra field \"comment\".",
+      "registry": "registries/REG-14-unknown-field.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-15-missing-field",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Entry without iss.",
+      "registry": "registries/REG-15-missing-field.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-16-no-keys",
+      "kind": "registry",
+      "category": "registry",
+      "description": "Empty keys array.",
+      "registry": "registries/REG-16-no-keys.json",
+      "expected": "registry_entry_invalid"
+    },
+    {
+      "id": "REG-17-role-unknown",
+      "kind": "registry",
+      "category": "registry",
+      "description": "role \"admin\".",
+      "registry": "registries/REG-17-role-unknown.json",
+      "expected": "registry_entry_invalid"
+    }
+  ]
+}

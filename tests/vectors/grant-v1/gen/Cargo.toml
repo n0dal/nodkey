@@ -1,0 +1,13 @@
+[package]
+name = "nodkey-grant-v1-vectors"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Generator and reference checker for the Nodkey-Grant v1 test vectors (TEST-ONLY keys)"
+publish = false
+
+[dependencies]
+ed25519-dalek = "3.0.0"
+curve25519-dalek = "5.0.0"
+sha2 = "0.11"
+serde_json = { version = "1", features = ["preserve_order"] }
