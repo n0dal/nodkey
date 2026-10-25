@@ -1,0 +1,98 @@
+# BASELINE profile = a conventional deployment, used as the POSITIVE CONTROL for the probes.
+# The app holds its own DB credentials (env) and sits on the DB network, as most PHP apps do.
+# Attacks are EXPECTED TO SUCCEED here. INTENTIONALLY VULNERABLE; bound to 127.0.0.1 only.
+name: nodkey-baseline
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options: { max-size: "1m", max-file: "3" }
+
+services:
+  app:
+    <<: *logging
+    image: nodkey/php-ledger-app:dev
+    build: { context: ., dockerfile: docker/php/Dockerfile }
+    user: "10001:10001"          # same uid as protected, so the broker config is identical
+    networks:
+      data: { ipv4_address: 172.30.20.30 }
+    env_file: ../../var/containment/secrets/baseline/app.env   # DATABASE_DSN/USER/PASSWORD
+    volumes:
+      - fcgi:/run/fcgi
+      - nodkey-app1:/run/nodkey:ro
+    depends_on:
+      broker: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/fcgi/php.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  web:
+    <<: *logging
+    image: nginxinc/nginx-unprivileged:1.28-alpine@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
+    networks: [edge]
+    ports: ["127.0.0.1:8081:8080"]
+    volumes:
+      - fcgi:/run/fcgi
+      - ./docker/nginx/nginx.baseline.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      app: { condition: service_healthy }
+
+  broker:
+    <<: *logging
+    image: nodkey/broker:dev
+    build: { context: ../../broker }
+    user: "10002:10002"
+    networks:
+      data: { ipv4_address: 172.30.20.10 }
+    volumes:
+      - nodkey-app1:/run/nodkey/app1
+      - nodkey-app2:/run/nodkey/app2
+      - ./docker/broker/broker.json:/etc/nodkey/broker.json:ro
+    secrets: [db_broker_password]
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nodkey-broker", "--healthcheck", "/etc/nodkey/broker.json"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  db:
+    <<: *logging
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    networks:
+      data: { ipv4_address: 172.30.20.20 }
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf", "-c", "password_encryption=scram-sha-256"]
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
+    secrets: [db_broker_password, db_superuser_password, db_app_password]
+    volumes:
+      - ./docker/postgres/pg_hba.baseline.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "ledger"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+networks:
+  edge: {}
+  data:
+    ipam: { config: [{ subnet: 172.30.20.0/24 }] }
+
+volumes:
+  fcgi:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,uid=10001,gid=10001,mode=0755" }
+  nodkey-app1:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,uid=10002,gid=10002,mode=0755" }
+  nodkey-app2:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,uid=10002,gid=10002,mode=0755" }
+  dbdata: {}
+
+secrets:
+  db_broker_password: { file: ../../var/containment/secrets/baseline/db_broker_password }
+  db_superuser_password: { file: ../../var/containment/secrets/baseline/db_superuser_password }
+  db_app_password: { file: ../../var/containment/secrets/baseline/db_app_password }

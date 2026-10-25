@@ -1,0 +1,26 @@
+{
+  "max_request_bytes": 16384,
+  "db": {
+    "host": "db",
+    "port": 5432,
+    "dbname": "ledger",
+    "user": "nodkey_broker",
+    "password_file": "/run/secrets/db_broker_password"
+  },
+  "workloads": [
+    {
+      "name": "app1",
+      "socket_path": "/run/nodkey/app1/broker.sock",
+      "uid": 10001,
+      "allowed_ops": ["ledger.get_balance", "ledger.transfer"],
+      "max_transfer_cents": 50000
+    },
+    {
+      "name": "app2",
+      "socket_path": "/run/nodkey/app2/broker.sock",
+      "uid": 10003,
+      "allowed_ops": ["ledger.get_balance"],
+      "max_transfer_cents": 0
+    }
+  ]
+}
