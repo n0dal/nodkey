@@ -1,17 +1,27 @@
 # Spec issues found while implementing `nodkey-grant`
 
-Found while writing this crate as an independent second implementation of
-[`docs/specs/grant-v1.md`](../../docs/specs/grant-v1.md) (Draft 1). The vector generator was not
-read; each item below was settled by the reading stated, and each needs a decision in the spec or
-the vectors. All 235 grant vectors (246 steps) and 17 registry vectors pass with these readings.
+These were found while building this crate as an independent second implementation of
+[`docs/specs/grant-v1.md`](../../docs/specs/grant-v1.md). The vector generator was not read. The
+crate now implements **Draft 2**.
+
+## Draft 1 issues: all resolved in Draft 2
+
+| Id | Issue | Resolution in Draft 2 | Implemented |
+|---|---|---|---|
+| SI-1 | Parameter types were undefined. | §6.2: closed type set with grammars (manifest `types`). | `ParamType` (closed enum) |
+| SI-2 | The `op`/`opv` inputs to `request_hash` were unclear. | §5.4 (normative): hash the requested `op`, with no `opv`. | `Request::request_hash` |
+| SI-3 | It was unclear whether an empty transport string counts as missing. | §2: absent means `grant_missing`; `""` decodes to zero bytes and then fails as `grant_malformed`. | `decode_transport` |
+| SI-4 | Error codes for a malformed `kid` format and for document-level registry errors were unstated. | §8.3: both are `registry_entry_invalid`. | `Registry::load` |
+| SI-5 | Mixed-order keys had no vector. | §8.3: keys must have order exactly L (vector REG-18). | `is_small_order() \|\| !is_torsion_free()` |
+| SI-6 | The README described the `jti` derivation incorrectly. | The README now describes it correctly. | ACC-01 test takes `jti` from the grant |
+| SI-7 | The W12 error codes for a missing or wrong-type request value were unstated. | §7.3, W12b/W12c (vectors CON-20..23). | `WriteGrant::decide` |
+| SI-8 | "Destination-like" parameters could not be checked. | §6.1: a `destination` flag, which requires the parameter to be exact. | `Operations::new` |
+
+## Open items against Draft 2
 
 | Id | Severity | Where | Issue | Reading used here | Proposed fix |
 |---|---|---|---|---|---|
-| SI-1 | Medium | §6, step 11a; manifest `operations[].params[].type`; vectors CON-17, CON-18, CON-19 | Parameter **types** (`account_id`, `currency`, `text64`, `uint`) are used by step 11a ("each value has the declared type") and by vectors, but the spec and the manifest never define them. Two conforming implementations can disagree, for example on whether `"eur"` or a 33-character account id is valid. | The crate takes a `ParamType` (uint, or text with length bounds and an allowed-byte set) from the broker. The test harness defines `account_id` = `[a-z0-9_]{1,32}` (the broker's existing `AccountId` rule), `currency` = `[A-Z]{3}`, `text64` = 0–64 bytes of 0x20–0x7E. | Define each type in §6 and add a `types` section to `manifest.json`. Add boundary vectors (account id of 32 and 33 bytes). |
-| SI-2 | Low | §5.4, §7.3 | `request_hash` covers `[op, opv, params]`, but the request (§7.1) carries no `opv`, and for a verified write grant denied at step 10a the requested `op` differs from the grant's. §7.3 records a hash for such denials, so which `op` and `opv` to hash is not specified. | Requested `op` and the grant's `opv`. | State "requested op, grant opv" (or drop `opv` from the hash). |
-| SI-3 | Low | §2, step 0 | It is not specified whether an empty transport string is "no grant supplied" (`grant_missing`) or a supplied grant of zero bytes (`grant_malformed`, as in vector ENV-03 at the byte level). | Absent means `grant_missing`; `""` decodes to zero bytes, then fails as `grant_malformed`. | Say which applies to `""` and to an empty header value. |
-| SI-4 | Low | §8.3 | A `kid` that is not 32 lowercase hex characters breaks a §8.2 member rule, but §8.3 excludes `kid` values from `registry_entry_invalid` and only states `registry_kid_mismatch`. Malformed JSON, a wrong `format`, and an empty `keys` array have no stated code (REG-16 expects `registry_entry_invalid`). | A badly formatted `kid` gives `registry_kid_mismatch` (it cannot equal the lowercase derivation). Document-level failures give `registry_entry_invalid`. | List the document-level failures and the `kid` format failure explicitly in the §8.3 table. |
-| SI-5 | Low | §8.3, §12 | §8.3 requires rejecting keys "with a small-order component" (mixed-order points). That is stricter than `verify_strict`, which only rejects small-order keys. No vector covers a mixed-order key: REG-02 and REG-03 are pure small-order points. | Rejected at load with `registry_key_weak` (`!is_torsion_free()`); a unit test covers A + T₂. | Add a registry vector with a mixed-order key. |
-| SI-6 | Low (docs) | `tests/vectors/grant-v1/README.md` | The README says `jti = SHA-256("nodkey.test.jti" ‖ 0x00 ‖ vector-id)[0..16]`. The committed grants use the **short** id (`"ACC-01"`), not the manifest `id` (`"ACC-01-valid-transfer"`). Found while reproducing ACC-01 byte for byte. | Short id. | Correct the README wording. |
-| SI-7 | Low | §5.3, step 11c | For a `bounded` parameter, §5.3 says the request must be "a uint and ≤ value", but step 11c gives no code for a non-uint or missing request value. For a missing `exact` or `res` parameter the code is also unstated. §7.1 says the request parser rejects these cases first, so a conforming broker should never reach them. | Bounded, not a uint or missing: `grant_bound_exceeded`. Exact, missing: `grant_constraint_mismatch`. Res, missing: `grant_resource_mismatch`. | State the codes, or state that these cases are unreachable. |
-| SI-8 | Low | §6 | "The broker MUST refuse to start if … a destination-like parameter is `free`", but no declaration attribute marks a parameter as destination-like, so the rule cannot be checked mechanically. | Not enforced. `Binding::Free` documents that this is the declaring operator's judgement. | Add an explicit `destination: true` attribute that forbids `free`. |
+| D2-1 | Low (vectors) | CON-24, vectors README | The README says only CON-20..23 carry ill-formed requests. CON-24's request also violates the declaration: `p0` is 257 bytes (`text256` allows at most 256) and `p1`..`p7` are missing. The expected result (`grant_payload_invalid` at step 7) is unaffected, but a broker that parses requests strictly rejects CON-24 before verification. | The harness runs CON-24 through the test-only unvalidated request path, as it does CON-20..23, and asserts that exactly these five vectors take that path. | Give CON-24 a valid request (for example `p0` of 256 bytes and `p1`..`p7`), or list it in the README. |
+| D2-2 | Low | §2, TRN-11 | §2 limits the text to 2731 "characters", but the manifest's `text_len` counts UTF-8 bytes (TRN-11 has a non-ASCII character). The verdict is the same either way, because non-ASCII text is invalid. | The limit is checked in bytes. | Say "bytes" (or "ASCII characters") in §2. |
+| D2-3 | Low | §6.3 | The crate also refuses a write operation that binds no `res` or `con` parameter, because a grant for it would bind only the operation name (review GC-05). §6.3 does not list this refusal; OPS-01 is unaffected. | Refused (`ops_declaration_invalid`). | Ratify the rule in §6.3 (and add an OPS vector), or drop it from the crate. |
+| D2-4 | Low | §7.3, W14 | The spec does not say whether the time checks (4d, 8d, 8e) must still hold at commit. A transaction that waits on locks can commit after `exp + skew` (review GC-03). | Not enforced by the crate. Listed as a caller obligation in the README. | State the rule: re-check `now < exp + skew` at commit, or bound transaction time. |

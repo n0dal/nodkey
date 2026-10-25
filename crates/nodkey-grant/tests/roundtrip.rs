@@ -1,5 +1,6 @@
-//! Issuer round trips: GrantBuilder -> sign -> verify, byte-exact reproduction of a committed
-//! vector, and randomized property checks (deterministic PRNG, no proptest dependency).
+//! Issuer round trips (GrantBuilder -> sign -> verify), byte-exact reproduction of a committed
+//! vector, API-binding tests for review findings GC-01/GC-02, and randomized property checks
+//! (deterministic PRNG, no proptest dependency).
 
 mod common;
 
@@ -7,22 +8,24 @@ use std::collections::HashMap;
 
 use common::*;
 use nodkey_grant::{
-    GrantBuilder, GrantError, GrantKind, ParamValue, Params, Registry, Skew, VerifyContext,
-    decode_transport, encode_transport, verify,
+    Authorized, GrantBuilder, GrantError, GrantKind, Limits, Operations, ParamValue, Params,
+    Registry, Request, RequestError, Verified, VerifyContext, WriteGrant, decode_transport,
+    encode_transport, verify,
 };
 
 struct Env {
     registry: Registry,
-    ops: nodkey_grant::Operations,
+    ops: Operations,
     wl: HashMap<String, Vec<String>>,
+    bid: nodkey_grant::BrokerId,
 }
 
 fn env() -> Env {
-    let m = manifest();
     Env {
         registry: load_registry("registry.json").unwrap(),
-        ops: operations(&m),
-        wl: workloads(&m),
+        ops: operations(),
+        wl: workloads(&manifest()),
+        bid: broker_id(),
     }
 }
 
@@ -36,12 +39,12 @@ fn transfer(to: &str, amount: u64) -> Params {
     ])
 }
 
-fn transfer_grant(jti: [u8; 16], nbf: u64, exp: u64) -> GrantBuilder {
+fn transfer_grant(jti: [u8; 16], exp: u64) -> GrantBuilder {
     GrantBuilder::write("ledger.transfer", 1)
         .issuer("nodkey.authority.test")
         .audience(BROKER)
         .jti(jti)
-        .times(IAT, nbf, exp)
+        .times(IAT, IAT, exp)
         .workload(APP1)
         .tenant("acme")
         .subject("user:u-17")
@@ -51,79 +54,141 @@ fn transfer_grant(jti: [u8; 16], nbf: u64, exp: u64) -> GrantBuilder {
         .confirmed(true)
 }
 
-fn ctx<'a>(e: &'a Env, now: u64, op: &'a str, p: &'a Params) -> VerifyContext<'a> {
+fn ctx<'a>(e: &'a Env, now: u64, req: &'a Request) -> VerifyContext<'a> {
     VerifyContext {
         now,
-        audience: BROKER,
+        broker_id: &e.bid,
         workload: APP1,
         workload_tenants: &e.wl[APP1],
-        requested_op: op,
-        requested_params: p,
+        request: req,
         operations: &e.ops,
-        skew: Skew::default(),
+        limits: Limits::default(),
     }
 }
 
-fn vector_jti(id: &str) -> [u8; 16] {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(b"nodkey.test.jti");
-    h.update([0u8]);
-    h.update(id.as_bytes());
-    h.finalize()[..16].try_into().unwrap()
+fn write<'a>(e: &'a Env, g: &[u8], now: u64, req: &'a Request) -> WriteGrant<'a> {
+    match verify(g, &e.registry, &ctx(e, now, req)).unwrap() {
+        Verified::Write(w) => w,
+        Verified::Read(_) => panic!("expected a write grant"),
+    }
 }
 
-/// The builder reproduces the committed ACC-01 grant byte for byte (search over the unknown
-/// nbf/exp only), which cross-checks the canonical encoder against the vector generator's.
+fn decide_write<'a>(
+    e: &'a Env,
+    g: &[u8],
+    now: u64,
+    req: &'a Request,
+) -> Result<Authorized<'a>, GrantError> {
+    write(e, g, now, req).decide(&[])
+}
+
+/// The builder reproduces the committed ACC-01 grant byte for byte (jti taken from the grant,
+/// as the vectors README recommends), cross-checking the canonical encoder.
 #[test]
 fn builder_reproduces_acc01_bytes() {
-    let want = hex(&std::fs::read_to_string(
-        vectors_dir().join("grants/ACC-01-valid-transfer.hex"),
-    )
-    .unwrap());
-    let key = signing_key(SEED_A);
-    // The jti label is the short id ("ACC-01"), not the manifest id (SPEC_ISSUES.md SI-6).
-    let jti = vector_jti("ACC-01");
-    let mut found = false;
-    'outer: for nbf in IAT..=IAT + 5 {
-        for exp in nbf + 1..=nbf + 30 {
-            if transfer_grant(jti, nbf, exp).sign(&key).unwrap() == want {
-                found = true;
-                break 'outer;
-            }
-        }
-    }
-    assert!(found, "builder output never matched ACC-01");
+    let want = hex(&read("grants/ACC-01-valid-transfer.hex"));
+    let at = want.windows(2).position(|w| w == [0x03, 0x50]).unwrap() + 2;
+    let jti: [u8; 16] = want[at..at + 16].try_into().unwrap();
+    let got = transfer_grant(jti, IAT + 30)
+        .sign(&signing_key(SEED_A))
+        .unwrap();
+    assert_eq!(got, want);
 }
 
 #[test]
-fn write_round_trip_and_bindings() {
+fn write_round_trip_binds_the_checked_request() {
     let e = env();
-    let key = signing_key(SEED_A);
-    let g = transfer_grant([7; 16], IAT, IAT + 30).sign(&key).unwrap();
-    let p = transfer("bob", 12500);
-    let v = verify(&g, &e.registry, &ctx(&e, IAT + 10, "ledger.transfer", &p)).unwrap();
-    assert_eq!(v.kind(), GrantKind::Write);
-    assert!(v.must_consume());
-    assert_eq!(v.jti(), &[7; 16]);
-    assert_eq!(v.iss(), "nodkey.authority.test");
-    assert_eq!((v.op(), v.opv()), ("ledger.transfer", 1));
-    assert_eq!((v.tenant(), v.subject()), ("acme", "user:u-17"));
+    let g = transfer_grant([7; 16], IAT + 30)
+        .sign(&signing_key(SEED_A))
+        .unwrap();
+    let req = e
+        .ops
+        .parse_request("ledger.transfer", transfer("bob", 12500))
+        .unwrap();
+    let w = write(&e, &g, IAT + 10, &req);
+    assert_eq!(w.identity().kind, GrantKind::Write);
+    // W10 record carries the hash of exactly the validated request (GC-02).
+    let c = w.consumption();
+    assert_eq!(
+        (c.iss.as_str(), c.jti, c.exp),
+        ("nodkey.authority.test", [7; 16], IAT + 30)
+    );
+    assert_eq!(&c.request_hash, req.request_hash());
+    let a = w.decide(&[]).unwrap();
+    assert_eq!((a.op(), a.opv()), ("ledger.transfer", 1));
+    assert_eq!(a.params(), req.params());
+    assert_eq!(a.request_hash(), req.request_hash());
 
     // Transport round trip.
-    let t = encode_transport(&g);
-    assert_eq!(decode_transport(Some(&t)).unwrap(), g);
+    assert_eq!(decode_transport(Some(&encode_transport(&g))).unwrap(), g);
 
-    // A verified-but-denied write grant carries its identity for §7.3 recording.
-    let bad = transfer("mallory", 12500);
-    let r = verify(&g, &e.registry, &ctx(&e, IAT + 10, "ledger.transfer", &bad)).unwrap_err();
-    assert_eq!(r.code, GrantError::ConstraintMismatch);
-    assert_eq!(r.verified.as_ref().unwrap().jti, [7; 16]);
+    // A verified write grant denied at W12 is an Err of `decide` (the broker records it).
+    let bad = e
+        .ops
+        .parse_request("ledger.transfer", transfer("mallory", 12500))
+        .unwrap();
+    assert_eq!(
+        decide_write(&e, &g, IAT + 10, &bad).unwrap_err(),
+        GrantError::ConstraintMismatch
+    );
+    // Unverified failures never reach the consumption stage.
+    assert_eq!(
+        verify(&g, &e.registry, &ctx(&e, IAT + 100, &req)).unwrap_err(),
+        GrantError::Expired
+    );
+}
 
-    // An unverified failure carries none.
-    let r = verify(&g, &e.registry, &ctx(&e, IAT + 100, "ledger.transfer", &p)).unwrap_err();
-    assert_eq!(r.code, GrantError::Expired);
-    assert!(r.verified.is_none());
+/// GC-01: the strict request parser rejects undeclared, missing and ill-typed parameters,
+/// including free and owner-scoped ones, so they can never reach verification or effect code.
+#[test]
+fn request_parser_is_strict() {
+    let ops = operations();
+    let hold = |memo: ParamValue| {
+        Params::from([
+            ("account".into(), ParamValue::Text("alice".into())),
+            ("amount_cents".into(), ParamValue::Uint(1)),
+            ("currency".into(), ParamValue::Text("EUR".into())),
+            ("memo".into(), memo),
+        ])
+    };
+    assert!(
+        ops.parse_request("test.hold", hold(ParamValue::Text("rent".into())))
+            .is_ok()
+    );
+    assert!(matches!(
+        ops.parse_request("test.hold", hold(ParamValue::Uint(1))),
+        Err(RequestError::InvalidValue(_))
+    ));
+    assert!(matches!(
+        ops.parse_request("test.hold", hold(ParamValue::Text("\n".repeat(5000)))),
+        Err(RequestError::InvalidValue(_))
+    ));
+    let mut extra = hold(ParamValue::Text("rent".into()));
+    extra.insert("to".into(), ParamValue::Text("mallory".into()));
+    assert!(matches!(
+        ops.parse_request("test.hold", extra),
+        Err(RequestError::UnknownParameter(_))
+    ));
+    let mut missing = hold(ParamValue::Text("rent".into()));
+    missing.remove("memo");
+    assert!(matches!(
+        ops.parse_request("test.hold", missing),
+        Err(RequestError::MissingParameter(_))
+    ));
+    assert_eq!(
+        ops.parse_request("ledger.delete", Params::new()),
+        Err(RequestError::UnknownOperation)
+    );
+    let big = transfer("bob", 1 << 53);
+    assert!(matches!(
+        ops.parse_request("ledger.transfer", big),
+        Err(RequestError::InvalidValue(_))
+    ));
+    let owner = Params::from([("account".into(), ParamValue::Text("Alice".into()))]);
+    assert!(matches!(
+        ops.parse_request("ledger.get_balance", owner),
+        Err(RequestError::InvalidValue(_))
+    ));
 }
 
 #[test]
@@ -138,31 +203,50 @@ fn read_round_trip() {
         .tenant("acme")
         .subject("user:u-17")
         .read_op("ledger.get_balance", 1)
-        .read_op("ledger.list_transfers", 1)
+        .read_op("test.peek", 1)
         .sign(&signing_key(SEED_A))
         .unwrap();
     let p = Params::from([("account".into(), ParamValue::Text("alice".into()))]);
-    for op in ["ledger.get_balance", "ledger.list_transfers"] {
-        let v = verify(&g, &e.registry, &ctx(&e, IAT + 1, op, &p)).unwrap();
-        assert!(!v.must_consume());
-        assert_eq!(v.op(), op);
+    for op in ["ledger.get_balance", "test.peek"] {
+        let req = e.ops.parse_request(op, p.clone()).unwrap();
+        let Verified::Read(r) = verify(&g, &e.registry, &ctx(&e, IAT + 1, &req)).unwrap() else {
+            panic!("read grant")
+        };
+        let a = r.decide(&[]).unwrap();
+        assert_eq!((a.op(), a.tenant(), a.subject()), (op, "acme", "user:u-17"));
     }
-    let r = verify(&g, &e.registry, &ctx(&e, IAT + 1, "ledger.transfer", &p)).unwrap_err();
-    assert_eq!(r.code, GrantError::KindMismatch);
+    let req = e
+        .ops
+        .parse_request("ledger.transfer", transfer("bob", 1))
+        .unwrap();
+    let Verified::Read(r) = verify(&g, &e.registry, &ctx(&e, IAT + 1, &req)).unwrap() else {
+        panic!("read grant")
+    };
+    assert_eq!(r.decide(&[]).unwrap_err(), GrantError::KindMismatch);
 }
 
 #[test]
 fn builder_refuses_nonconforming_grants() {
     let key = signing_key(SEED_A);
-    let ok = || transfer_grant([0; 16], IAT, IAT + 30);
+    let ok = || transfer_grant([0; 16], IAT + 30);
     assert!(ok().sign(&key).is_ok());
     assert!(ok().times(IAT, IAT, IAT + 31).sign(&key).is_err());
+    assert!(
+        ok().times(IAT, IAT + 6, IAT + 10).sign(&key).is_err(),
+        "nbf - iat > skew"
+    );
+    assert!(
+        ok().times(IAT, IAT + 1, IAT + 31).sign(&key).is_err(),
+        "exp - iat > 30"
+    );
     assert!(ok().times(IAT, IAT - 1, IAT + 10).sign(&key).is_err());
     assert!(ok().times(IAT, IAT, IAT).sign(&key).is_err());
+    assert!(ok().times(u64::MAX, u64::MAX, u64::MAX).sign(&key).is_err());
     assert!(ok().tenant("ac me").sign(&key).is_err());
     assert!(ok().tenant("").sign(&key).is_err());
     assert!(ok().subject(&"x".repeat(257)).sign(&key).is_err());
     assert!(ok().resource(16, ParamValue::Uint(1)).sign(&key).is_err());
+    assert!(ok().exact(2, ParamValue::Uint(1 << 53)).sign(&key).is_err());
     assert!(
         ok().exact(2, ParamValue::Text("a\n".into()))
             .sign(&key)
@@ -192,10 +276,9 @@ fn builder_refuses_nonconforming_grants() {
             .is_err()
     );
     assert!(read.read_op("x", 1).sign(&key).is_ok());
-    // Oversized grants are refused rather than emitted.
     let big = ok().workload(&"w".repeat(256)).subject(&"s".repeat(256));
     let big = (0..16u8).fold(big, |b, k| b.resource(k, ParamValue::Text("r".repeat(100))));
-    assert!(big.sign(&key).is_err());
+    assert!(big.sign(&key).is_err(), "over 2048 bytes");
 }
 
 fn rand_id(r: &mut Rng, max: usize) -> String {
@@ -205,9 +288,9 @@ fn rand_id(r: &mut Rng, max: usize) -> String {
         .collect()
 }
 
-/// Property: any conforming test.hold grant (random IDs, times, bound, currency, account)
-/// verifies for any request within its bindings, and is denied with the exact code when one
-/// binding is exceeded.
+/// Property: any conforming test.hold grant (random subject, times, bound, currency, account)
+/// is authorized for any request within its bindings, and is denied with the exact code when a
+/// binding is exceeded or the grant has expired.
 #[test]
 fn property_random_test_hold_grants() {
     let e = env();
@@ -215,9 +298,9 @@ fn property_random_test_hold_grants() {
     let mut r = Rng(0x9e37_79b9_7f4a_7c15);
     for i in 0..300 {
         let sub = rand_id(&mut r, 256);
-        let nbf = IAT + r.below(5);
-        let exp = nbf + 1 + r.below(30);
-        let bound = r.next() >> r.below(64);
+        let nbf = IAT + r.below(6);
+        let exp = nbf + 1 + r.below(IAT + 30 - nbf);
+        let bound = (r.next() >> r.below(64)) & ((1 << 53) - 1);
         let account: String = (0..1 + r.below(32))
             .map(|_| b"abcdefghijklmnopqrstuvwxyz0123456789_"[r.below(37) as usize] as char)
             .collect();
@@ -235,50 +318,45 @@ fn property_random_test_hold_grants() {
             .exact(1, ParamValue::Text(currency.clone()))
             .sign(&key)
             .unwrap();
-        let amount = if bound == 0 {
-            0
-        } else {
-            r.below(bound) + r.below(2)
-        };
         let memo: String = (0..r.below(65))
             .map(|_| (0x20 + r.below(95) as u8) as char)
             .collect();
-        let mut p = Params::from([
-            ("account".into(), ParamValue::Text(account.clone())),
-            ("amount_cents".into(), ParamValue::Uint(amount.min(bound))),
-            ("currency".into(), ParamValue::Text(currency.clone())),
-            ("memo".into(), ParamValue::Text(memo)),
-        ]);
+        let mk = |amount: u64, cur: &str| {
+            e.ops
+                .parse_request(
+                    "test.hold",
+                    Params::from([
+                        ("account".into(), ParamValue::Text(account.clone())),
+                        ("amount_cents".into(), ParamValue::Uint(amount)),
+                        ("currency".into(), ParamValue::Text(cur.into())),
+                        ("memo".into(), ParamValue::Text(memo.clone())),
+                    ]),
+                )
+                .unwrap()
+        };
         let now = nbf + r.below(exp - nbf);
-        let v = verify(&g, &e.registry, &ctx(&e, now, "test.hold", &p));
-        assert!(v.is_ok(), "iteration {i}: {v:?}");
-        assert_eq!(v.unwrap().subject(), sub);
-
-        if bound < u64::MAX {
-            p.insert("amount_cents".into(), ParamValue::Uint(bound + 1));
-            let err = verify(&g, &e.registry, &ctx(&e, now, "test.hold", &p)).unwrap_err();
-            assert_eq!(err.code, GrantError::BoundExceeded);
-            p.insert("amount_cents".into(), ParamValue::Uint(bound));
+        let req = mk(r.below(bound + 1), &currency);
+        let a = decide_write(&e, &g, now, &req);
+        assert!(a.is_ok(), "iteration {i}: {a:?}");
+        assert_eq!(a.unwrap().identity().sub, sub);
+        if bound < (1 << 53) - 1 {
+            let req = mk(bound + 1, &currency);
+            assert_eq!(
+                decide_write(&e, &g, now, &req).unwrap_err(),
+                GrantError::BoundExceeded
+            );
         }
-        p.insert("currency".into(), ParamValue::Text("ZZZ".into()));
         if currency != "ZZZ" {
-            let err = verify(&g, &e.registry, &ctx(&e, now, "test.hold", &p)).unwrap_err();
-            assert_eq!(err.code, GrantError::ConstraintMismatch);
+            let req = mk(bound, "ZZZ");
+            assert_eq!(
+                decide_write(&e, &g, now, &req).unwrap_err(),
+                GrantError::ConstraintMismatch
+            );
         }
-        let err = verify(&g, &e.registry, &ctx(&e, exp + 5, "test.hold", &p)).unwrap_err();
-        assert_eq!(err.code, GrantError::Expired);
+        let req = mk(bound, &currency);
+        assert_eq!(
+            verify(&g, &e.registry, &ctx(&e, exp + 5, &req)).unwrap_err(),
+            GrantError::Expired
+        );
     }
-}
-
-/// The scheduler key cannot be used for user operations, and vice versa (spec D-9).
-#[test]
-fn role_separation() {
-    let e = env();
-    let p = transfer("bob", 12500);
-    let g = transfer_grant([3; 16], IAT, IAT + 30)
-        .issuer("nodkey.scheduler.test")
-        .sign(&signing_key(SEED_E))
-        .unwrap();
-    let err = verify(&g, &e.registry, &ctx(&e, IAT + 1, "ledger.transfer", &p)).unwrap_err();
-    assert_eq!(err.code, GrantError::IssuerNotPermitted);
 }

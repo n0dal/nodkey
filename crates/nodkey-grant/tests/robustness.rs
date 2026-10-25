@@ -11,14 +11,15 @@ use std::collections::HashMap;
 
 use common::*;
 use nodkey_grant::{
-    AAD_TAG, Operations, ParamValue, Params, Registry, SigningKey, Skew, TYP, VerifyContext,
-    decode_transport, derive_kid, verify,
+    AAD_TAG, BrokerId, Limits, Operations, ParamValue, Params, Registry, Request, SigningKey, TYP,
+    Verified, VerifyContext, decode_transport, derive_kid, verify,
 };
 
 struct Fixture {
     registry: Registry,
     ops: Operations,
     wl: HashMap<String, Vec<String>>,
+    bid: BrokerId,
     grants: Vec<(String, Vec<u8>, bool)>,
 }
 
@@ -37,10 +38,17 @@ fn fixture() -> Fixture {
     }
     Fixture {
         registry: load_registry("registry.json").unwrap(),
-        ops: operations(&m),
+        ops: operations(),
         wl: workloads(&m),
+        bid: broker_id(),
         grants,
     }
+}
+
+fn transfer_request(f: &Fixture) -> Request {
+    f.ops
+        .parse_request("ledger.transfer", transfer_params())
+        .unwrap()
 }
 
 fn transfer_params() -> Params {
@@ -51,18 +59,25 @@ fn transfer_params() -> Params {
     ])
 }
 
-fn check(f: &Fixture, g: &[u8], p: &Params) -> bool {
+/// Full grant decision for a `ledger.transfer` request: verify, then decide.
+fn check(f: &Fixture, g: &[u8], req: &Request) -> bool {
     let ctx = VerifyContext {
         now: 1_792_886_410,
-        audience: BROKER,
+        broker_id: &f.bid,
         workload: APP1,
         workload_tenants: &f.wl[APP1],
-        requested_op: "ledger.transfer",
-        requested_params: p,
+        request: req,
         operations: &f.ops,
-        skew: Skew::default(),
+        limits: Limits::default(),
     };
-    verify(g, &f.registry, &ctx).is_ok()
+    match verify(g, &f.registry, &ctx) {
+        Err(_) => false,
+        Ok(Verified::Write(w)) => {
+            let _ = w.consumption();
+            w.decide(&[]).is_ok()
+        }
+        Ok(Verified::Read(r)) => r.decide(&[]).is_ok(),
+    }
 }
 
 fn mutations(g: &[u8], r: &mut Rng) -> Vec<Vec<u8>> {
@@ -109,7 +124,7 @@ fn mutations(g: &[u8], r: &mut Rng) -> Vec<Vec<u8>> {
 #[test]
 fn mutated_vectors_never_panic_and_never_accept() {
     let f = fixture();
-    let p = transfer_params();
+    let p = transfer_request(&f);
     let mut r = Rng(0x1234_5678_9abc_def1);
     let mut n = 0usize;
     for (id, g, accepted) in &f.grants {
@@ -128,7 +143,7 @@ fn mutated_vectors_never_panic_and_never_accept() {
 #[test]
 fn random_bytes_never_panic() {
     let f = fixture();
-    let p = transfer_params();
+    let p = transfer_request(&f);
     let mut r = Rng(42);
     for _ in 0..20_000 {
         let len = r.below(300) as usize;
@@ -210,7 +225,7 @@ fn sign_raw(key: &SigningKey, payload: &[u8]) -> Vec<u8> {
 #[test]
 fn resigned_mutated_payloads_never_panic() {
     let f = fixture();
-    let p = transfer_params();
+    let p = transfer_request(&f);
     let key = signing_key(SEED_A);
     let mut r = Rng(0xdead_beef);
 

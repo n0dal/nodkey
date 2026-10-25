@@ -49,33 +49,31 @@ pub enum GrantError {
     WorkloadMismatch,
     /// Step 9c.
     TenantMismatch,
-    /// Step 10a (write), 10a/10c/10d (read).
+    /// Step W11a; R11a/R11b/R11d.
     OpMismatch,
-    /// Step 10b (write), 10b/10c (read).
+    /// Step W11b; R11a/R11c.
     KindMismatch,
-    /// Step 10c (write), 10e (read).
+    /// Step W11c; R11a.
     OpvUnsupported,
-    /// Step 10d (write), 10f (read).
-    IssuerNotPermitted,
-    /// Step 10e (write).
+    /// Step W11d.
     ConfirmationRequired,
-    /// Step 11a.
+    /// Step W12a.
     OpSchemaInvalid,
-    /// Step 11b.
+    /// Step W12b.
     ResourceMismatch,
-    /// Step 11c (exact).
+    /// Step W12c (exact, or bounded with a non-uint request value).
     ConstraintMismatch,
-    /// Step 11c (bounded).
+    /// Step W12c (bounded).
     BoundExceeded,
-    /// Step 12 (produced by the broker's replay store, not by this crate's `verify`).
+    /// Step W10 (produced by the broker's replay store: same `(iss, jti)`, different hash).
     Replayed,
-    /// Step 13 (produced by the broker's revocation check, see `GrantIdentity::is_revoked`).
+    /// Steps W13 / R13.
     Revoked,
 }
 
 impl GrantError {
     /// Every code, in procedure order.
-    pub const ALL: [GrantError; 32] = [
+    pub const ALL: [GrantError; 31] = [
         Self::Missing,
         Self::TooLarge,
         Self::EncodingInvalid,
@@ -100,7 +98,6 @@ impl GrantError {
         Self::OpMismatch,
         Self::KindMismatch,
         Self::OpvUnsupported,
-        Self::IssuerNotPermitted,
         Self::ConfirmationRequired,
         Self::OpSchemaInvalid,
         Self::ResourceMismatch,
@@ -137,7 +134,6 @@ impl GrantError {
             Self::OpMismatch => "grant_op_mismatch",
             Self::KindMismatch => "grant_kind_mismatch",
             Self::OpvUnsupported => "grant_opv_unsupported",
-            Self::IssuerNotPermitted => "grant_issuer_not_permitted",
             Self::ConfirmationRequired => "grant_confirmation_required",
             Self::OpSchemaInvalid => "grant_op_schema_invalid",
             Self::ResourceMismatch => "grant_resource_mismatch",
@@ -201,17 +197,60 @@ impl fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
-/// Invalid operation declarations (spec §6): the broker must refuse to start.
+/// Invalid operation declarations (spec §6.3): the broker must refuse to start.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeclarationError(pub String);
+pub struct DeclarationError {
+    detail: String,
+}
+
+impl DeclarationError {
+    pub(crate) fn new(detail: String) -> Self {
+        DeclarationError { detail }
+    }
+    /// The spec's code, `ops_declaration_invalid`.
+    pub const fn as_str(&self) -> &'static str {
+        "ops_declaration_invalid"
+    }
+    /// Human-readable detail for the operator log.
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+}
 
 impl fmt::Display for DeclarationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid operation declaration: {}", self.0)
+        write!(f, "ops_declaration_invalid: {}", self.detail)
     }
 }
 
 impl std::error::Error for DeclarationError {}
+
+/// A request that does not match its operation's declaration (spec §6.2, §7.1). This is a
+/// request-parser rejection (the broker's `invalid_argument`), not a grant decision: nothing is
+/// verified, consumed or recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestError {
+    UnknownOperation,
+    UnknownParameter(String),
+    MissingParameter(String),
+    InvalidValue(String),
+    /// Internal: the request could not be encoded for hashing (unreachable for valid input).
+    Encoding,
+}
+
+impl fmt::Display for RequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownOperation => f.write_str("unknown operation"),
+            Self::UnknownParameter(n) => write!(f, "unknown parameter {n}"),
+            Self::MissingParameter(n) => write!(f, "missing parameter {n}"),
+            Self::InvalidValue(n) => write!(f, "invalid value for {n}"),
+            Self::Encoding => f.write_str("request encoding failed"),
+        }
+    }
+}
+
+impl std::error::Error for RequestError {}
 
 /// The issuer refused to sign: the grant would not conform to the spec.
 #[derive(Debug, Clone, PartialEq, Eq)]

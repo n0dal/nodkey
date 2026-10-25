@@ -1,67 +1,101 @@
 # nodkey-grant
 
-> **PROTOTYPE.** This crate is not reviewed and not suitable for production use.
+> **PROTOTYPE.** This crate is not suitable for production use.
 
-This crate verifies and issues **Nodkey-Grant v1** grants, as specified in
-[`docs/specs/grant-v1.md`](../../docs/specs/grant-v1.md). Grants use a restricted COSE_Sign1
-(Ed25519) profile with a deterministic-CBOR payload. The crate was written as a second
-implementation, independent of the vector generator in `tests/vectors/grant-v1/gen/`. It shares no
-code with the generator and was written without reading it.
+This crate verifies and issues **Nodkey-Grant v1** grants. It implements **spec Draft 2**
+([`docs/specs/grant-v1.md`](../../docs/specs/grant-v1.md)): restricted COSE_Sign1 with Ed25519 and a
+deterministic-CBOR payload.
 
-A valid grant is a necessary condition for an effect, never a sufficient one (SI-04). The broker
-still applies policy, current state and budgets.
+It is a second implementation, independent of the vector generator in
+`tests/vectors/grant-v1/gen/`. It shares no code with the generator, and the generator was not read
+while writing it.
+
+A valid grant is a necessary condition for an effect, never a sufficient one (SI-04).
 
 ## What it does
 
 | Area | Spec | Notes |
 |---|---|---|
-| Strict CBOR decoder and encoder | §4 | Hand-written and bounded. Rejects non-shortest heads, indefinite lengths, major type 7, tags, invalid UTF-8, unsorted or duplicate map keys, trailing bytes, and lengths larger than the remaining input (checked before allocation). Depth limits are 4, 1 and 3. Negative integers are not allowed in the payload. |
-| COSE_Sign1 profile | §3 | Requires the single-byte tag `0xd2`, the exact protected header `{1: alg, 4: kid, 16: typ}` and an empty unprotected map. The signature is checked with Ed25519 `verify_strict` over `Sig_structure`, with `external_aad = "nodkey.grant.v1" ‖ 0x00 ‖ broker_id`. |
-| Key registry | §8 | Strict JSON: unknown, duplicate and missing members are rejected. Each key must be a canonical encoding of a curve point, must not be small-order or mixed-order, must have a derived kid, and must not be a duplicate. Checks run in file order. |
-| Verification | §7.2 steps 1c–11 | The first failing step sets the error code. |
-| Transport | §2, steps 0–1c | Canonical unpadded base64url. |
-| Issuer | §9 | `GrantBuilder` emits canonical grants. It validates its own output with the verifier's decoder and schema, and refuses to sign anything nonconforming. |
+| Strict CBOR decoder and encoder | §4 | Hand-written and bounded. Rejects non-shortest heads, indefinite lengths, major type 7, tags, invalid UTF-8, keys that are not in encoded-byte order (C8) or are duplicated, trailing bytes, and lengths beyond the input (checked before allocation). Depth limits: envelope 4, header 1, payload 3. |
+| COSE_Sign1 profile | §3 | Requires the single-byte `0xd2` tag, the exact protected header, an empty unprotected map, and `verify_strict` over `Sig_structure` with `external_aad = "nodkey.grant.v1" ‖ 0x00 ‖ broker_id`. |
+| Key registry | §8 | Strict JSON. Rejects unknown, missing or duplicate members, JSON string escapes, and integers that do not match `0\|[1-9][0-9]*` or exceed 2^53 − 1. Each key must have order exactly L and a derived `kid`, and duplicates are refused. |
+| Operation declarations | §6 | `Operations::load` reads the reference JSON format with the same strictness, and applies the §6.3 refusals plus D2-3 (SPEC_ISSUES.md). |
+| Request validation | §6.2, §7.1 | `Operations::parse_request` rejects undeclared, missing or ill-typed parameters, using the closed type grammars. It returns a `Request` that carries the normative §5.4 hash. |
+| Verification | §7.2–§7.4 | `verify` runs steps 1c–9. `WriteGrant::decide` runs W11–W13. `ReadGrant::decide` runs R11 and R13. The first failing check sets the code. |
+| Transport | §2 | Canonical unpadded base64url. |
+| Issuer | §9 | `GrantBuilder` produces canonical grants. It checks its own payload with the verifier and refuses times outside `iat ≤ nbf ≤ iat + 5` and `nbf < exp ≤ iat + 30`. |
 
-The crate does **not** do step 12 (consumption) or step 13 (revocation). Both need the broker's
-database and must run inside its effect transaction. The crate supplies the inputs for them.
-
-## API
+## API and caller obligations
 
 ```rust
-let registry = Registry::load(&json)?;                       // RegistryError { code, entry }
-let ops = Operations::new(declarations)?;                    // spec §6 start-up checks
-let bytes = decode_transport(header_value)?;                 // steps 0–1c
-let ctx = VerifyContext { now, audience: broker_id, workload: peer_wid,
-                          workload_tenants: &tenants, requested_op, requested_params: &params,
-                          operations: &ops, skew: Skew::default() };
+let registry = Registry::load(&registry_json)?;          // at start-up; any error: refuse to start
+let ops = Operations::load(&operations_json)?;            // ditto (ops_declaration_invalid)
+let broker_id = BrokerId::new(configured_id).expect("ID"); // ditto
+
+// Per request:
+let request = ops.parse_request(op, params)?;             // RequestError: invalid_argument, nothing else happens
+let bytes = decode_transport(header_or_member)?;          // None if absent; never trim the value
+let ctx = VerifyContext { now, broker_id: &broker_id, workload: peer_wid,
+                          workload_tenants: &registered_tenants, request: &request,
+                          operations: &ops, limits: Limits::default() };
 match verify(&bytes, &registry, &ctx) {
-    Ok(g) if g.must_consume() => { /* step 12: insert (g.iss(), g.jti(), request_hash(..)); step 13 */ }
-    Ok(g) => { /* read grant: step 13 (g.identity().is_revoked(..)), then READ ONLY query by (ten, sub) */ }
-    Err(rej) => {
-        // rej.code.as_str() goes to the audit log; the workload only gets "grant_denied".
-        // If rej.verified is Some(write grant), record DENIED under (iss, jti) (spec §7.3).
+    Err(code) => deny(code),                              // unverified: consume and record nothing
+    Ok(Verified::Write(w)) => {
+        // BEGIN; W10 is the first statement:
+        let c = w.consumption();                          // (iss, jti, exp, request_hash)
+        // INSERT consumed_grant(c.iss, c.jti, c.exp, c.request_hash, 'PENDING')
+        //   conflict, same hash      -> return the stored outcome (STORED_OUTCOME)
+        //   conflict, different hash -> grant_replayed (row unchanged)
+        // SAVEPOINT decision; SELECT revoked_before rows for the grant's tenant
+        match w.decide(&rows) {                           // W11–W13
+            Ok(a) => { /* W14 preconditions; effect using ONLY a.params(); outcome = ACCEPT; COMMIT */ }
+            Err(code) => { /* ROLLBACK TO SAVEPOINT; outcome = DENIED; COMMIT; on any failure -> unavailable */ }
+        }
+    }
+    Ok(Verified::Read(r)) => {
+        // READ ONLY transaction; SELECT revoked_before rows for the grant's tenant
+        let a = r.decide(&rows)?;                         // R11, R13; nothing is recorded
+        // query filtered by a.tenant() and a.subject() (R14)
     }
 }
-
-let grant = GrantBuilder::write("ledger.transfer", 1)
-    .issuer(iss).audience(broker_id).jti(csprng_16_bytes).times(iat, nbf, exp)
-    .workload(wid).tenant(ten).subject(sub)
-    .resource(0, ParamValue::Text("alice".into()))
-    .exact(0, ParamValue::Text("bob".into())).exact(1, ParamValue::Uint(12500))
-    .confirmed(true)
-    .sign(&signing_key)?;
 ```
 
-- **`GrantError`** has one variant per §7.2 error code, and `as_str()` returns that code as a
-  stable string. `verify` returns a `Rejection { code, verified }` rather than a bare
-  `GrantError`. Spec §7.3 requires the broker to record a verified write grant that is denied at
-  steps 10–11 under its `(iss, jti)`, so the identity has to come back with the error.
-  `verified` is `Some` exactly when steps 1–9 passed.
-- **`VerifiedGrant`** can only be constructed by `verify`. It exposes `kind`, `iss`, `jti`, the
-  tenant, the subject, `op` and `opv`, and `must_consume()`.
-- **Parameter types** are supplied by the broker as a `ParamType` (uint, or text with length
-  bounds and an allowed-byte set), because the spec does not define them (SPEC_ISSUES.md SI-1).
-- The crate never generates `jti`. The issuer must supply 16 bytes from a CSPRNG.
+The broker must meet these obligations. They cannot be enforced inside a library.
+
+1. **Trusted context.**
+   - `workload` comes from the socket or mTLS peer identity.
+   - `workload_tenants` comes from the workload registry, and is empty if the workload is not
+     registered.
+   - `now` is the broker clock, floored, and checked against the persisted high-water mark (§7.6).
+   - All instances that share a `broker_id` share one replay store and one revocation table (§7.1).
+2. **W10 before anything else.**
+   - The consumption insert, keyed uniquely on `(iss, jti)`, is the first statement of the effect
+     transaction.
+   - Every `Err` from `WriteGrant::decide`, and every W14 precondition failure, is recorded as
+     DENIED in **the same** transaction (§7.3).
+   - If that recording or the commit fails, or the commit outcome is unknown, answer `unavailable`,
+     not `grant_denied`.
+   - Nothing is recorded for read grants or for `verify` errors.
+3. **Revocation rows** are read inside the deciding transaction and passed to `decide`.
+4. **Execute only what was checked.** The effect reads parameters only from
+   `Authorized::params()`, which are the same values that were validated, hashed, and compared
+   with the grant. `Request`, `WriteGrant`, `ReadGrant` and `Authorized` are not `Clone`.
+5. **Client responses.**
+   - The workload sees only `grant_denied` or `unavailable`.
+   - `GrantError::as_str()` is for the audit log.
+   - Infrastructure failures (registry, replay store, revocation table, locks) mean `unavailable`.
+6. **Configuration tests.** Check that `ledger.transfer` has `requires_confirmation: true` (D-2).
+   - Registry reload must validate the whole file and swap it in atomically.
+   - If the reload fails, stop serving: the failed file may have carried a revocation (§8.4).
+   - The registry and declaration files must be writable by administrators only.
+7. **Expiry at commit** (SPEC_ISSUES.md D2-4): re-check `now < exp + skew` inside the effect
+   transaction, or bound the transaction time.
+8. **Concurrency, restart and replay-store restore** must be covered by integration tests
+   (§12.2).
+
+The feature `conformance-unvalidated-requests` exposes `Request::unvalidated_for_conformance`. It
+exists only so that this crate's tests can reach W12b/W12c, and is enabled only through the
+crate's own dev-dependency. **Never enable it in a broker.**
 
 ## Dependencies
 
@@ -69,32 +103,27 @@ Licenses were checked with the crates.io API (`/api/v1/crates/<name>/<version>`)
 
 | Crate | Version | License | Why |
 |---|---|---|---|
-| `ed25519-dalek` | =3.0.0 | BSD-3-Clause | Ed25519 `verify_strict`, signing, key decoding. The spec names this exact behaviour (§3.5). Pinned. Features: `fast`, `zeroize`. |
-| `curve25519-dalek` (transitive) | 5.0.0 | BSD-3-Clause | Provides `is_small_order` and `is_torsion_free`, used for the registry weak-key check. |
-| `sha2` | 0.11 (0.11.0 locked) | MIT OR Apache-2.0 | SHA-256 for kid derivation (§8.1) and `request_hash` (§5.4). |
-| `serde` | 1.0.229 | MIT OR Apache-2.0 | Strict registry parsing (`deny_unknown_fields`, duplicate-field detection). |
-| `serde_json` | 1.0.154 | MIT OR Apache-2.0 | Registry JSON. Uses `raw_value` so that duplicate members are detected within each entry. |
+| `ed25519-dalek` | =3.0.0 | BSD-3-Clause | `verify_strict`, signing, key decoding. §3.5 names this behaviour. Features: `fast`, `zeroize`. |
+| `curve25519-dalek` (transitive) | 5.0.0 | BSD-3-Clause | `is_small_order` / `is_torsion_free`, used for the order-L check on keys. |
+| `sha2` | 0.11 (0.11.0 locked) | MIT OR Apache-2.0 | SHA-256 for the kid (§8.1) and the request hash (§5.4). |
+| `serde` | 1.0.229 | MIT OR Apache-2.0 | Strict parsing of the registry and declarations (`deny_unknown_fields`, duplicate fields, borrowed strings). |
+| `serde_json` | 1.0.154 | MIT OR Apache-2.0 | JSON parsing. The `raw_value` feature supports per-entry parsing and integer-grammar checks. |
 
-There are no dev-dependencies. Property and fuzz-style tests use a small in-file PRNG instead of
-`proptest` or `cargo fuzz`. The full transitive tree (`cargo tree -e normal`) uses only the
-MIT, Apache-2.0, BSD-3-Clause, Unlicense-or-MIT and Unicode-3.0 licenses.
+The only dev-dependency is this crate itself, which enables the test-only feature. The transitive
+tree uses only MIT, Apache-2.0, BSD-3-Clause, Unlicense-or-MIT and Unicode-3.0 licenses.
 
 ## Tests
 
 ```sh
-cargo test                                   # unit + conformance + round trip + robustness
+cargo test --release
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-| Suite | What it checks |
+| Suite | Covers |
 |---|---|
-| `tests/conformance.rs` | Runs every vector in `tests/vectors/grant-v1/manifest.json`: 235 grant vectors with 246 steps, and 17 registry vectors. Each step must give the exact expected result. Steps 12 and 13 are simulated with an in-memory replay store, as the vectors README describes. |
-| `tests/roundtrip.rs` | Builder → sign → verify for write and read grants. Byte-exact reproduction of vector ACC-01. Role separation. Builder refusals. 300 randomized `test.hold` grants checked for accept, bound, constraint and expiry. |
-| `tests/robustness.rs` | Over 1.4 million truncated, bit-flipped, byte-substituted, inserted and random variants of every vector, plus random inputs and deep nesting. Also re-signed mutated payloads, which reach the post-signature decoder. The checks: no panics, and no mutation of an accepted grant is ever accepted. |
+| `tests/conformance.rs` | Every vector in the manifest:<br>• 280 grant vectors (293 steps)<br>• 26 registry, 19 operation-declaration and 11 transport vectors<br>• 3 request-hash examples<br>W10 and the savepoint recording rule are simulated with an in-memory store. The test also asserts that only CON-20..24 bypass the strict request parser. |
+| `tests/roundtrip.rs` | • Builder → verify → decide<br>• Byte-exact reproduction of ACC-01<br>• Strict request parsing (GC-01)<br>• The consumption hash and `Authorized::params` match the validated request (GC-02)<br>• Builder refusals<br>• 300 randomized `test.hold` grants |
+| `tests/robustness.rs` | • Over 1.4 million truncated, mutated, extended and random variants of every vector<br>• Re-signed mutated payloads<br>The checks are no panics, and no mutation of an accepted grant is ever accepted. |
 
-Not covered: concurrency, restart, replay-store failure (broker integration tests), and signatures
-with a small-order `R` but an otherwise valid equation. `verify_strict` rejects that case, but
-there is no vector for it (spec §12.2).
-
-Spec ambiguities found during implementation: [`SPEC_ISSUES.md`](SPEC_ISSUES.md).
+Spec issues: [`SPEC_ISSUES.md`](SPEC_ISSUES.md).

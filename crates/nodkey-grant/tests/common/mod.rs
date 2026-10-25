@@ -1,16 +1,15 @@
 //! Shared test harness: loads `tests/vectors/grant-v1/manifest.json` and simulates the broker
-//! steps this crate does not own (step 12 consumption with an in-memory replay store, step 13
-//! revocation), as described in the vectors README.
+//! parts this crate does not own (the W10 replay store with an in-memory map, the savepoint
+//! recording rule of spec §7.3), as described in the vectors README.
 
 #![allow(dead_code)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use nodkey_grant::{
-    Authority, Binding, GrantKind, OpKind, OperationDecl, Operations, ParamDecl, ParamType,
-    ParamValue, Params, Registry, RevocationScope, RevokedBefore, Skew, TextRule, VerifyContext,
-    request_hash, verify,
+    BrokerId, Limits, Operations, ParamValue, Params, Registry, Request, RevocationScope,
+    RevokedBefore, Verified, VerifyContext, verify,
 };
 use serde_json::Value as J;
 
@@ -27,94 +26,16 @@ pub fn hex(s: &str) -> Vec<u8> {
         .collect()
 }
 
+pub fn read(rel: &str) -> String {
+    std::fs::read_to_string(vectors_dir().join(rel)).expect(rel)
+}
+
 pub fn manifest() -> J {
-    let text = std::fs::read_to_string(vectors_dir().join("manifest.json")).expect("manifest");
-    serde_json::from_str(&text).expect("manifest json")
+    serde_json::from_str(&read("manifest.json")).expect("manifest json")
 }
 
-// Parameter types are not defined by the spec (SPEC_ISSUES.md SI-1). These definitions are the
-// harness's: account_id follows the broker's existing AccountId rule; currency is ISO 4217 style.
-fn account_byte(c: u8) -> bool {
-    c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_'
-}
-fn currency_byte(c: u8) -> bool {
-    c.is_ascii_uppercase()
-}
-fn printable(c: u8) -> bool {
-    (0x20..=0x7e).contains(&c)
-}
-
-pub fn param_type(name: &str) -> ParamType {
-    match name {
-        "uint" => ParamType::Uint,
-        "account_id" => ParamType::Text(TextRule {
-            min_len: 1,
-            max_len: 32,
-            allowed: account_byte,
-        }),
-        "currency" => ParamType::Text(TextRule {
-            min_len: 3,
-            max_len: 3,
-            allowed: currency_byte,
-        }),
-        "text64" => ParamType::Text(TextRule {
-            min_len: 0,
-            max_len: 64,
-            allowed: printable,
-        }),
-        other => panic!("unknown param type {other}"),
-    }
-}
-
-pub fn operations(m: &J) -> Operations {
-    let mut decls = Vec::new();
-    for o in m["operations"].as_array().unwrap() {
-        let kind = match o["kind"].as_str().unwrap() {
-            "write" => OpKind::Write,
-            "read" => OpKind::Read,
-            k => panic!("kind {k}"),
-        };
-        let authority = match o["authority"].as_str().unwrap() {
-            "user_grant" => Authority::UserGrant,
-            "scheduler_grant" => Authority::SchedulerGrant,
-            a => panic!("authority {a}"),
-        };
-        let params = o["params"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|p| {
-                let key = p["key"].as_u64().map(|k| u8::try_from(k).unwrap());
-                let binding = match (p["in"].as_str().unwrap(), p["class"].as_str().unwrap()) {
-                    ("res", "exact") => Binding::Resource(key.unwrap()),
-                    ("con", "exact") => Binding::Exact(key.unwrap()),
-                    ("con", "bounded") => Binding::Bounded(key.unwrap()),
-                    ("con", "free") => Binding::Free,
-                    ("request", "owner_scoped") => Binding::OwnerScoped,
-                    (i, c) => panic!("binding {i}/{c}"),
-                };
-                ParamDecl {
-                    name: p["name"].as_str().unwrap().to_owned(),
-                    binding,
-                    ty: param_type(p["type"].as_str().unwrap()),
-                }
-            })
-            .collect();
-        decls.push(OperationDecl {
-            name: o["op"].as_str().unwrap().to_owned(),
-            kind,
-            versions: o["opv"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| u16::try_from(v.as_u64().unwrap()).unwrap())
-                .collect(),
-            authority,
-            requires_confirmation: o["requires_confirmation"].as_bool().unwrap(),
-            params,
-        });
-    }
-    Operations::new(decls).expect("declarations valid")
+pub fn operations() -> Operations {
+    Operations::load(&read("operations.json")).expect("operations.json loads")
 }
 
 pub fn workloads(m: &J) -> HashMap<String, Vec<String>> {
@@ -177,18 +98,21 @@ pub fn revocations(rows: &J) -> Vec<RevokedBefore> {
         .collect()
 }
 
+/// Builds the request the way a broker would: strict validation first. Vectors that
+/// deliberately pass an ill-formed request (CON-20..23) are built with the test-only unvalidated
+/// constructor so they reach W12, and the harness records that the strict parser rejects them.
+pub fn request(ops: &Operations, op: &str, p: Params, unvalidated: &mut Vec<String>) -> Request {
+    match ops.parse_request(op, p.clone()) {
+        Ok(r) => r,
+        Err(e) => {
+            unvalidated.push(format!("{op}: {e}"));
+            Request::unvalidated_for_conformance(op, p).expect("encodable request")
+        }
+    }
+}
+
 type ReplayKey = (String, [u8; 16]);
 type ReplayRow = ([u8; 32], &'static str);
-
-/// One submission's trusted context and request (one manifest step).
-pub struct Submission<'a> {
-    pub now: u64,
-    pub broker_id: &'a str,
-    pub peer_wid: &'a str,
-    pub revoked: &'a [RevokedBefore],
-    pub op: &'a str,
-    pub params: &'a Params,
-}
 
 /// In-memory replay store: (iss, jti) -> (request hash, outcome).
 #[derive(Default)]
@@ -196,8 +120,15 @@ pub struct ReplayStore {
     rows: HashMap<ReplayKey, ReplayRow>,
 }
 
-/// The broker simulation for one submission: verify (1c–11), then 12 and 13 for write grants,
-/// 13 for read grants. Returns the expected-result string format of the manifest.
+/// One submission's trusted context and request (one manifest step).
+pub struct Submission<'a> {
+    pub now: u64,
+    pub broker_id: &'a BrokerId,
+    pub peer_wid: &'a str,
+    pub revoked: &'a [RevokedBefore],
+    pub request: &'a Request,
+}
+
 pub struct Broker<'a> {
     pub registry: &'a Registry,
     pub operations: &'a Operations,
@@ -205,80 +136,58 @@ pub struct Broker<'a> {
 }
 
 impl Broker<'_> {
+    /// Steps 1c–9, then W10–W13 (write: consumption first, every denial recorded in the same
+    /// "transaction") or R11/R13 (read). Returns the manifest's expected-result string.
     pub fn submit(&self, store: &mut ReplayStore, grant: &[u8], sub: &Submission<'_>) -> String {
-        let Submission {
-            now,
-            broker_id,
-            peer_wid,
-            revoked,
-            op,
-            params,
-        } = *sub;
         let empty = Vec::new();
-        let tenants = self.workloads.get(peer_wid).unwrap_or(&empty);
         let ctx = VerifyContext {
-            now,
-            audience: broker_id,
-            workload: peer_wid,
-            workload_tenants: tenants,
-            requested_op: op,
-            requested_params: params,
+            now: sub.now,
+            broker_id: sub.broker_id,
+            workload: sub.peer_wid,
+            workload_tenants: self.workloads.get(sub.peer_wid).unwrap_or(&empty),
+            request: sub.request,
             operations: self.operations,
-            skew: Skew::default(),
+            limits: Limits::default(),
         };
         match verify(grant, self.registry, &ctx) {
-            Ok(g) => match g.kind() {
-                GrantKind::Read => {
-                    if g.identity().is_revoked(revoked) {
-                        "grant_revoked".into()
-                    } else {
-                        "ACCEPT".into()
-                    }
-                }
-                GrantKind::Write => {
-                    let h = request_hash(op, g.opv(), params);
-                    let key = (g.iss().to_owned(), *g.jti());
-                    // Step 12 then 13, one transaction.
-                    if let Some((stored, outcome)) = store.rows.get(&key) {
-                        return if *stored == h {
-                            format!("STORED_OUTCOME:{outcome}")
-                        } else {
-                            "grant_replayed".into()
-                        };
-                    }
-                    if g.identity().is_revoked(revoked) {
-                        store.rows.insert(key, (h, "DENIED"));
-                        "grant_revoked".into()
-                    } else {
-                        store.rows.insert(key, (h, "ACCEPT"));
-                        "ACCEPT".into()
-                    }
-                }
+            Err(code) => code.as_str().into(),
+            Ok(Verified::Read(r)) => match r.decide(sub.revoked) {
+                Ok(_) => "ACCEPT".into(),
+                Err(code) => code.as_str().into(),
             },
-            Err(rej) => {
-                // Spec §7.3: a verified write grant denied at steps 10-11 is recorded once.
-                if let Some(id) = &rej.verified {
-                    if id.kind == GrantKind::Write {
-                        let opv = id.write_op.as_ref().map(|(_, v)| *v).unwrap_or(0);
-                        let h = request_hash(op, opv, params);
-                        store
-                            .rows
-                            .entry((id.iss.clone(), id.jti))
-                            .or_insert((h, "DENIED"));
+            Ok(Verified::Write(w)) => {
+                // W10: first statement of the effect transaction.
+                let c = w.consumption();
+                let key = (c.iss.clone(), c.jti);
+                if let Some((stored, outcome)) = store.rows.get(&key) {
+                    return if *stored == c.request_hash {
+                        format!("STORED_OUTCOME:{outcome}")
+                    } else {
+                        "grant_replayed".into()
+                    };
+                }
+                store.rows.insert(key.clone(), (c.request_hash, "PENDING"));
+                // W11–W13 after the savepoint; commit ACCEPT or DENIED with the row.
+                let result = w.decide(sub.revoked);
+                let row = store.rows.get_mut(&key).unwrap();
+                match result {
+                    Ok(_) => {
+                        row.1 = "ACCEPT";
+                        "ACCEPT".into()
+                    }
+                    Err(code) => {
+                        row.1 = "DENIED";
+                        code.as_str().into()
                     }
                 }
-                rej.code.as_str().into()
             }
         }
     }
 }
 
 pub fn load_registry(file: &str) -> Result<Registry, String> {
-    let text = std::fs::read_to_string(vectors_dir().join(file)).expect("registry file");
-    Registry::load(&text).map_err(|e| e.code.as_str().to_owned())
+    Registry::load(&read(file)).map_err(|e| e.code.as_str().to_owned())
 }
-
-pub type Cache = BTreeMap<String, Registry>;
 
 /// Deterministic xorshift64* PRNG for the smoke and property tests (no external dependency).
 pub struct Rng(pub u64);
@@ -304,6 +213,10 @@ pub const SEED_A: &str = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac
 pub const SEED_E: &str = "833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42";
 pub const BROKER: &str = "nodkey.broker.ledger-test";
 pub const APP1: &str = "spiffe://nodkey.test/workload/app1";
+
+pub fn broker_id() -> BrokerId {
+    BrokerId::new(BROKER).unwrap()
+}
 
 pub fn signing_key(seed_hex: &str) -> nodkey_grant::SigningKey {
     nodkey_grant::SigningKey::from_bytes(&hex(seed_hex).try_into().unwrap())

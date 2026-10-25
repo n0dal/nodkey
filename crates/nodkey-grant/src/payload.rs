@@ -13,51 +13,42 @@ pub enum GrantKind {
     Read,
 }
 
-impl GrantKind {
-    pub const fn as_u8(self) -> u8 {
-        match self {
-            GrantKind::Write => 1,
-            GrantKind::Read => 2,
-        }
-    }
-}
-
 /// `con` entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Constraint<'a> {
-    Exact(Scalar<'a>),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Constraint {
+    Exact(Scalar),
     Bounded(u64),
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Body<'a> {
+pub(crate) enum Body {
     Write {
-        op: &'a str,
+        op: String,
         opv: u16,
         /// Ascending key order.
-        res: Vec<(u8, Scalar<'a>)>,
+        res: Vec<(u8, Scalar)>,
         /// Ascending key order.
-        con: Vec<(u8, Constraint<'a>)>,
+        con: Vec<(u8, Constraint)>,
         cfm: bool,
     },
     Read {
-        /// Map order (the deterministic encoding order).
-        rop: Vec<(&'a str, u16)>,
+        /// Map order (C8 order).
+        rop: Vec<(String, u16)>,
     },
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Payload<'a> {
-    pub iss: &'a str,
-    pub aud: &'a str,
+pub(crate) struct Payload {
+    pub iss: String,
+    pub aud: String,
     pub jti: [u8; 16],
     pub iat: u64,
     pub nbf: u64,
     pub exp: u64,
-    pub wid: &'a str,
-    pub ten: &'a str,
-    pub sub: &'a str,
-    pub body: Body<'a>,
+    pub wid: String,
+    pub ten: String,
+    pub sub: String,
+    pub body: Body,
 }
 
 pub(crate) const K_VER: usize = 0;
@@ -104,21 +95,22 @@ fn uint(v: &Value<'_>) -> Result<u64, GrantError> {
     }
 }
 
-fn time(v: &Value<'_>) -> Result<u64, GrantError> {
+/// A uint ≤ 2^53 − 1 (times, and every uint in `res`/`con`).
+fn uint53(v: &Value<'_>) -> Result<u64, GrantError> {
     let t = uint(v)?;
     if t > MAX_TIME { Err(INVALID) } else { Ok(t) }
 }
 
-fn id<'a>(v: &Value<'a>, max: usize) -> Result<&'a str, GrantError> {
+fn id(v: &Value<'_>, max: usize) -> Result<String, GrantError> {
     match v {
-        Value::Text(s) if is_id(s.as_bytes(), max) => Ok(s),
+        Value::Text(s) if is_id(s.as_bytes(), max) => Ok((*s).to_owned()),
         _ => Err(INVALID),
     }
 }
 
-fn op_name<'a>(v: &Value<'a>) -> Result<&'a str, GrantError> {
+fn op_name(v: &Value<'_>) -> Result<String, GrantError> {
     match v {
-        Value::Text(s) if is_op_name(s.as_bytes()) => Ok(s),
+        Value::Text(s) if is_op_name(s.as_bytes()) => Ok((*s).to_owned()),
         _ => Err(INVALID),
     }
 }
@@ -130,18 +122,18 @@ fn opv(v: &Value<'_>) -> Result<u16, GrantError> {
     }
 }
 
-fn scalar<'a>(v: &Value<'a>) -> Result<Scalar<'a>, GrantError> {
+fn scalar(v: &Value<'_>) -> Result<Scalar, GrantError> {
     match v {
-        Value::Uint(n) => Ok(Scalar::Uint(*n)),
-        Value::Text(s) if is_value_text(s.as_bytes()) => Ok(Scalar::Text(s)),
+        Value::Uint(_) => Ok(Scalar::Uint(uint53(v)?)),
+        Value::Text(s) if is_value_text(s.as_bytes()) => Ok(Scalar::Text((*s).to_owned())),
         _ => Err(INVALID),
     }
 }
 
 /// `res`/`con` map: uint keys 0..=15 (so at most 16 entries; order and uniqueness come from C8).
-fn param_map<'a, 'v, T>(
-    v: &'v Value<'a>,
-    mut f: impl FnMut(&'v Value<'a>) -> Result<T, GrantError>,
+fn param_map<T>(
+    v: &Value<'_>,
+    f: impl Fn(&Value<'_>) -> Result<T, GrantError>,
 ) -> Result<Vec<(u8, T)>, GrantError> {
     let Value::Map(entries) = v else {
         return Err(INVALID);
@@ -158,19 +150,19 @@ fn param_map<'a, 'v, T>(
         .collect()
 }
 
-fn constraint<'a>(v: &Value<'a>) -> Result<Constraint<'a>, GrantError> {
+fn constraint(v: &Value<'_>) -> Result<Constraint, GrantError> {
     let Value::Array(items) = v else {
         return Err(INVALID);
     };
     match items.as_slice() {
         [Value::Uint(0), val] => Ok(Constraint::Exact(scalar(val)?)),
-        [Value::Uint(1), Value::Uint(c)] => Ok(Constraint::Bounded(*c)),
+        [Value::Uint(1), c] => Ok(Constraint::Bounded(uint53(c)?)),
         _ => Err(INVALID),
     }
 }
 
 /// Steps 7a and 7b.
-pub(crate) fn parse<'a>(v: &Value<'a>) -> Result<Payload<'a>, GrantError> {
+pub(crate) fn parse(v: &Value<'_>) -> Result<Payload, GrantError> {
     let Value::Map(entries) = v else {
         return Err(INVALID);
     };
@@ -182,8 +174,8 @@ pub(crate) fn parse<'a>(v: &Value<'a>) -> Result<Payload<'a>, GrantError> {
             }
         }
     }
-    // 7b: keys are uints < 20; collect slots (uniqueness is guaranteed by C8).
-    let mut slot: [Option<&Value<'a>>; 20] = [None; 20];
+    // 7b: keys are uints < 20 (uniqueness is guaranteed by C8).
+    let mut slot: [Option<&Value<'_>>; 20] = [None; 20];
     let mut present = 0u32;
     for (k, val) in entries {
         match k {
@@ -206,7 +198,6 @@ pub(crate) fn parse<'a>(v: &Value<'a>) -> Result<Payload<'a>, GrantError> {
     if present != expected {
         return Err(INVALID);
     }
-    // All required keys are present from here on.
     let get = |k: usize| slot[k].ok_or(INVALID);
 
     if uint(get(K_VER)?)? != 1 {
@@ -252,9 +243,9 @@ pub(crate) fn parse<'a>(v: &Value<'a>) -> Result<Payload<'a>, GrantError> {
         iss: id(get(K_ISS)?, 128)?,
         aud: id(get(K_AUD)?, 128)?,
         jti,
-        iat: time(get(K_IAT)?)?,
-        nbf: time(get(K_NBF)?)?,
-        exp: time(get(K_EXP)?)?,
+        iat: uint53(get(K_IAT)?)?,
+        nbf: uint53(get(K_NBF)?)?,
+        exp: uint53(get(K_EXP)?)?,
         wid: id(get(K_WID)?, 256)?,
         ten: id(get(K_TEN)?, 128)?,
         sub: id(get(K_SUB)?, 256)?,

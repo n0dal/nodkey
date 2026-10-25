@@ -14,6 +14,15 @@ sha2 = { version = "0.11", default-features = false }
 serde = { version = "1", default-features = false, features = ["std", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["std", "raw_value"] }
 
+[features]
+# TEST-ONLY: exposes `Request::unvalidated_for_conformance` so that vectors CON-20..23 can reach
+# steps W12b/W12c with a request the strict parser would reject. Never enable in a broker build.
+conformance-unvalidated-requests = []
+
+[dev-dependencies]
+# Enables the test-only feature for this crate's own integration tests.
+nodkey-grant = { path = ".", features = ["conformance-unvalidated-requests"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 

@@ -7,9 +7,10 @@ use serde::Deserialize;
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
+use crate::KID_LABEL;
 use crate::error::{RegistryError, RegistryErrorCode};
+use crate::json::json_uint;
 use crate::text::{hex_lower, is_id, parse_hex_lower};
-use crate::{KID_LABEL, MAX_TIME};
 
 /// COSE algorithm identifier of Ed25519 (RFC 9864); the only algorithm in v1.
 pub const ALG_ED25519: i64 = -19;
@@ -26,14 +27,6 @@ pub fn derive_kid(public_key: &[u8; 32]) -> [u8; 16] {
     kid
 }
 
-/// Issuer role of a key (spec §8.2 `role`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    UserAuthority,
-    /// Provisional (spec D-9).
-    Scheduler,
-}
-
 /// Registry status of a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyStatus {
@@ -47,7 +40,6 @@ pub struct KeyEntry {
     kid: [u8; 16],
     key: VerifyingKey,
     iss: String,
-    role: Role,
     not_before: u64,
     not_after: u64,
     status: KeyStatus,
@@ -62,9 +54,6 @@ impl KeyEntry {
     }
     pub fn iss(&self) -> &str {
         &self.iss
-    }
-    pub fn role(&self) -> Role {
-        self.role
     }
     pub fn not_before(&self) -> u64 {
         self.not_before
@@ -90,35 +79,53 @@ pub struct Registry {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawRegistry<'a> {
-    format: String,
+    #[serde(borrow)]
+    format: &'a str,
     #[serde(borrow)]
     keys: Vec<&'a RawValue>,
 }
 
+/// Strings are borrowed `&str`: serde_json refuses to borrow a string containing an escape, so
+/// escaped values are rejected (review GC-06). Integers are taken raw and checked against the
+/// §8.2 grammar.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawEntry {
-    kid: String,
-    alg: String,
-    public_key: String,
-    iss: String,
-    role: String,
-    purpose: String,
-    not_before: u64,
-    not_after: u64,
-    status: String,
+struct RawEntry<'a> {
+    #[serde(borrow)]
+    kid: &'a str,
+    #[serde(borrow)]
+    alg: &'a str,
+    #[serde(borrow)]
+    public_key: &'a str,
+    #[serde(borrow)]
+    iss: &'a str,
+    #[serde(borrow)]
+    purpose: &'a str,
+    #[serde(borrow)]
+    not_before: &'a RawValue,
+    #[serde(borrow)]
+    not_after: &'a RawValue,
+    #[serde(borrow)]
+    status: &'a str,
 }
 
 fn err(code: RegistryErrorCode, entry: Option<usize>) -> RegistryError {
     RegistryError { code, entry }
 }
 
+fn is_lower_hex(s: &str, len: usize) -> bool {
+    s.len() == len
+        && s.bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
 impl Registry {
     /// Parses and validates a registry document (spec §8.2, §8.3). Entries are checked in file
     /// order; the first failure aborts the load (the broker must refuse to start).
     ///
-    /// JSON that is not well-formed, duplicate member names, unknown or missing members, wrong
-    /// types, a wrong `format`, or an empty `keys` array are all `registry_entry_invalid`.
+    /// Document-level failures (not JSON, duplicate/unknown/missing members, wrong types, string
+    /// escapes, non-canonical integers, wrong `format`, empty `keys`) and entry member failures
+    /// (including the `kid` format) are `registry_entry_invalid`.
     pub fn load(json: &str) -> Result<Registry, RegistryError> {
         use RegistryErrorCode::*;
         let raw: RawRegistry<'_> =
@@ -130,30 +137,29 @@ impl Registry {
         for (i, raw_entry) in raw.keys.iter().enumerate() {
             let at = Some(i);
             // Strict per-entry parse from the raw text, so duplicate members are detected.
-            let e: RawEntry =
+            let e: RawEntry<'_> =
                 serde_json::from_str(raw_entry.get()).map_err(|_| err(EntryInvalid, at))?;
-            let role = match e.role.as_str() {
-                "user_authority" => Role::UserAuthority,
-                "scheduler" => Role::Scheduler,
-                _ => return Err(err(EntryInvalid, at)),
-            };
-            let status = match e.status.as_str() {
+            let status = match e.status {
                 "active" => KeyStatus::Active,
                 "revoked" => KeyStatus::Revoked,
                 _ => return Err(err(EntryInvalid, at)),
             };
+            let (Some(not_before), Some(not_after)) =
+                (json_uint(e.not_before), json_uint(e.not_after))
+            else {
+                return Err(err(EntryInvalid, at));
+            };
             if e.alg != "Ed25519"
                 || e.purpose != "grant"
                 || !is_id(e.iss.as_bytes(), 128)
-                || e.not_before > MAX_TIME
-                || e.not_after > MAX_TIME
-                || e.not_before >= e.not_after
+                || not_before >= not_after
+                || !is_lower_hex(e.kid, 32)
             {
                 return Err(err(EntryInvalid, at));
             }
 
             // public_key: 64 lowercase hex, a curve point, canonically encoded.
-            let pk: [u8; 32] = parse_hex_lower(&e.public_key)
+            let pk: [u8; 32] = parse_hex_lower(e.public_key)
                 .and_then(|v| <[u8; 32]>::try_from(v).ok())
                 .ok_or(err(KeyInvalid, at))?;
             let key = VerifyingKey::from_bytes(&pk).map_err(|_| err(KeyInvalid, at))?;
@@ -161,7 +167,7 @@ impl Registry {
             if point.compress().to_bytes() != pk {
                 return Err(err(KeyInvalid, at));
             }
-            // Small order, or a nonzero small-order component.
+            // Order exactly L (spec §8.3): not small order and torsion-free.
             if point.is_small_order() || !point.is_torsion_free() {
                 return Err(err(KeyWeak, at));
             }
@@ -179,10 +185,9 @@ impl Registry {
                 KeyEntry {
                     kid,
                     key,
-                    iss: e.iss,
-                    role,
-                    not_before: e.not_before,
-                    not_after: e.not_after,
+                    iss: e.iss.to_owned(),
+                    not_before,
+                    not_after,
                     status,
                 },
             );
@@ -222,7 +227,7 @@ mod tests {
 
     fn entry(pk: &str, kid: &str) -> String {
         format!(
-            r#"{{"kid":"{kid}","alg":"Ed25519","public_key":"{pk}","iss":"i","role":"user_authority","purpose":"grant","not_before":1,"not_after":2,"status":"active"}}"#
+            r#"{{"kid":"{kid}","alg":"Ed25519","public_key":"{pk}","iss":"i","purpose":"grant","not_before":1,"not_after":2,"status":"active"}}"#
         )
     }
 
@@ -252,6 +257,25 @@ mod tests {
             Registry::load(top).unwrap_err().code,
             RegistryErrorCode::EntryInvalid
         );
+    }
+
+    #[test]
+    fn escapes_and_integer_grammar_rejected() {
+        let good = entry(RFC8032_TEST1_PK, &kid_of(RFC8032_TEST1_PK));
+        for (from, to) in [
+            (r#""status":"active""#, r#""status":"\u0061ctive""#),
+            (r#""not_before":1"#, r#""not_before":-0"#),
+            (r#""not_before":1"#, r#""not_before":1.0"#),
+            (r#""not_after":2"#, r#""not_after":9007199254740992"#),
+        ] {
+            assert!(good.contains(from));
+            let e = good.replace(from, to);
+            assert_eq!(
+                Registry::load(&doc(&[e])).unwrap_err().code,
+                RegistryErrorCode::EntryInvalid,
+                "{to}"
+            );
+        }
     }
 
     #[test]

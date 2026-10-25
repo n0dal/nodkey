@@ -10,7 +10,7 @@ use crate::ops::ParamValue;
 use crate::payload::{self, GrantKind};
 use crate::registry::{ALG_ED25519, derive_kid};
 use crate::verify::{external_aad, sig_structure};
-use crate::{MAX_GRANT_BYTES, MAX_TTL, TYP};
+use crate::{MAX_GRANT_BYTES, MAX_SKEW, MAX_TTL, TYP};
 
 #[derive(Debug, Clone)]
 enum ConEntry {
@@ -33,7 +33,8 @@ enum Body {
 }
 
 /// Builder for one grant. Every field is required; `sign` validates the result against the
-/// payload schema (spec §5) and the time rules (`iat <= nbf < exp <= nbf + 30`).
+/// payload schema (spec §5) and the time rules of §9 / steps 8b–8c. The Authority should use
+/// `nbf = iat` with `iat` from its own clock (spec §9).
 ///
 /// `jti` must come from a CSPRNG and never be reused (spec §9); this crate does not generate it.
 #[derive(Debug, Clone)]
@@ -182,9 +183,10 @@ impl GrantBuilder {
         let wid = self.wid.as_deref().ok_or(missing.clone())?;
         let ten = self.ten.as_deref().ok_or(missing.clone())?;
         let sub = self.sub.as_deref().ok_or(missing)?;
-        if !(iat <= nbf && nbf < exp && exp - nbf <= MAX_TTL) {
+        // Spec §9 and steps 8b/8c: nbf - iat <= skew (5), exp - iat <= max_ttl (30).
+        if !(iat <= nbf && nbf - iat <= MAX_SKEW && nbf < exp && exp - iat <= MAX_TTL) {
             return Err(BuildError(
-                "times must satisfy iat <= nbf < exp <= nbf + 30",
+                "times must satisfy iat <= nbf <= iat + 5 and nbf < exp <= iat + 30",
             ));
         }
         let u = |n: usize| Value::Uint(n as u64);
