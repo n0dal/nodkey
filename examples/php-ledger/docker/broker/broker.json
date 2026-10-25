@@ -1,4 +1,5 @@
 {
+  "profile": "demo1",
   "max_request_bytes": 16384,
   "db": {
     "host": "db",

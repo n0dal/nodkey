@@ -1,0 +1,8 @@
+# Keep local state, secrets, internal tooling, and build outputs out of every build context.
+.git
+.claude
+var
+**/target
+**/node_modules
+*.env
+.env*

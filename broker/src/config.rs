@@ -15,6 +15,10 @@ pub const MAX_REQUEST_BYTES: usize = 1 << 20;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConfig {
+    /// Protocol v1 exists only for the Demo 1 profile (effect protocol v2 §2.1). The member is
+    /// optional for compatibility with the Demo 1 configuration; if present it must be "demo1".
+    #[serde(default)]
+    profile: Option<String>,
     max_request_bytes: usize,
     db: DbConfig,
     workloads: Vec<RawWorkload>,
@@ -60,6 +64,9 @@ impl Config {
     pub fn parse(bytes: &[u8]) -> Result<Config, String> {
         strict_json::check_strict(bytes).map_err(|e| format!("config: {e}"))?;
         let raw: RawConfig = serde_json::from_slice(bytes).map_err(|e| format!("config: {e}"))?;
+        if raw.profile.as_deref().is_some_and(|p| p != "demo1") {
+            return Err("config: protocol v1 is allowed only in the demo1 profile".into());
+        }
 
         if !(MIN_REQUEST_BYTES..=MAX_REQUEST_BYTES).contains(&raw.max_request_bytes) {
             return Err(format!(
@@ -181,6 +188,16 @@ mod tests {
         assert!(!c.workloads[1].allowed_ops.contains(&OpKind::Transfer));
     }
 
+    /// T32 (v1 side): v1 only under the demo1 profile.
+    #[test]
+    fn v1_profile_must_be_demo1() {
+        let ok = sample(APP1).replace(
+            r#"{"max_request_bytes""#,
+            r#"{"profile":"demo1","max_request_bytes""#,
+        );
+        assert!(Config::parse(ok.as_bytes()).is_ok());
+    }
+
     #[test]
     fn rejects_bad_configs() {
         let bad = [
@@ -194,6 +211,10 @@ mod tests {
             sample(&APP1.replace("app1", "App 1")),
             sample(""),
             sample(APP1).replace("16384", "10"),
+            sample(APP1).replace(
+                r#"{"max_request_bytes""#,
+                r#"{"profile":"phase3","max_request_bytes""#,
+            ),
         ];
         for b in bad {
             assert!(Config::parse(b.as_bytes()).is_err(), "should reject: {b}");

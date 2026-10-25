@@ -208,6 +208,47 @@ impl Ledger {
         res
     }
 
+    /// Claims the database for protocol v1 (effect protocol v2 §2.1, EP-10): a v1 and a v2
+    /// broker must never share one database. Returns `Ok(false)` if the database has no
+    /// `broker_claim` table (a Demo 1 database without the v2 schema, which no v2 broker can
+    /// use either). Any other failure, or a claim by another protocol, is an error.
+    pub async fn claim_protocol_v1(&self) -> Result<bool, String> {
+        let r = self
+            .with_client(move |c, w| {
+                Box::pin(async move {
+                    let ins = c
+                        .execute(
+                            "INSERT INTO broker_claim (singleton, protocol, broker_id) \
+                             VALUES (true, 1, 'demo1') ON CONFLICT (singleton) DO NOTHING",
+                            &[],
+                        )
+                        .await;
+                    if let Err(e) = &ins {
+                        if e.code() == Some(&SqlState::UNDEFINED_TABLE) {
+                            return Ok(None);
+                        }
+                    }
+                    ins.map_err(|e| w.failure("claim", e))?;
+                    let row = c
+                        .query_one("SELECT protocol FROM broker_claim", &[])
+                        .await
+                        .map_err(|e| w.failure("claim read", e))?;
+                    let p: i32 = row.try_get(0).map_err(|e| w.failure("decode", e))?;
+                    Ok(Some(p))
+                })
+            })
+            .await;
+        match r {
+            Ok(None) => Ok(false),
+            Ok(Some(1)) => Ok(true),
+            Ok(Some(p)) => Err(format!(
+                "database already claimed by a protocol {p} broker (refusing to start)"
+            )),
+            Err(LedgerError::Unavailable(d) | LedgerError::OutcomeUnknown(d)) => Err(d),
+            Err(e) => Err(format!("{e:?}")),
+        }
+    }
+
     pub async fn get_balance(&self, account: &AccountId) -> Result<i64, LedgerError> {
         let account = account.as_str().to_owned();
         self.with_client(move |c, w| {

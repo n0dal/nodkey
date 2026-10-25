@@ -42,7 +42,7 @@ services:
   broker:
     <<: *logging
     image: nodkey/broker:dev
-    build: { context: ../../broker }
+    build: { context: ../.., dockerfile: broker/Dockerfile }
     user: "10002:10002"
     networks:
       data: { ipv4_address: 172.30.20.10 }

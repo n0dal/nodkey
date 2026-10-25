@@ -13,6 +13,27 @@ tokio = { version = "1", default-features = false, features = ["rt-multi-thread"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+# Grant verification (docs/specs/grant-v1.md). The test-only feature
+# `conformance-unvalidated-requests` MUST NOT be enabled here; `tests/feature_guard.rs` fails if it is.
+nodkey-grant = { path = "../crates/nodkey-grant", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+
+[dev-dependencies]
+# Integration tests drive socket A with the authority's own client and message types.
+nodkey-authority = { path = "../crates/nodkey-authority" }
+# Integration tests drive socket G with the gateway's own client and result types.
+nodkey-gateway = { path = "../crates/nodkey-gateway" }
+
+[lib]
+name = "nodkey_broker"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nodkey-broker"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
 
 [profile.release]
 debug = false
