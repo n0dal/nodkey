@@ -484,3 +484,14 @@ been tested.
   - ADR-0004, pending OQ-07.
   - ADR-0007, to be accepted together with ADR-0009.
   - ADR-0009, new and unreviewed.
+
+### Correction to the Resolution table (2026-10-25)
+
+The 2026-10-25 review (`2026-10-25-adr-0003-0009-review.md`) found that three rows above claimed more
+than the ADR text contained. Corrected dispositions:
+
+| Finding | Corrected status | Where now addressed |
+|---|---|---|
+| AR-01 | The credential-field lint was claimed but missing from ADR-0003 rev. 2. **Now added**, for mapped routes only; unmapped routes cannot be linted, so an app with its own login form is not in Native mode. Callback binding, recovery, and re-issue are now specified. | ADR-0003 rev. 3 §2, §4 |
+| AR-02 | Was partial: `Expires` was not overridden and the cache rule was keyed by content type. **Now addressed**: `no-store` on every app response with `Expires`/`Age` removed, hash-verified static exceptions, `nosniff`, and `Service-Worker` rejected by presence. **Still open:** WebKit behaviour (browser spike, THREAT_MODEL R-19). | ADR-0003 rev. 3 §4 |
+| AR-06 | Was partial: `job.claim` reopened a grantless path, and `workload` operations lacked subject and resource scope. **Now replaced** by ADR-0009 rev. 2 (broker-derived authority, no scheduler, config-enforced tenancy). Still Proposed, Phase 5 scope. Phase 3 permits no grantless effects. | ADR-0009 rev. 2; SI-19 v0.3 |

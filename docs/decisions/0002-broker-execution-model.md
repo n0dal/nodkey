@@ -33,7 +33,7 @@ reviewable size; path to stronger internal separation.
 
 1. A Rust broker exposes **only typed, declared operations**: operation id + schema version, typed
    request, per-parameter binding class `exact | bounded | free` (ADR-0003), required authority
-   (`user_grant | scheduler_grant | workload`, ADR-0009), preconditions, idempotency semantics.
+   (`user_grant | read | derived | workload`, ADR-0003 §7, ADR-0009), preconditions, idempotency semantics.
    Unknown operations or fields ⇒ deny. Unclassified parameters, or a non-`user_grant` operation not
    listed in config, are **startup errors** (SI-19).
 2. The broker holds all DB credentials.

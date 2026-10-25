@@ -30,8 +30,9 @@ cross-broker receipts (only when brokers share no DB).
 2. Each transition is a typed operation: lock the workflow row (lock order per ADR-0006), check
    `(state, op)` is declared and its guard holds on current trusted state, apply the effect, advance
    with `WHERE state = from_state` (rows = 1). Any failure ⇒ rollback ⇒ deny.
-3. **Transitions without a user request** (e.g. capture after authorize) require a scheduler grant
-   or are broker-internal, per ADR-0009; never grantless in multi-tenant workloads.
+3. **Transitions without a user request** (e.g. capture after authorize) are `derived`
+   transitions whose authority is the consumed user grant recorded on the workflow row (ADR-0009 rev. 2,
+   Phase 5).
 4. **v0 returns an unsigned outcome plus an audit row id (AR-19).** No receipt signing key, no second
    COSE type. Signed receipts are added only with a named external verifier. Nothing returned to the
    app is ever accepted as an authorization input (SI-12).
@@ -55,7 +56,8 @@ Research 01 §4 (privsep monitor; Bertino et al. 1999; in-toto as evidence); rev
 ## Required tests
 
 Skip a step; repeat a step; two concurrent transitions from one state; replay an outcome; cross-tenant
-workflow id; background transition without scheduler grant (ADR-0009).
+workflow id; `derived` transition from another workload, after `derived_until`, or not declared as a follow-on
+(ADR-0009).
 
 ## Reversal / migration
 

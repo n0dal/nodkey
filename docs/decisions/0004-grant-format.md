@@ -31,7 +31,8 @@ CVE-2026-25537) — rejected. Fixed-field binary — fallback. Actenon — not e
 - **Ed25519** (−19), `verify_strict`; algorithm fixed by the `kid` trust-store entry.
 - Payload: deterministic CBOR, Nodkey-private integer keys, unknown keys rejected at every level.
 - Domain separation: fixed `typ`, `"Signature1"`, `external_aad = "nodkey.grant.v1" ‖ 0x00 ‖ aud`, one
-  key per purpose and issuer (gateway authority; scheduler per ADR-0009).
+  key per purpose and issuer (the gateway's authority is the only issuer in v0). Read grants (ADR-0003 §7)
+  require an amendment to this ADR: grant-kind field, `use` semantics, `ops` set.
 - Verification order per 02 §4.3; any failure is a generic deny.
 - **Payload changes vs 02 §4.2:**
   - `con` carries the **exact value** for every `exact` parameter and the ceiling for every `bounded`

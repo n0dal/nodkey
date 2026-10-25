@@ -25,7 +25,7 @@ Postgres libraries; reviewability; small runtime; language-neutral protocol.
 
 ## Decision
 
-1. **Gateway, authority, scheduler, and broker in Rust.** `unsafe` forbidden in Nodkey crates (`#![forbid(unsafe_code)]`)
+1. **Gateway edge, gateway proxy, authority, and broker in Rust.** `unsafe` forbidden in Nodkey crates (`#![forbid(unsafe_code)]`)
    except in a reviewed, isolated module if ever required. Dependencies pinned via `Cargo.lock`,
    reviewed with `cargo audit`/`cargo deny`; minimal feature sets. `forbid(unsafe_code)` does **not**
    cover dependencies: the whole dependency tree (including `unsafe` in crates such as the async
