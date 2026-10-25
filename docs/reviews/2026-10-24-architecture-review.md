@@ -442,3 +442,43 @@ and puts an attacker-facing C parser in the TCB, and at **budgets**, which are t
 largest residual and are not concurrency-safe as specified. Phase 2 may proceed once AR-12 and AR-15 are
 addressed and the AR-03 topology is decided; Phase 3 is blocked by AR-01..04, AR-06 and the Medium
 findings marked Phase 3.
+
+---
+
+## Resolution (2026-10-24, architecture revision rev. 2)
+
+Rulings by the orchestrator; changes drafted by the design author. The project is now named
+**Nodkey**: revised documents use the new name and `nodkey` identifier prefixes. Nothing below has
+been tested.
+
+| Finding | Disposition | Where addressed |
+|---|---|---|
+| AR-01 | **Accepted.** Separate auth origin served only by the gateway; passkeys (RP ID = auth host) for P0; password login is a weaker, labelled profile; `__Host-` HttpOnly Secure session cookie set via a gateway-reserved callback. Route-map lint for credential-named fields adopted. | ADR-0003 §2; SI-18; THREAT_MODEL §3, assumption 9, R-4; ARCHITECTURE §3 step 1, §6 |
+| AR-02 | **Accepted.** `Service-Worker: script` requests rejected; `Service-Worker-Allowed` dropped; HTML/JS forced `no-cache`; `Clear-Site-Data` runbook. R-3 rewritten and quantified. **Partially deferred:** a gateway-pinned CSP with hash-pinned `script-src` breaks most legacy apps (inline scripts), so it is an optional hardening, not a P0 requirement. Whether browsers send `Service-Worker: script` must be confirmed in a spike. | ADR-0003 §4; SI-18; THREAT_MODEL §6 R-3 |
+| AR-03 | **Accepted.** A Rust gateway is the only public listener and terminates TLS and sessions. Signing runs in a separate `authority` container with no network and no workload traffic. nginx, if used, is part of the untrusted workload. Request headers and cookies are forwarded from an allowlist. | ADR-0001; ADR-0003 §1, §3; THREAT_MODEL row J, R-8 |
+| AR-04 | **Accepted.** Every parameter is classified `exact` / `bounded` (only where the route map marks it `app_computed`) / `free` (justified and published). Destination-like parameters are never free. Unclassified parameters are a startup error. CI binding check against policy. | ADR-0003 §5; ADR-0002 §1; ADR-0004 (`con`); ADR-0005; SI-06 |
+| AR-05 | **Accepted.** Locked counter rows (`FOR UPDATE`, guarded write) under READ COMMITTED with a fixed lock order. SERIALIZABLE is not required. Fixed windows give a published 2× worst case at a boundary. | ADR-0006 §1–2; ADR-0005; THREAT_MODEL R-3 |
+| AR-06 | **Accepted.** New ADR-0009: authority classes `user_grant` / `scheduler_grant` / `workload`; trusted scheduler issues grants derived from prior user-granted state; grantless only in single-tenant workloads, with fixed ceilings. | ADR-0009; ADR-0002; ADR-0007 §3; SI-19 |
+| AR-07 | **Accepted, resolved by topology.** The subrequest is gone: one hop and one parser, and the body forwarded is the bytes that were parsed. | ADR-0003 §1, §5; ARCHITECTURE §3 |
+| AR-08 | **Accepted.** `rqh` removed in v1 (exact `con` replaces it); key 16 reserved. | ADR-0004; ADR-0003 §6 |
+| AR-09 | **Accepted.** `epo` replaced by broker-side `revoked_before` per `(ten)`, `(ten, wid)`, `(ten, sub)`; gateway revoke-only socket on logout; `max_ttl` 30 s. | ADR-0004; ADR-0006 §6; ADR-0002 §3 |
+| AR-10 | **Accepted (first half).** In-transaction precondition: deny effects on a resource with a pending conflicting `UNKNOWN`. **Deferred:** business-intent upstream idempotency keys, until the first external adapter, because they depend on upstream semantics. | ADR-0006 §7, Open |
+| AR-11 | **Accepted.** A verified-and-denied grant records `DENIED` in a separate transaction; one decision per grant. | ADR-0006 §4; SI-09 |
+| AR-12 | **Accepted.** All writable workload mounts, including socket volumes, are tmpfs `noexec,nosuid,nodev` with size caps; log rotation limits; DB storage on a separate filesystem; new exec and persistence probes. The research 03 §2.2 statement is superseded here; the research note itself was not edited. | ADR-0001; ARCHITECTURE §4; THREAT_MODEL TB-7, R-14 |
+| AR-13 | **Accepted.** One route ⇒ at most one grant ⇒ one operation. Composite effects are a single typed operation or a workflow transition. | ADR-0003 §5 |
+| AR-14 | **Accepted.** PostgREST RPC-only + RLS comparison recorded; it is to be built as a test comparator. ADR-0001/0002 stay Proposed until OQ-01 is closed. | ADR-0002 Alternatives; ADR-0001; ARCHITECTURE §6 |
+| AR-15 | **Accepted, mostly made moot.** nginx is untrusted, so X-Accel and error interception affect only the workload. The gateway drops app `Set-Cookie` for gateway-owned names. `Nodkey-Grant` can be set only by the gateway, because inbound `Nodkey-*` headers are not on the allowlist. | ADR-0003 §3–4; THREAT_MODEL TB-2 |
+| AR-16 | **Accepted.** SI-02 reworded (reusable/standing credentials, end-user credentials; grants present by design). Exfiltration stated in THREAT_MODEL §1. Row A and the §3 session-credential row corrected. Five-container P0 stated. | SI-02; THREAT_MODEL §1–3; ARCHITECTURE §4 |
+| AR-17 | **Accepted.** `sub`/`ten` are stated as *sourced* from the verified grant; the checked fields are listed. | ADR-0004; SI-06 |
+| AR-18 | **Accepted.** Clock high-water mark and restore runbook specified. SI-09 is not claimed across restore or clock rollback until these are tested. | ADR-0006 §8–9; SI-09; ARCHITECTURE §5 |
+| AR-19 | **Accepted.** v0 returns an unsigned outcome plus an audit row id; signed receipts wait for a named verifier. Evidence is the broker DB audit table, never container logs. | ADR-0007 §4–5; ADR-0001 |
+| AR-20 | Noted; no change. | — |
+
+**Rejected findings:** none. **Status after revision:**
+- **Accepted:** ADR-0005, ADR-0006, ADR-0008.
+- **Proposed:**
+  - ADR-0001 and ADR-0002, pending OQ-01.
+  - ADR-0003, rewritten; needs re-review.
+  - ADR-0004, pending OQ-07.
+  - ADR-0007, to be accepted together with ADR-0009.
+  - ADR-0009, new and unreviewed.

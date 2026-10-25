@@ -1,84 +1,91 @@
-# ADR-0003: Trusted user context and grant issuance
+# ADR-0003: Trusted user context and grant issuance (rev. 2)
 
-- **Status:** Proposed
+- **Status:** Proposed — rewritten after review AR-01..04, AR-07, AR-08, AR-13 (rev. 1 verdict:
+  reject and resubmit). Needs re-review before acceptance.
 - **Date:** 2026-10-24
-- **Invariants:** SI-02, SI-05, SI-06, SI-07, SI-09, SI-10
-- **Open questions:** OQ-04 (addressed), OQ-08 (partially)
+- **Invariants:** SI-02, SI-05, SI-06, SI-07, SI-09, SI-10, SI-18
+- **Open questions:** OQ-04 (addressed), OQ-08 (addressed by single-parser topology)
 
 ## Problem
 
-The broker must know which user is behind an effect and what that user asked for, without trusting
-the app that relays the request (OQ-04).
+The broker must know which user is behind an effect and exactly what that user asked for, without
+trusting the app that relays the request, and without the app ever holding a reusable user
+credential (OQ-04).
 
 ## Evaluation criteria
 
-No reusable user credential in the workload; binding to the user's actual request; residual
-authority of a compromised app; no client-side keys; standard formats.
+No reusable user credential reaches workload code, server- or client-side; the effect is bound to
+the user's actual request; one parser decides what the request means; the residual of a compromised
+app is published and small; standard primitives only.
 
 ## Alternatives considered
 
-From research 04 §2: (a) app forwards the session cookie/token — the app holds a bearer credential
-and can act as the user until expiry: **rejected**. (b1) gateway identity attestation — app can
-trigger any permitted operation during TTL. (b2) gateway attestation + request digest, with the
-**broker** deriving operation and parameters from the attested request. (c) DPoP-style client keys —
-do not defeat a compromised origin. (d) RFC 9421 — suits server channels, not browsers.
+(a) app forwards the session cookie — rejected (bearer credential in the app). (b1) identity-only
+attestation — app can trigger any permitted operation. (b2) attestation bound to the request,
+operation derived by a trusted parser — chosen. (c) DPoP client keys — do not defeat a compromised
+origin. Rev. 1 (nginx + auth subrequest, ceiling binding) — rejected by review: nginx parses app
+output while holding all session cookies (AR-03), the subrequest has no body and no reliable response
+association (AR-07), ceilings widen the residual (AR-04), and a shared origin lets the app capture
+credentials at login (AR-01).
 
 ## Decision
 
-1. The gateway (authority component) verifies the user session and **removes the session credential
-   before forwarding** the request to the app.
-2. The authority maps the user's HTTP request through an **authority-held route map** to an
-   **operation scope**: operation, resource, and a constraint ceiling (e.g. `ledger.refund` on order
-   9821, `amount_cents ≤ policy max`).
-3. It issues a **short-lived, single-use signed grant** (ADR-0004) bound to: issuer, audience =
-   broker, workload, tenant, subject, operation, resource, constraints, request digest, `nbf`/`exp`,
-   `jti`.
-4. The app receives the grant, may compute concrete parameters, and submits `{grant, params}` to the
-   broker. The broker **re-derives everything it can from trusted state** (ownership, tenant, state,
-   budgets) and treats the grant as an upper bound only (necessary, never sufficient).
-5. Unmapped routes produce no user-scoped grant. Workload-only operations (no subject) are a separate,
-   budgeted class.
+1. **Topology.** A Rust **gateway** is the only public listener. It terminates TLS and sessions,
+   parses each request once, and forwards it over a UDS to the workload (nginx, if used, is part of
+   the untrusted workload). Grant **signing** happens in a separate **authority** process/container
+   that receives requests only from the gateway, never from the app.
+2. **Separate auth origin (SI-18).** Credential entry and session establishment happen only on
+   `auth.<domain>`, served solely by the gateway, with `frame-ancestors 'none'`. Passkeys/WebAuthn
+   with RP ID = the auth host are the P0 login method; password login is a weaker, separately
+   labelled profile. After login the gateway sets `__Host-nodkey_session` (HttpOnly, Secure,
+   SameSite=Lax) on the app host through a gateway-reserved, one-time-code callback path.
+3. **Request allowlist.** The gateway builds the forwarded request from an **allowlist** of headers
+   and app-owned cookies; everything else, including every gateway-owned cookie, `Authorization`, and
+   any client-supplied `Nodkey-*` header, is dropped. The grant is attached under `Nodkey-Grant`, which only
+   the gateway can set.
+4. **Browser persistence controls.** The gateway rejects requests carrying `Service-Worker: script`
+   (no service-worker registration on the app origin), sets `Cache-Control: no-cache` on HTML and
+   JavaScript responses, drops app `Set-Cookie` headers naming gateway-owned cookies, and drops
+   `Service-Worker-Allowed`. It supports an operator-triggered `Clear-Site-Data: "cache", "storage"`
+   for remediation.
+5. **Route map → exact binding.** The gateway maps method + canonical path + strictly parsed body
+   (JSON with duplicate keys rejected, size-capped) to **at most one operation** per request
+   (AR-13). Each operation parameter is classified in its broker declaration as **exact** (default:
+   the value comes from the request and is placed in the grant), **bounded** (ceiling, allowed only
+   where the route map marks it `app_computed`), or **free** (requires a written justification and
+   appears in the published residual table). Destination-like parameters (accounts, URLs, recipients)
+   are never free. The broker refuses to start if any parameter is unclassified.
+6. **Grant.** The authority signs a single-use grant (ADR-0004): `iss, aud, wid, ten, sub, op, opv,
+   res, con, iat, nbf, exp (≤ 30 s), jti`. No `rqh`: exact binding in `con` replaces it (AR-08).
+7. **Broker.** Sources `sub`/`ten` from the verified grant (AR-17), checks `wid` against the socket,
+   checks params against `res`/`con`, then re-derives ownership, state and budgets in-transaction.
+8. Unmapped routes get no grant. Background and workload-authority operations follow ADR-0009.
 
-## Residual authority of a compromised app (quantified)
+## Residual authority of a compromised app
 
-For each user request *r* that passes through the app and maps to scope *s(r)*, the app can cause
-**at most one** effect with `op = s(r).op`, `resource = s(r).res`, subject/tenant = r's verified
-user, and parameters anywhere in `ceiling(r) ∩ policy(u, state) ∩ budgets`, before `exp`
-(TTL ≤ `max_ttl`, default 300 s). Example: user asks to refund $25; ceiling = per-refund policy max
-$100; order refundable $80 ⇒ the app can refund **up to $80**, i.e. $55 more than intended, once.
-It cannot touch another order, operation, user, tenant, or workload, or reuse the grant. Additionally
-(THREAT_MODEL R-3) the app serves the page, so injected script can make the logged-in browser send
-further real requests; the true bound across a session is then *P(u) limited by budgets*.
+- **In-flight grant:** per mapped request, the app can execute **exactly the user's request, once,
+  within 30 s**, or drop it. For `bounded` params: anything up to the declared ceiling; for `free`
+  params: anything, as listed in the residual table.
+- **In-page abuse while the user is active** (quantified in THREAT_MODEL R-3): any route in P(u),
+  limited by budgets, while a tab from the app origin is open within the session lifetime.
+- **No credential capture** under passkeys; under passwords, phishing on the app origin remains (R-4).
 
 ## Evidence
 
-Research 04 §2.3 residual table; BeyondProd end-user context tickets and OAuth Transaction Tokens
-draft-11 (01 §3); PSD2 RTS Art. 5 dynamic linking (01 §3).
+Research 04 §2 (b2); review AR-01..04, AR-07, AR-08, AR-13; WebAuthn L2 RP ID rules [F\*]; Service
+Workers spec `Service-Worker: script` request header [F\*, to verify in a spike]; RFC 6265bis cookie
+prefixes [F\*].
 
 ## Consequences
-- **Advantages:** no reusable user credential in the workload; the authority is the single HTTP
-  parser, which removes broker-side re-parsing and narrows OQ-08 to nginx ↔ authority.
-- **Drawbacks:** route map is a manifest burden; multi-effect requests need multiple scopes/grants
-  (open); policy knowledge is split between route-map ceilings and broker Cedar.
-- **Security:** authority and its key are TCB (attacker J); see ADR-0001 objection 1.
-- **Performance:** one authority call and one signature per mapped request.
-- **Compatibility:** requires the authority to see the request body when a ceiling depends on it.
-
-## Architect objection
-
-**1. A ceiling is weaker than b2 without need.** When the route map can read a parameter from the
-user's own request (here `amount_cents = 2500` in the body), the grant should bind it **exactly**
-(`amount_cents == 2500`, or the `rqh` exact-request mode), not as a ceiling. Then the residual for
-that request is "the effect the user sent, at most once" instead of "up to $80". Ceilings should be
-used only for parameters the route map explicitly declares as *app-computed*, and each such
-declaration should be listed in the deployment's published residuals. Evidence: 04 §2.3 (b2 vs b1),
-PSD2 dynamic linking binds the exact amount.
-
-**2. The request digest is not a binding unless the broker checks it.** The broker receives
-`{grant, params}`, not the user's HTTP request, so `rqh` over the HTTP request cannot be verified at
-the broker and is audit evidence only. Either define `rqh` over the canonical *broker request*
-(computed by the authority from route-extracted parameters) or document it as evidence only.
+- **Advantages:** one memory-safe parser; no reusable credential in the workload; residual equals the
+  user's own request for exact routes.
+- **Drawbacks:** apps must give up their own login and declare routes; gateway is new TCB code.
+- **Security:** the gateway still parses app responses and holds sessions — a gateway bug reachable
+  from the app yields live sessions (not the signing key). Authority compromise = attacker J.
+- **Performance:** one extra hop plus one signature per mapped request [H].
+- **Compatibility:** apps relying on service workers need an explicit allowlisted path (none in v0).
 
 ## Reversal / migration
 
-Moving to strict b2 (exact binding everywhere) is a route-map change; grant format is unchanged.
+Moving bounded params to exact is a route-map change. Replacing the gateway with an IdP + another
+trusted proxy is possible if both keep decisions 2–5.

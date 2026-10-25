@@ -1,69 +1,63 @@
-# ADR-0005: Policy evaluation — Cedar embedded in the broker
+# ADR-0005: Policy evaluation — Cedar embedded in the broker (rev. 2)
 
-- **Status:** Proposed
+- **Status:** Accepted — review conditions AR-04 (CI binding check) and AR-05 (budget facts from
+  locked counters) addressed below and in ADR-0006.
 - **Date:** 2026-10-24
 - **Invariants:** SI-08, SI-10, SI-11, SI-13, SI-15
 
 ## Problem
 
-Choose how the broker decides whether a typed, grant-bound request is permitted given trusted facts.
+Decide whether a typed, grant-bound request is permitted given trusted facts.
 
 ## Evaluation criteria
 
-Embeddable in Rust with no network hop; deterministic, no I/O; default deny; formal analysis;
-schema validation; Apache-2.0-compatible; maturity (research 04 §3.1).
+Embeddable in Rust; deterministic, no I/O; default deny; formal analysis; schema validation;
+Apache-2.0-compatible; maturity (research 04 §3.1).
 
 ## Alternatives considered
 
-**OPA/Rego** (Go sidecar or `regorus`; builtins with I/O must be disabled; no formal analysis).
-**OpenFGA/SpiceDB** (server with own store; cross-store staleness) — later as a fact source only.
-**Casbin** (nothing over Cedar). **Hand-written Rust** (no analysis, policy mixed into code).
-**Cedar** (`cedar-policy` 4.14.0, Apache-2.0, CNCF Sandbox; Lean-modeled semantics; `symcc` SMT
-analysis).
+OPA/Rego (I/O builtins, no analysis); OpenFGA/SpiceDB (separate store; later as fact source only);
+Casbin; hand-written Rust; **Cedar** (`cedar-policy` 4.14.0, Apache-2.0, CNCF Sandbox, `symcc`).
 
 ## Decision
 
 Three layers, each failing closed:
 
-1. **Typed Rust validation (before):** parse the declared operation into a typed request; reject
-   unknown fields; build Cedar `principal`, `action`, `resource`, `context` **only from trusted
-   facts** (grant-verified subject/tenant, transport workload id, DB rows read in the transaction).
-2. **Cedar (decision):** embedded, schema-validated policy set; default deny; `forbid` overrides
-   `permit`. Guardrail forbids include cross-tenant, amount above refundable, and budget exceeded.
-3. **DB transaction (after):** state preconditions, guarded writes (`rows = 1`), consumption (ADR-0006).
+1. **Typed Rust (before):** typed request; Cedar `principal`/`action`/`resource`/`context` built
+   only from trusted facts: grant-sourced `sub`/`ten`, socket `wid`, rows read in the transaction.
+2. **Cedar:** schema-validated, default deny, `forbid` overrides `permit`. Guardrail forbids:
+   cross-tenant, amount above refundable, budget exceeded.
+3. **Transaction (after):** state preconditions, guarded writes, consumption (ADR-0006).
 
-**Fail-closed adapter:** Allow only if the decision is Allow **and** diagnostics contain zero errors.
-Any evaluation error, request-validation error, or entity-construction error ⇒ Deny. Cedar *skips*
-an erroring policy and reports it in diagnostics; an erroring `forbid` would otherwise let a
-`permit` through. The broker refuses to start with a policy set that fails strict validation. CI runs
-`symcc` never-errors checks on every guardrail `forbid` and implication checks for published
-guardrails.
+**Budget facts (AR-05).** `context.window_spent_*` comes **only** from budget counter rows locked
+`SELECT … FOR UPDATE` in the effect transaction (ADR-0006 §2), never from an unlocked aggregate.
+The counter is advanced with a guarded write, so the SQL guard and the Cedar forbid both enforce it.
+
+**Fail-closed adapter.** Allow iff decision = Allow **and** zero diagnostic errors; any evaluation,
+validation, or entity-construction error ⇒ Deny. Policy sets failing strict validation are refused at
+startup. CI: `symcc` never-errors on every guardrail `forbid`; implication checks for published
+guardrails; and a **binding check** that every request attribute used in policy is either grant-bound
+(`exact`/`bounded`) or a declared `free` parameter (AR-04); also flags route-map ceilings tighter than
+policy.
 
 ## Evidence
 
-Cedar authorization semantics (error-skip, default deny); Cutler et al., OOPSLA 2024;
-`cedar-policy-symcc` docs; OPA capabilities docs; Zanzibar §2.2 — cited in research 04.
+Cedar authorization semantics (error-skip); Cutler et al., OOPSLA 2024; `cedar-policy-symcc`;
+PostgreSQL isolation docs on write skew [F\*] — research 04; review AR-05, AR-20.
 
 ## Consequences
-- **Advantages:** policies are analyzable before deployment; pure evaluation keeps facts and policy
-  separate.
-- **Drawbacks:** Cedar plus schema is another language for adopters; `symcc` requires an external
-  `cvc5` binary at analysis time (not runtime, not TCB at runtime).
-- **Security:** proofs cover *policy given the schema*, not the truth of the facts fed in; the fact
-  layer needs its own tests (R-11; 04 §9 item 6). Cedar crate is a TCB dependency (attacker H): pin
-  and review.
-- **Performance:** in-process evaluation [H, small relative to the transaction; not measured].
-- **Compatibility:** policy is language-neutral; adopters on Rego would need translation.
+- **Advantages:** analyzable policy; facts and policy separated.
+- **Drawbacks:** another language for adopters; `cvc5` needed at CI time only.
+- **Security:** proofs cover policy given the schema, not fact truth (R-11); Cedar is a pinned TCB
+  dependency.
+- **Performance:** in-process [H, unmeasured].
+- **Compatibility:** language-neutral policy.
 
-## Architect notes
+## Required deny tests
 
-- Policy and the authority's route-map ceilings are two sources of truth. A ceiling looser than
-  policy is harmless (policy narrows); a ceiling tighter than policy silently denies legitimate
-  requests. A CI check comparing them is recommended.
-- Required deny tests: forged context, cross-tenant IDs, wrong owner, over-refund, budget exceeded,
-  Cedar evaluation error, invalid policy set at startup.
+Forged context, cross-tenant IDs, wrong owner, over-refund, budget exceeded including N = 64
+concurrent requests on **different** resources, Cedar evaluation error, invalid policy at startup.
 
 ## Reversal / migration
 
-The typed layer isolates Cedar behind a `decide(facts) -> Allow|Deny` interface; replacing the
-engine does not change the wire protocol.
+Cedar sits behind `decide(facts) -> Allow | Deny`; engine replacement does not change the protocol.

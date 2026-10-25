@@ -1,71 +1,72 @@
-# ADR-0006: Replay prevention and effect state
+# ADR-0006: Replay prevention, budgets, and effect state (rev. 2)
 
-- **Status:** Proposed
+- **Status:** Accepted — review conditions AR-05, AR-10, AR-11 decided below; AR-18 is a condition on
+  *claiming* SI-09 across restore/clock rollback, which SI-09 v0.2 now scopes explicitly.
 - **Date:** 2026-10-24
 - **Invariants:** SI-09, SI-11, SI-15
 
 ## Problem
 
-Guarantee at-most-once effects per single-use grant under concurrency, retries, restarts, and
-ambiguous external outcomes.
+At-most-once effects per grant under concurrency, retries, restarts, and ambiguous external
+outcomes; concurrency-safe budgets.
 
 ## Evaluation criteria
 
-Atomicity of consumption and effect; durability across restart; correct handling of legitimate
-retries; no blind retry of ambiguous external effects; bounded storage.
+Atomicity; durability; one decision per grant; no blind retry; budgets that concurrent callers cannot
+exceed; bounded storage.
 
 ## Alternatives considered
 
-- In-memory replay cache — lost on restart, reopens the window: rejected.
-- Separate replay store (e.g. Redis) — not atomic with the effect; crash between the two yields
-  either a lost grant or a duplicate effect: rejected for internal effects.
-- Per-`jti` denylist — unnecessary when consumption is recorded.
-- Consumption row in the **same transaction** as the effect: chosen.
+In-memory cache (lost on restart) and separate replay store (not atomic) — rejected. For budgets:
+SERIALIZABLE with retry vs locked counter rows (AR-05) — counters chosen: deterministic, no retry
+loop, no dependence on aggregate reads.
 
 ## Decision
 
-1. **Internal effects:** in one serializable (or row-locked) DB transaction: `INSERT
-   consumed_grant(iss, jti, exp, request_hash, outcome)` (unique key = arbiter under concurrency),
-   re-check state preconditions, write the effect, commit. Crash ⇒ both or neither. Store
-   unavailable ⇒ deny. Synchronous commit on.
-2. **Idempotent retry:** same `(iss, jti)` with the same canonical request hash returns the stored
-   outcome without a second effect; a different hash is denied and logged.
-3. **External effects:** durable state machine `RESERVED → DISPATCHED → SUCCEEDED | FAILED |
-   UNKNOWN`. `RESERVED` (which consumes `jti`) commits before any network call; the upstream
-   idempotency key is `HMAC(broker_key, "pbe.idem.v1" ‖ iss ‖ jti)`. Timeout, reset, or 5xx after
-   dispatch ⇒ `UNKNOWN`. **`UNKNOWN` is never retried or moved to `FAILED`** unless the upstream
-   documents idempotency-key deduplication over a window longer than the retry horizon; otherwise it
-   is resolved by reconciliation or an operator. Crash in `RESERVED` ⇒ safe to fail; crash in
-   `DISPATCHED` ⇒ `UNKNOWN`.
-4. **Retention:** consumption rows are pruned no earlier than `exp + skew + margin`.
-5. Revocation (epoch) is checked inside the consuming transaction.
+1. **Transaction mode:** READ COMMITTED with explicit locks, fixed lock order: budget counter rows
+   (sorted by key) → workflow row → resource row. Deadlock or lock timeout ⇒ Deny, no automatic retry.
+2. **Budgets:** counter rows `budget(scope, window_start) → spent, limit` for scopes `(ten, sub)`,
+   `(ten)`, `(ten, wid)` as configured; **fixed windows** (e.g. UTC day). Each effect locks its rows
+   `FOR UPDATE` and advances them with `UPDATE … WHERE spent + $amt <= limit` (rows = 1). Fixed windows
+   allow at most **2× limit** across one boundary; published as such.
+3. **Consumption:** `INSERT consumed_grant(iss, jti, exp, request_hash, outcome)` in the effect
+   transaction; unique key arbitrates concurrency; store unavailable ⇒ deny; synchronous commit.
+4. **One decision per grant (AR-11):** if a *verified* grant is denied (policy, state, budget, lock
+   failure), the broker rolls back the effect transaction and records `outcome = DENIED` in a separate
+   short transaction; if that write fails, the response is still Deny. Later submissions of that `jti`
+   return the stored outcome. Unverified grants consume nothing.
+5. **Idempotent retry:** same `jti` and request hash ⇒ stored outcome; different hash ⇒ deny + log.
+6. **Revocation:** `revoked_before` per `(ten)`, `(ten, wid)`, `(ten, sub)` checked in-transaction;
+   written by the gateway's revoke socket on logout/session revocation, or by the operator (ADR-0004).
+7. **External effects:** `RESERVED → DISPATCHED → SUCCEEDED | FAILED | UNKNOWN`; upstream key
+   `HMAC(broker_key, "nodkey.idem.v1" ‖ iss ‖ jti)`; `UNKNOWN` never retried or moved to `FAILED` without
+   documented upstream deduplication; reconciliation or operator resolves. **(AR-10)** Any effect on
+   a resource with a pending `UNKNOWN` of a conflicting operation type is denied as an in-transaction
+   precondition, so a fresh grant cannot cause a duplicate.
+8. **Retention and clock (AR-18):** prune rows no earlier than `exp + skew + margin`. Persist a clock
+   high-water mark; refuse to serve while `now` < mark − skew.
+9. **Restore runbook (AR-18):** after any DB restore, set `revoked_before = now` for every tenant (or
+   rotate the grant key) before serving. Until mark and runbook are implemented and tested, SI-09 is
+   not claimed across restore or clock rollback.
 
 ## Evidence
 
-Research 02 §5; PostgreSQL transaction isolation and explicit locking (cited in 04 §4); Stripe
-idempotent requests and IETF Idempotency-Key draft (01 §4).
+Research 02 §5; PostgreSQL isolation and explicit locking [F\*]; Stripe / IETF idempotency keys
+(research 01); review AR-05, AR-10, AR-11, AR-18.
 
 ## Consequences
-- **Advantages:** at-most-once follows from a unique constraint and a single commit, both standard.
-- **Drawbacks:** the consumption table must live in the same database as each internal effect; a
-  deployment with several protected databases needs a consumption table per DB or the
-  RESERVED pattern for all but one.
-- **Security:** an `UNKNOWN` effect blocks automatic progress, which is a liveness cost accepted for
-  SI-15.
-- **Performance:** one extra indexed insert per effect.
-- **Compatibility:** requires a transactional store; Postgres in v0.
+- **Advantages:** at-most-once and budgets reduce to unique constraints and guarded writes.
+- **Drawbacks:** per-DB consumption tables; hot budget rows serialize a subject's effects; fixed
+  windows double the worst case at boundaries.
+- **Security:** `UNKNOWN` blocks progress on a resource (liveness cost for SI-15).
+- **Performance:** extra indexed insert plus counter-row locks per effect [H].
+- **Compatibility:** Postgres in v0.
 
-## Open risks (listed, not resolved)
+## Open
 
-- **Clock:** pruning and `exp` checks trust the broker clock. A backward jump larger than the margin
-  could readmit a pruned `jti`. Proposed mitigation: persist a clock high-water mark and refuse to
-  serve if `now` is below it. Behaviour must be specified then tested (02 §8 vector 26).
-- **Replay-store restore:** restoring the DB from a backup older than live grants' `exp` reopens
-  their replay window. Proposed mitigation: restore procedure must bump all epochs or rotate the
-  grant key before the broker serves. Until then SI-09 cannot be claimed across restore (vector 22).
-- **Re-issue after `UNKNOWN`:** the authority should refuse new grants for a resource with a pending
-  `UNKNOWN` operation; not yet designed.
+Business-intent upstream idempotency keys (AR-10 second half): deferred to the first external
+adapter; depends on upstream semantics.
 
 ## Reversal / migration
 
-The state machine is broker-internal; changes do not affect the wire protocol.
+Broker-internal; no wire change. SERIALIZABLE can be added on top of counters without loss.

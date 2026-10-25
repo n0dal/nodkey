@@ -1,65 +1,62 @@
-# ADR-0007: Receipts are evidence; workflow state is broker-owned
+# ADR-0007: Outcomes are evidence; workflow state is broker-owned (rev. 2)
 
-- **Status:** Proposed
+- **Status:** Proposed — AR-19 applied; AR-06 is addressed in ADR-0009, which is new and unreviewed.
+  Accept together with ADR-0009.
 - **Date:** 2026-10-24
-- **Invariants:** SI-11, SI-12, SI-15
+- **Invariants:** SI-11, SI-12, SI-15, SI-19
 - **Open questions:** OQ-06 (addressed for v0)
 
 ## Problem
 
 Demo 3 (order → reserve → authorize → capture → confirm) requires that steps cannot be skipped,
-repeated, or reordered, including under concurrency and retries. Decide whether workload-held
-receipts or broker-owned state enforce this.
+repeated, or reordered, including under concurrency and retries.
 
 ## Evaluation criteria
 
-No authority from possession; resistance to replay, cross-tenant reuse, and laundering; current-state
-checks (SI-11); minimal new mechanism.
+No authority from possession; resistance to replay, cross-tenant reuse, laundering; current-state
+checks; minimal new mechanism.
 
 ## Alternatives considered
 
-- **Receipt chain as authority:** step N's signed receipt authorizes step N+1. Adds replay,
-  cross-tenant reuse, and laundering surface; stale by construction.
-- **External orchestrator (Temporal, sagas) as authority:** provides durability and compensation,
-  but the workflow code is trusted, which the workload is not.
-- **Broker-owned state machine:** privsep-monitor pattern; the broker re-reads its own state.
-- Cross-broker receipts (in-toto / Txn-Token style): only needed when brokers share no database.
+Receipt chain as authority (replay/laundering surface, stale by construction); external orchestrator
+as authority (workflow code trusted); **broker-owned state machine** (privsep monitor pattern);
+cross-broker receipts (only when brokers share no DB).
 
 ## Decision
 
-1. **Workflow state is owned by the broker** in its DB: per-workflow row with tenant, resource, and
-   current state, plus a declared transition table per workflow type (`from_state`, operation,
-   `to_state`, guard).
-2. Each transition is a typed operation. In the effect transaction the broker locks the workflow
-   row, checks that `(current_state, op)` is a declared transition and that its guard holds against
-   current trusted state, applies the effect, and advances the state with a guarded write
-   (`WHERE state = from_state`, rows = 1). Any failure ⇒ rollback ⇒ deny.
-3. **Receipts are evidence only (SI-12):** returned to the app and logged; signed with a
-   receipt-purpose key and `typ` distinct from grants. The broker **never** accepts a receipt as an
-   input to authorization.
-4. External orchestrators, if used, sit outside the TCB and only *request* transitions.
-5. Cross-broker receipt chains are deferred until a concrete multi-broker deployment needs them.
+1. **Workflow state is broker-owned:** per-workflow row (tenant, subject, resource, state) and a
+   declared transition table per workflow type (`from_state`, operation, `to_state`, guard, required
+   authority per ADR-0009).
+2. Each transition is a typed operation: lock the workflow row (lock order per ADR-0006), check
+   `(state, op)` is declared and its guard holds on current trusted state, apply the effect, advance
+   with `WHERE state = from_state` (rows = 1). Any failure ⇒ rollback ⇒ deny.
+3. **Transitions without a user request** (e.g. capture after authorize) require a scheduler grant
+   or are broker-internal, per ADR-0009; never grantless in multi-tenant workloads.
+4. **v0 returns an unsigned outcome plus an audit row id (AR-19).** No receipt signing key, no second
+   COSE type. Signed receipts are added only with a named external verifier. Nothing returned to the
+   app is ever accepted as an authorization input (SI-12).
+5. **Evidence is the broker DB audit table** (or an append-only log only the broker writes), never
+   aggregated container logs, which the app can forge.
+6. External orchestrators sit outside the TCB and only request transitions.
 
 ## Evidence
 
-Research 01 §4: OpenSSH privsep monitor state machine; Bertino et al. 1999 workflow authorization
-constraints; in-toto receipts as evidence to a verifier; Zanzibar zookies on staleness.
+Research 01 §4 (privsep monitor; Bertino et al. 1999; in-toto as evidence); review AR-06, AR-19, AR-20.
 
 ## Consequences
-- **Advantages:** skipping or repeating a step reduces to a failed guarded update; concurrency is
-  handled by the same row lock as SI-11.
-- **Drawbacks:** each workflow type needs a declared transition table in broker config (TCB data).
-- **Security:** a compromised app can still request any declared transition whose guard holds for a
-  user it has a grant for; the state machine bounds order, not intent.
+- **Advantages:** skipping or repeating a step is a failed guarded update; concurrency handled by the
+  same locks as SI-11.
+- **Drawbacks:** transition tables are TCB configuration.
+- **Security:** a compromised app can still request any declared transition its grants and guards
+  allow; the state machine bounds order, not intent.
 - **Performance:** one row lock per transition.
-- **Compatibility:** receipts in a documented format let adopters audit without trusting the app.
+- **Compatibility:** audit rows are the export format for auditors.
 
-## Architect notes
+## Required tests
 
-- Privacy: receipts should carry opaque identifiers only (research 05, privacy considerations).
-- Tests: skip a step, repeat a step, two concurrent transitions from the same state, replay a
-  receipt, present a receipt from another tenant — all must deny.
+Skip a step; repeat a step; two concurrent transitions from one state; replay an outcome; cross-tenant
+workflow id; background transition without scheduler grant (ADR-0009).
 
 ## Reversal / migration
 
-Adding cross-broker receipts later is additive and must re-check the receiving broker's own state.
+Signed receipts and cross-broker chains are additive and must re-check the receiving broker's state.

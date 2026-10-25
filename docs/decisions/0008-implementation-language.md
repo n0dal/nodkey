@@ -1,6 +1,6 @@
-# ADR-0008: Rust for trusted components; thin untrusted PHP SDK
+# ADR-0008: Rust for trusted components; thin untrusted PHP SDK (rev. 2)
 
-- **Status:** Proposed
+- **Status:** Accepted — review verdict "accept"; dependency-coverage note added.
 - **Date:** 2026-10-24
 - **Invariants:** SI-02, SI-05, SI-08, SI-16
 
@@ -25,10 +25,12 @@ Postgres libraries; reviewability; small runtime; language-neutral protocol.
 
 ## Decision
 
-1. **Authority and broker in Rust.** `unsafe` forbidden in PBE crates (`#![forbid(unsafe_code)]`)
+1. **Gateway, authority, scheduler, and broker in Rust.** `unsafe` forbidden in Nodkey crates (`#![forbid(unsafe_code)]`)
    except in a reviewed, isolated module if ever required. Dependencies pinned via `Cargo.lock`,
-   reviewed with `cargo audit`/`cargo deny`; minimal feature sets.
-2. **PHP SDK is a thin, untrusted client:** connects to `/run/pbe/broker.sock`, serializes typed
+   reviewed with `cargo audit`/`cargo deny`; minimal feature sets. `forbid(unsafe_code)` does **not**
+   cover dependencies: the whole dependency tree (including `unsafe` in crates such as the async
+   runtime, TLS, and HTTP stacks) is TCB and is reviewed and pinned as such.
+2. **PHP SDK is a thin, untrusted client:** connects to `/run/nodkey/broker.sock`, serializes typed
    requests, passes grants as opaque length-capped strings, never parses or validates grants, holds
    no keys. Nothing the SDK does counts toward any invariant.
 3. The wire protocol is specified independently of both languages; a second-language SDK (Phase 7)
