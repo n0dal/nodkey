@@ -1,0 +1,22 @@
+[package]
+name = "nodkey-grant"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Nodkey-Grant v1 (docs/specs/grant-v1.md): strict verifier and canonical issuer"
+publish = false
+
+# Each dependency is justified in README.md ("Dependencies").
+[dependencies]
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast", "zeroize"] }
+sha2 = { version = "0.11", default-features = false }
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["std", "raw_value"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# Tests run hundreds of thousands of Ed25519 verifications; optimize dependencies in dev builds.
+[profile.dev.package."*"]
+opt-level = 3
