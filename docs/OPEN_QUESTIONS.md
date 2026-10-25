@@ -12,3 +12,5 @@
 | OQ-08 | Gateway and broker may parse the same HTTP request differently (route-mapping divergence). How is a single canonical request representation guaranteed? | Protocol | Open |
 | OQ-09 | Demo P refund initiator: customer self-service or staff? | Owner/Orchestrator | **Resolved 2026-10-25:** Demo P = customer self-service (ownership + user confirmation); staff-side refunds are covered by Demo A (support agent under a staff-delegated mandate). |
 | OQ-10 | ADR-0006 amendment: a reconciler resend with the same provider idempotency key is not a new effect and not a grantless path (SI-19). | Protocol | Open (Phase 4) |
+| OQ-11 | For confirmed effects, should the broker execute the approved effect itself (grant delivered authority→broker, never to the workload) instead of the workload presenting the grant? Simpler and smaller workload authority; applies to Demo A and possibly Demo P. | Architecture | Open (decide at start of Phase 4) |
+| OQ-12 | Mandate grant type (delegated, budgeted, signed; broker-tracked spend) — ADR-0004/0006 amendments. Prior art: AP2 mandates. | Protocol | Open (Phase 4/5) |

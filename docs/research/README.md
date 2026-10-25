@@ -12,6 +12,7 @@ Each note separates **established facts** (cited) from **hypotheses**. Notes are
 | [04-authorization-policy.md](04-authorization-policy.md) | Identity and policy | Trusted gateway attests verified user + request digest; Cedar embedded in the broker; facts read in the effect's own transaction. |
 | [05-governance-licensing-naming.md](05-governance-licensing-naming.md) | Licensing, naming, export, legal checklist | Apache-2.0 + DCO; retire the "Proof-Bound Execution" name before public release (conflicts found). |
 | [06-payment-provider-and-http-adapter.md](06-payment-provider-and-http-adapter.md) | Payment providers, simulator, HTTP effect adapter | Provider restricted keys cannot bind amount/charge/user; idempotency only covers same-key retries. Stripe has overlapping approval rules; Nodkey adds end-user binding, ownership from trusted facts, user confirmation, key custody under containment, provider independence. Simulator + adapter design; 19 attack scenarios. |
+| [07-ai-agents-and-tool-authorization.md](07-ai-agents-and-tool-authorization.md) | AI agents, MCP, mandates | Expose broker operations as MCP tools over per-agent sockets; MCP carries no security. In-process approval features of agent SDKs are not a boundary against prompt injection. Closest prior art: AWS AgentCore Policy (proprietary), AP2 signed mandates. Demo A scenario with prompt injection. |
 
 ## Orchestrator verification notes
 
