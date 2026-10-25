@@ -11,6 +11,7 @@ Each note separates **established facts** (cited) from **hypotheses**. Notes are
 | [03-runtime-isolation.md](03-runtime-isolation.md) | Runtime isolation | Architecture A with Deployment Profile P0 (`network_mode: none` + per-workload broker socket); gVisor as P1; WASI not viable for legacy PHP in 2026. |
 | [04-authorization-policy.md](04-authorization-policy.md) | Identity and policy | Trusted gateway attests verified user + request digest; Cedar embedded in the broker; facts read in the effect's own transaction. |
 | [05-governance-licensing-naming.md](05-governance-licensing-naming.md) | Licensing, naming, export, legal checklist | Apache-2.0 + DCO; retire the "Proof-Bound Execution" name before public release (conflicts found). |
+| [06-payment-provider-and-http-adapter.md](06-payment-provider-and-http-adapter.md) | Payment providers, simulator, HTTP effect adapter | Provider restricted keys cannot bind amount/charge/user; idempotency only covers same-key retries. Stripe has overlapping approval rules; Nodkey adds end-user binding, ownership from trusted facts, user confirmation, key custody under containment, provider independence. Simulator + adapter design; 19 attack scenarios. |
 
 ## Orchestrator verification notes
 
