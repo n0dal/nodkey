@@ -1,0 +1,24 @@
+[package]
+name = "nodkey-authority"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+description = "Nodkey authority (prototype): signs grants after gateway approval and broker record agree (effect-protocol-v2 Draft 2)"
+publish = false
+
+# Each dependency is justified in README.md ("Dependencies").
+[dependencies]
+nodkey-grant = { path = "../nodkey-grant" }
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "io-util", "macros", "time", "sync", "signal"] }
+serde = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["std"] }
+sha2 = { version = "0.11", default-features = false }
+getrandom = { version = "0.4", default-features = false }
+zeroize = { version = "1", default-features = false, features = ["std"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.dev.package."*"]
+opt-level = 3
