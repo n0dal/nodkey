@@ -7,7 +7,7 @@ Statuses: `Proposed` → `Accepted` | `Rejected`; later `Superseded by ADR-NNNN`
 |---|---|---|
 | [0001](0001-architecture-and-tcb.md) | Architecture A (OS isolation + external broker) and the v0 TCB | Proposed (OQ-01 open) |
 | [0002](0002-broker-execution-model.md) | Broker execution model | Proposed (OQ-01 open) |
-| [0003](0003-trusted-user-context-and-grant-issuance.md) | Trusted user context and grant issuance (rev. 3) | Proposed (focused re-review; ADR-0004 amendment) |
+| [0003](0003-trusted-user-context-and-grant-issuance.md) | Trusted user context and grant issuance (rev. 3) | Accepted with Phase 3 profile (ADR-0004 amendment pending) |
 | [0004](0004-grant-format.md) | Grant format — restricted COSE_Sign1 profile | Proposed (OQ-07 open) |
 | [0005](0005-policy-engine.md) | Policy evaluation — Cedar embedded in the broker | Accepted |
 | [0006](0006-replay-and-effect-state.md) | Replay prevention, budgets, and effect state | Accepted |

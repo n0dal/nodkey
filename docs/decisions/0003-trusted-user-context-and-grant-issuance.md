@@ -1,9 +1,8 @@
 # ADR-0003: Trusted user context and grant issuance (rev. 3)
 
-- **Status:** Proposed. Rev. 3 addresses every R3 item that blocks Phase 3 (R3-01, 02, 04, 05) and every
-  item the 2026-10-25 review set as a condition for acceptance. It stays Proposed because rev. 3 adds
-  unreviewed mechanisms: confirmation flow, edge/proxy split, and read grants. Read grants also need an
-  ADR-0004 amendment (§7). A focused re-review is needed before acceptance.
+- **Status:** Accepted (2026-10-25) with the Phase 3 implementation profile below, per the focused
+  review in `docs/reviews/2026-10-25-adr-0003-0009-review.md` (verdict: accept with listed changes).
+  Text corrections R3B-03 and R3B-09 are still pending; R3B-08 and R3B-10 are published residuals.
 - **Date:** 2026-10-25
 - **Invariants:** SI-02, SI-05, SI-06, SI-07, SI-09, SI-10, SI-18, SI-20, SI-21
 - **Open questions:** OQ-04 (addressed), OQ-08 (see §5)
@@ -283,3 +282,39 @@ get no grant. Phase 3 has **no grantless effects** (ADR-0009).
 
 - The IdP and built-in login are interchangeable behind the code flow in §2.
 - `confirm` predicates and binding sources are route-map changes.
+
+
+## Phase 3 implementation profile (orchestrator rulings, 2026-10-25)
+
+The Phase 3 demo implements exactly this subset. Anything in this ADR not listed here is not claimed
+for Phase 3.
+
+1. **Provenance (SI-21).** Write grants: non-safe method and `Sec-Fetch-Site: same-origin`, else exact
+   `Origin` match, else deny. Read grants: `Sec-Fetch-Mode: navigate` **and** `Sec-Fetch-Dest: document`
+   (R3B-05), or same-origin. The gateway sets `frame-ancestors 'self'` on app responses.
+2. **Request/response filtering (SI-18).** Gateway cookies and headers are never forwarded to the app;
+   duplicate gateway cookies are rejected; app `Set-Cookie` is allowlisted; requests carrying
+   `Service-Worker` are rejected; `Cache-Control: no-store` and `X-Content-Type-Options: nosniff` are set.
+3. **Session.** `__Host-nodkey_session`, HttpOnly, Secure, SameSite=Lax; fresh id at login; absolute
+   lifetime; logout revokes. **Login uses a local test login only** (R3B-11): compiled in only with the
+   `test-login` Cargo feature, enabled only by an explicit configuration flag, and every page it renders
+   carries a visible TEST LOGIN banner. Because of this, SI-18's credential-entry claim is
+   **NOT TESTED** in Phase 3; passkey login is future work.
+4. **Confirmation (SI-20). Every `ledger.transfer` requires confirmation** — no threshold (R3B-01). The
+   gateway renders the exact effect (amount, source, destination) on the auth origin with
+   `frame-ancestors 'none'`, COOP `same-origin`, and a restrictive CSP. Pending effects follow a
+   compare-and-set state machine: `PENDING → APPROVED → ISSUED` (at most once), or `DENIED` / `EXPIRED`
+   (R3B-07). Approval is bound to the pending id and the session's subject. After approval, the app
+   obtains the grant with a same-origin POST naming the pending id (R3B-04); it receives a grant only
+   for the approved values.
+5. **Signed confirmation marker (R3B-02).** The grant carries `cfm` inside the signed payload; the broker
+   rejects a `ledger.transfer` grant without it.
+6. **Grant kinds (R3B-06).** Single-use write grant (TTL ≤ 30 s) for `ledger.transfer`; multi-use read
+   grant for `ledger.get_balance`, scoped to the subject's own accounts. The kind is signed; the broker
+   checks the operation class before dispatch; reads run in `READ ONLY` transactions; denials are uniform.
+   Requires the matching ADR-0004 amendment (grant spec v1).
+7. **Parameters.** Strict JSON; amounts in integer minor units; `exact` binding for transfer amount and
+   destination; canonical path forwarding.
+8. **Not in Phase 3:** the edge/proxy split (it supports no invariant yet), OIDC/passkeys, budgets
+   (Phase 4), workflows (Phase 5). Confirmation summaries show account ids, not verified display names
+   (R3B-08 residual).
