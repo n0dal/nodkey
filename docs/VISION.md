@@ -37,9 +37,20 @@ and what guarantees are achievable. See [`research/`](research/).
 
 ## Scope
 
-**In scope (v0):** Linux deployments; a PHP reference integration; a broker with a small number of
-narrowly typed adapters; cryptographically verifiable grants; workflow preconditions; reproducible
-adversarial tests.
+**Focus ([ADR-0010](decisions/0010-project-focus.md), 2026-10-25):** authority control for applications
+and AI agents that perform **consequential external actions** — payments, refunds, outbound messages,
+third-party API calls — with **user-confirmed intent**. The workload (an app or an agent) can propose
+any effect; the broker, which alone holds the third-party credentials, executes only effects backed by a
+signed grant for exactly that effect.
+
+**In scope (v0):** Linux deployments; a broker with a small number of typed external-API adapters;
+cryptographically verifiable grants; user confirmation and bounded mandates; containment verification;
+two flagship demos — a web app issuing refunds through a simulated payment provider, and an AI agent
+whose tool calls are subject to the same controls; reproducible adversarial tests.
+
+**Not a focus:** protecting an application's own database in general. For that case, existing tools
+(e.g. PostgREST with row-level security and a network-isolated app) already provide comparable
+containment.
 
 **Explicitly not claimed:** preventing code execution; protecting against host, kernel, runtime,
 broker, or Authority compromise; making permitted operations safe to abuse; regulatory compliance.

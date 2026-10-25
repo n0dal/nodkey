@@ -6,15 +6,17 @@ evidence is recorded in [STATUS.md](STATUS.md).
 | Phase | Goal | Acceptance | State |
 |---|---|---|---|
 | 0 | Repository and project knowledge | A fresh session can reconstruct goals and state from the repo | Done |
-| 1 | Research and architecture selection | Coherent security model; assumptions stated; initial ADRs accepted | **Active** |
-| 2 | Minimal containment (PHP) | Arbitrary PHP execution cannot reach the protected resource under the documented profile | Planned |
-| 3 | Cryptographic authorization | Forged, altered, expired, misdirected, or reused grants produce no effect | Planned |
-| 4 | Policy engine and effect broker | Approved effects without unrestricted resource authority | Planned |
-| 5 | Workflow authorization | Unauthorized workflow transitions rejected; concurrency/retry tested | Planned |
-| 6 | Developer experience | A newcomer can run the demo from docs alone | Planned |
-| 7 | Generalization | Second language integration; language-neutral protocol | Planned |
-| 8 | Security hardening | Fuzzing, failure injection, independent review, supply-chain hardening | Planned |
+| 1 | Research and architecture selection | Coherent security model; assumptions stated; initial ADRs accepted | Done |
+| 2 | Minimal containment (PHP, local DB) | Arbitrary PHP execution cannot reach the protected resource under P0 | Done |
+| 3 | Signed grants and confirmed intent | Forged, altered, expired, misdirected, reused, or unconfirmed grants produce no effect | **Active** |
+| 4 | External effects (Demo P) | Simulated payment provider behind the broker: app holds no provider key; refunds bound to confirmation; no double refund on ambiguous outcomes; budgets/mandates | Planned |
+| 5 | AI agents (Demo A) | Agent tool calls (incl. prompt-injection scenario) execute only when confirmed or within a delegated mandate; agent-facing interface | Planned |
+| 6 | Developer experience | `nodkey` CLI incl. `verify`; a newcomer can run both demos from docs alone | Planned |
+| 7 | Generalization | Second SDK language; more adapters; language-neutral protocol docs | Planned |
+| 8 | Security hardening | Fuzzing, failure injection, formal model of grant/effect state, supply-chain hardening | Planned |
 | 9 | Open-source preparation | Owner can evaluate a release candidate with known limits | Planned |
-| 10 | Long-term evolution | WASI-native execution, more adapters, distributed brokers | Research |
+| 10 | Long-term evolution | Workflow receipts (ADR-0007), WASI-native execution, distributed brokers | Research |
+
+Focus: [ADR-0010](docs/decisions/0010-project-focus.md).
 
 Public release of any kind requires explicit approval from the project owner.

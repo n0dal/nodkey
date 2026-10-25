@@ -14,3 +14,4 @@ Statuses: `Proposed` → `Accepted` | `Rejected`; later `Superseded by ADR-NNNN`
 | [0007](0007-receipts-and-workflows.md) | Outcomes are evidence; workflow state is broker-owned | Proposed (with ADR-0009) |
 | [0008](0008-implementation-language.md) | Rust for trusted components; thin untrusted PHP SDK | Accepted |
 | [0009](0009-workload-authority-and-background-operations.md) | Workload-authority and background operations (rev. 2) | Proposed (Phase 5 scope) |
+| [0010](0010-project-focus.md) | Project focus: authority control for consequential external actions | Accepted (owner) |
