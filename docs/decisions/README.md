@@ -15,3 +15,4 @@ Statuses: `Proposed` → `Accepted` | `Rejected`; later `Superseded by ADR-NNNN`
 | [0008](0008-implementation-language.md) | Rust for trusted components; thin untrusted PHP SDK | Accepted |
 | [0009](0009-workload-authority-and-background-operations.md) | Workload-authority and background operations (rev. 2) | Proposed (Phase 5 scope) |
 | [0010](0010-project-focus.md) | Project focus: authority control for consequential external actions | Accepted (owner) |
+| [0011](0011-propose-confirm-execute.md) | Propose → confirm → execute for consequential effects | Proposed (focused review running) |
