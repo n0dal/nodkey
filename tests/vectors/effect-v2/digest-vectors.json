@@ -1,0 +1,312 @@
+{
+  "format": "nodkey.effect-v2.digest-vectors",
+  "spec": "docs/specs/effect-protocol-v2.md section 3.2",
+  "label": "nodkey.pending.v1",
+  "digest_input": "SHA-256(label || 0x00 || hex_decode(cbor_hex))",
+  "vectors": [
+    {
+      "id": "DG-01-refund",
+      "description": "payments.refund; parameter names of different lengths (sorted shorter first)",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 1250,
+          "currency": "EUR"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d3137056f7061796d656e74732e726566756e64060107a36863757272656e637963455552686f726465725f696419265d6c616d6f756e745f6d696e6f721904e2081a6add4680091a6add48d80aa36863757272656e63796863757272656e6379686f726465725f69646475696e746c616d6f756e745f6d696e6f726475696e740ba26863757272656e6379634555526f616d6f756e745f6578706f6e656e7402",
+      "digest": "920744baca72aba5050f061410f1b55d0d201e3dad6862dfd40956ee5082dddc"
+    },
+    {
+      "id": "DG-02-transfer",
+      "description": "ledger.transfer with a destination parameter",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "ledger.transfer",
+        "opv": 1,
+        "params": {
+          "from": "alice",
+          "to": "bob",
+          "amount_minor": 12500
+        },
+        "param_types": {
+          "from": "account_id",
+          "to": "account_id",
+          "amount_minor": "uint"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d3137056f6c65646765722e7472616e73666572060107a362746f63626f626466726f6d65616c6963656c616d6f756e745f6d696e6f721930d4081a6add4680091a6add48d80aa362746f6a6163636f756e745f69646466726f6d6a6163636f756e745f69646c616d6f756e745f6d696e6f726475696e740ba26863757272656e6379634555526f616d6f756e745f6578706f6e656e7402",
+      "digest": "d6c0ff64cd5141930788f83d8a7b3006b18f037352eeaab94f7b37bd8b1b28b7"
+    },
+    {
+      "id": "DG-03-numeric-looking-text",
+      "description": "account_id \"12345\" is a tstr because the declared type is account_id",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "ledger.transfer",
+        "opv": 1,
+        "params": {
+          "from": "12345",
+          "to": "bob",
+          "amount_minor": 1
+        },
+        "param_types": {
+          "from": "account_id",
+          "to": "account_id",
+          "amount_minor": "uint"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d3137056f6c65646765722e7472616e73666572060107a362746f63626f626466726f6d6531323334356c616d6f756e745f6d696e6f7201081a6add4680091a6add48d80aa362746f6a6163636f756e745f69646466726f6d6a6163636f756e745f69646c616d6f756e745f6d696e6f726475696e740ba26863757272656e6379634555526f616d6f756e745f6578706f6e656e7402",
+      "digest": "8fe7df8ef64c71b63352c34a8163b9c35e888446858f5ff6b3c418568399105b"
+    },
+    {
+      "id": "DG-04-uint-max",
+      "description": "amount_minor = 2^53 - 1 (8-byte head)",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 9007199254740991,
+          "currency": "EUR"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d3137056f7061796d656e74732e726566756e64060107a36863757272656e637963455552686f726465725f696419265d6c616d6f756e745f6d696e6f721b001fffffffffffff081a6add4680091a6add48d80aa36863757272656e63796863757272656e6379686f726465725f69646475696e746c616d6f756e745f6d696e6f726475696e740ba26863757272656e6379634555526f616d6f756e745f6578706f6e656e7402",
+      "digest": "d7649c0f7a604a35f14c3ba8d5b3988f4aa307037bfdb8946fe2a9a268c3e44e"
+    },
+    {
+      "id": "DG-05-display-exponent",
+      "description": "Same amount, JPY with exponent 0: the display facts change the digest",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 1250,
+          "currency": "JPY"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 0,
+          "currency": "JPY"
+        }
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d3137056f7061796d656e74732e726566756e64060107a36863757272656e6379634a5059686f726465725f696419265d6c616d6f756e745f6d696e6f721904e2081a6add4680091a6add48d80aa36863757272656e63796863757272656e6379686f726465725f69646475696e746c616d6f756e745f6d696e6f726475696e740ba26863757272656e6379634a50596f616d6f756e745f6578706f6e656e7400",
+      "digest": "b3c924d3152ce1218761d558485f24734ec46089c60abebe1a72f705a3216f75"
+    },
+    {
+      "id": "DG-06-free-text-param",
+      "description": "Test-only operation with a free text64 parameter: included in M like any other",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "test.note",
+        "opv": 1,
+        "params": {
+          "account": "alice",
+          "memo": "rent for \"October\""
+        },
+        "param_types": {
+          "account": "account_id",
+          "memo": "text64"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {}
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d31370569746573742e6e6f7465060107a2646d656d6f7272656e7420666f7220224f63746f62657222676163636f756e7465616c696365081a6add4680091a6add48d80aa2646d656d6f66746578743634676163636f756e746a6163636f756e745f69640ba0",
+      "digest": "b15828ea9e829ca8a38a60b037e32e3dab3463590157ce02da446dd91fd6e3ca"
+    },
+    {
+      "id": "DG-07-pending-id-alias",
+      "description": "pending_id with a non-zero trailing bit (alias of DG-01's id)",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_x",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 1250,
+          "currency": "EUR"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "expected": "reject",
+      "reason": "pending_id: non-zero trailing bits (non-canonical alias)"
+    },
+    {
+      "id": "DG-08-type-from-declaration",
+      "description": "order_id given as a JSON string while declared uint",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": "9821",
+          "amount_minor": 1250,
+          "currency": "EUR"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "expected": "reject",
+      "reason": "order_id: declared uint, value is not a uint <= 2^53-1"
+    },
+    {
+      "id": "DG-09-missing-param",
+      "description": "A declared parameter is absent",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 1250
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "expected": "reject",
+      "reason": "params: key set differs from param_types (every declared parameter is required)"
+    },
+    {
+      "id": "DG-10-non-ascii-id",
+      "description": "approver_sub contains U+00E9",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-é",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 1250,
+          "currency": "EUR"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "expected": "reject",
+      "reason": "approver_sub: not an ID"
+    }
+  ]
+}

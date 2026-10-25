@@ -7,7 +7,7 @@ accepted ADR and the security invariants take precedence and the spec is correct
 | Spec | Version | Status | Implements | Test vectors |
 |---|---|---|---|---|
 | [Nodkey-Grant v1](grant-v1.md) — signed grant format, verification procedure, key registry, operation declarations | v1, Draft 2 (2026-10-25) | Draft; Draft 1 reviewed (approve with changes), Draft 2 awaiting re-review | ADR-0004 (Amendments 1–2), ADR-0003, ADR-0006 (Amendment 1) | [`tests/vectors/grant-v1/`](../../tests/vectors/grant-v1/README.md) |
-| [Effect protocol v2](effect-protocol-v2.md): propose → confirm → execute; workload, gateway and authority channels; pending-effect record and digest; confirmation page; test plan | v2, Draft 1 (2026-10-25) | Draft, not yet reviewed | ADR-0011 (Revision 1), ADR-0003 Phase 3 profile, ADR-0006 | test plan §8 (no vectors yet) |
+| [Effect protocol v2](effect-protocol-v2.md): propose → confirm → execute; workload, gateway and authority channels; pending-effect record and digest; confirmation page; test plan | v2, Draft 2 (2026-10-25) | Draft; Draft 1 reviewed (revise), Draft 2 awaiting re-review | ADR-0011 (Revision 1, Amendment 1), ADR-0003 Phase 3 profile, ADR-0006 | [`tests/vectors/effect-v2/`](../../tests/vectors/effect-v2/README.md) (digest); test plan §8 |
 
 Conventions: each spec states its status, the ADRs and invariants it implements, every dependency on an
 ADR that is not yet accepted, and the error code produced by each check. Each spec ships deterministic

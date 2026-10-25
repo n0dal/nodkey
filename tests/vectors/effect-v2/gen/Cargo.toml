@@ -1,0 +1,11 @@
+[package]
+name = "nodkey-effect-v2-digest-vectors"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Generator for the Nodkey effect protocol v2 pending-effect digest vectors"
+publish = false
+
+[dependencies]
+sha2 = "0.11"
+serde_json = { version = "1", features = ["preserve_order"] }

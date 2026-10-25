@@ -325,3 +325,24 @@ Existing-test notes:
 
 EP-01, EP-02, EP-03, EP-04, EP-05, EP-06. All are specification changes; EP-02 can alternatively be
 resolved by narrowing the ADR-0011 claim and publishing the residual.
+
+## Resolution (Draft 2, 2026-10-25)
+
+Recorded by the spec author. Blocking findings EP-01..EP-06 are resolved per the orchestrator's rulings, in [`docs/specs/effect-protocol-v2.md`](../specs/effect-protocol-v2.md) Draft 2 (§9 lists every change). No finding is rejected. Re-review is requested.
+
+| Id | Severity | Disposition | Where |
+|---|---|---|---|
+| EP-01 | High | **Fixed.** The broker stores the grant at `PENDING → APPROVED`. Verification, W10 consumption, savepoint, W11–W14, and the effect (or the `RESERVED` insert) all run in one transaction. A failure rolls back to `APPROVED`. A recovery loop retries at start-up and every 5 s, and expires the record at `grant.exp + skew`. `grant.deliver` can return `unavailable`. Re-delivery of the same grant bytes is idempotent, which removes the `already_delivered` dead end. The single-store rule is stated. | §3.1, §3.3, §4.3, §4.4 |
+| EP-02 | High | **Fixed.** New gateway → authority `approve{pending_id, digest_shown, subject}`. The authority fetches the record read-only, recomputes the digest, and checks the subject. It records `jti = pending_id` in its own durable store before signing, then delivers. Broker state alone no longer yields a grant. The gateway is stated to be in the TCB for the subject; a compromised gateway is a published residual until passkeys. ADR-0011 Amendment 1. | §1.1, §4.2, §6, §7.6 |
+| EP-03 | High | **Fixed.** Mandates apply only to `enrolled` workloads. `named` workloads need explicit confirmation for every write. | §2.4 |
+| EP-04 | Medium | **Fixed.** The digest input is fully normative: declared types (key 10), canonical `pending_id` bytes, exact text bytes with no normalization, every parameter, display exponent and currency (key 11), lowercase 64-char hex decoded before comparison. Vectors DG-01..10 are in `tests/vectors/effect-v2/`, checked by a Rust generator and a Python stdlib re-encoder and hasher. | §3.2; T28, T37 |
+| EP-05 | Medium | **Fixed.** Read grants are signed only by the authority (`read_grant` over socket I). The gateway holds no key. | §4.2 |
+| EP-06 | Medium | **Fixed.** Delivery requires `PENDING` and `now < expires_at`. Execution expires at `grant.exp + skew` and the grant is never used. The authority marks the issuance `expired`. Records expire lazily on every access. The redundant `grant_jti` condition is removed. | §3.3, §4.2 step 6, §4.4 |
+| EP-07 | Medium | **Fixed.** Refund status is an allow-list. `other_open_on_resource` is shown. Only the reconciler releases encumbered amounts. Fact staleness is a published residual. | §5 |
+| EP-08 | Medium | **Fixed.** The banner sits next to the buttons. `named` workloads may not use operations that have destination parameters. | §2.4, §7.1 |
+| EP-09 | Medium | **Fixed.** Each socket has its own directory with modes and ownership. A missing manifest means refusal unless an explicit, logged operator flag is set. The uid namespace rule is stated. | §1.2 |
+| EP-10 | Medium | **Fixed.** Start-up refusals for v1 outside `demo1`, and for v1 and v2 sharing one broker or one database. | §2.1 |
+| EP-11 | Low | **Fixed.** The `jti = pending_id` override of grant-v1 §9 is stated. The authority never signs two grants for one `jti`. The read-grant `jti` namespace is noted. The restore requirement is tied to the single store. | §4.2, §4.4 |
+| EP-12 | Low | **Accepted as a residual** (the execution oracle requires a user approval). `receipt_id` is opaque and random. | §2.3, §6 |
+| EP-13 | Low | **Fixed.** Login return is stored server-side. PostgreSQL `FOR UPDATE` is named. The token is consumed even when a later step fails. The domain-tag note and the quota note are added. | §7.1, §3.3, §7.2, §3.2, §2.5 |
+| Missing tests | — | T31–T46 added. T28–T30 extended. | §8 |

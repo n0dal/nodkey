@@ -1,45 +1,84 @@
 # Nodkey effect protocol v2 — propose → confirm → execute
 
-- **Status:** Draft 1 (2026-10-25). Not yet reviewed.
+- **Status:** **Draft 2** (2026-10-25). Not yet re-reviewed. Supersedes Draft 1 (changes in §9).
 - **Implements:**
-  - [ADR-0011](../decisions/0011-propose-confirm-execute.md) incl. Revision 1;
-  - [ADR-0003](../decisions/0003-trusted-user-context-and-grant-issuance.md) Phase 3 profile items 2, 3, 5, 6, 8, plus the page hardening of item 4;
-  - SECURITY_INVARIANTS v0.4 SI-06, SI-09, SI-10, SI-20, SI-21.
-- **Uses:** [grant-v1](grant-v1.md) Draft 2 (format, verification, deterministic CBOR §4, declarations §6).
-- **Review input:** [`docs/reviews/2026-10-25-adr-0011-review.md`](../reviews/2026-10-25-adr-0011-review.md) (PC-01..PC-13).
+  - [ADR-0011](../decisions/0011-propose-confirm-execute.md), incl. Revision 1 and Amendment 1 (approval
+    channel);
+  - [ADR-0003](../decisions/0003-trusted-user-context-and-grant-issuance.md) Phase 3 profile items 2, 3, 5, 6
+    and 8, plus the page hardening of item 4;
+  - SECURITY_INVARIANTS v0.4 SI-05, SI-06, SI-09, SI-10, SI-15, SI-20 and SI-21.
+- **Uses:** [grant-v1](grant-v1.md) Draft 2: format, verification, deterministic CBOR (§4) and
+  declarations (§6).
+- **Reviews:**
+  - [`2026-10-25-adr-0011-review.md`](../reviews/2026-10-25-adr-0011-review.md) (PC-xx);
+  - [`2026-10-25-effect-protocol-v2-review.md`](../reviews/2026-10-25-effect-protocol-v2-review.md) (EP-xx).
+- **Vectors:** [`tests/vectors/effect-v2/`](../../tests/vectors/effect-v2/README.md) (pending-effect digest).
 
-The key words MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119/8174.
+MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119 and RFC 8174.
 
-## 1. Components and channels
+## 1. Components, trust and channels
 
-| Channel | Path (example) | Peers | Mounted into | Authentication |
+### 1.1 Trust
+
+| Process | Holds | Trusted for | Compromise = |
+|---|---|---|---|
+| Workload | nothing reusable | nothing | attacker C (the design target) |
+| gateway-edge | sessions, approval tokens; **no signing key** | the authenticated session subject (TCB) | attacker J: can approve as any logged-in user |
+| Authority | the grant signing key; its own issuance store | signing only what a gateway approval and the broker record agree on | attacker J |
+| Broker | DB credentials, provider credentials, pending records | executing verified grants | attacker J |
+
+A write grant requires **two independent inputs**:
+- an approval from the gateway, carrying the session-verified subject and the digest it displayed;
+- a pending record read from the broker whose digest and approver match that approval.
+
+So compromise of the broker's database or request parsing **alone** cannot produce a grant. Neither can a
+compromised gateway alone: it can only approve records that exist, with the digest those records have. A
+compromised gateway can still approve any record on behalf of any logged-in user (residual, attacker J;
+reduced by passkeys, §7.6).
+
+### 1.2 Channels
+
+Every socket lives in its **own** directory, mode 0700, owned by the peer that connects to it. The socket
+file is mode 0600, owned by that peer's uid, with the listener's uid given access through a group. Nothing
+in any control directory is mounted into a workload.
+
+| # | Socket | Listener ← client | Mounted into | Client authentication |
 |---|---|---|---|---|
-| Workload | `/run/nodkey/wl/<wid>.sock` (one per workload, as v1) | workload → broker | that workload only | socket path identifies `wid`; `SO_PEERCRED` uid = the workload's configured uid |
-| Gateway | `/run/nodkey/ctl/gateway.sock` | gateway-edge → broker | gateway-edge only | `SO_PEERCRED` uid = configured gateway uid |
-| Authority | `/run/nodkey/ctl/authority.sock` | authority → broker | authority only | `SO_PEERCRED` uid = configured authority uid |
-| Issue | `/run/nodkey/auth/issue.sock` | gateway-edge → authority | gateway-edge, authority | `SO_PEERCRED` uid = gateway uid (checked by the authority) |
+| W | `/run/nodkey/wl/<wid>/broker.sock` (one per workload) | broker ← workload | that workload | the path identifies `wid`; `SO_PEERCRED` uid = that workload's uid |
+| G | `/run/nodkey/gw-broker/broker.sock` | broker ← gateway | gateway | `SO_PEERCRED` uid = gateway uid |
+| A | `/run/nodkey/au-broker/broker.sock` | broker ← authority | authority | `SO_PEERCRED` uid = authority uid |
+| I | `/run/nodkey/gw-authority/authority.sock` | authority ← gateway | gateway, authority | `SO_PEERCRED` uid = gateway uid (checked by the authority) |
 
-The broker MUST refuse to start in any of these cases:
-- two channels share a path or a uid;
-- the gateway or authority uid equals any workload uid;
-- a control socket's directory is listed in any workload's mounts (where the deployment manifest is
-  available to the broker).
+The authority has no network interface. It holds one listening socket (I) and one client socket (A).
 
-On every accepted connection the broker checks `SO_PEERCRED`, and closes the connection on a mismatch.
+**Start-up refusals.** The broker and the authority MUST refuse to start if any of these hold:
+- two roles share a uid;
+- the gateway or authority uid equals a workload uid;
+- a socket directory is shared between channels;
+- the deployment manifest shows any control directory mounted into a workload.
 
-All four channels use the framing of the v1 broker protocol (`broker/src/protocol.rs`):
+If the manifest is unavailable, they MUST also refuse to start, unless the operator flag
+`--mounts-verified-externally` is set. That flag is logged at every start (EP-09).
+
+uids are compared as seen in the listener's user namespace. Deployments MUST map each role to a distinct
+uid in that namespace. Every connection whose `SO_PEERCRED` uid differs from the expected one is closed.
+
+**Framing** (all channels): the v1 broker framing (`broker/src/protocol.rs`):
 - one strict JSON object per line;
-- duplicate members, unknown members and wrong types are rejected;
-- lines are ≤ 8 KiB, and read/write timeouts are as in v1.
+- duplicate, unknown and wrongly typed members are rejected;
+- lines are ≤ 8 KiB;
+- the v1 timeouts apply.
 
-## 2. Workload protocol v2
+## 2. Workload protocol v2 (socket W)
 
-### 2.1 Version decision
+### 2.1 Versions
 
-Protocol v1 (`"v":1`: `ledger.get_balance`, `ledger.transfer` with idempotency key, no grants) is kept
-**only for Demo 1**. Each workload socket is configured for exactly one version. A message whose `v`
-differs from the socket's version is answered with `unsupported_version`. A v2 socket never executes a
-write without a confirmed grant (no grantless effects).
+Protocol v1 (grantless `ledger.transfer`) exists **only** for Demo 1. A broker MUST refuse to start if:
+- a v1 socket is configured and the deployment profile is not the explicit `demo1` profile;
+- v1 and v2 sockets are configured on one broker;
+- v1 and v2 sockets share one database (EP-10).
+
+A message whose `v` differs from the socket's version gets `unsupported_version`.
 
 ### 2.2 Envelope
 
@@ -49,360 +88,490 @@ write without a confirmed grant (no grantless effects).
 {"v":2,"id":"…","correlation_id":"…","ok":false,"error":{"code":"…","message":"<static text>"}}
 ```
 
-`grant`, when present, is a member of `args` and contains grant-v1 transport text (base64url, ≤ 2731
-chars).
-
 ### 2.3 Methods
 
 | Method | `args` | `result` |
 |---|---|---|
-| `effect.propose` | `{"op": string, "params": object, "approver": {"ten": ID, "sub": ID}}` | `{"pending_id", "confirm_url", "expires_at"}` |
-| `effect.status` | `{"pending_id": string}` | `{"pending_id", "state", "expires_at", "outcome": null \| {"class", "receipt_id"}}` |
-| `ledger.get_balance` | `{"account": account_id, "grant": string}` | `{"account", "balance_minor"}` |
-| `payments.get_order` | `{"order_id": uint, "grant": string}` | `{"order_id", "currency", "amount_minor", "refunded_minor", "status"}` |
+| `effect.propose` | `{"op", "params": {...}, "approver": {"ten": ID, "sub": ID}}` | `{"pending_id", "confirm_url", "expires_at"}` |
+| `effect.status` | `{"pending_id"}` | `{"pending_id", "state", "expires_at", "outcome": null \| {"class", "receipt_id"}}` |
+| `ledger.get_balance` | `{"account", "grant"}` | `{"account", "balance_minor"}` |
+| `payments.get_order` | `{"order_id", "grant"}` | `{"order_id", "currency", "amount_minor", "refunded_minor", "status"}` |
 
 **`effect.propose`**
-1. `op` MUST be declared as a write operation that requires confirmation (§5) and is allowed for this
-   `wid`.
-2. `params` MUST contain exactly the declared parameters, strictly typed (grant-v1 §6.2; integers in minor
-   units ≤ 2^53 − 1). Phase 3/4 operations have no free-text parameters.
-3. `approver`: see §2.4.
-4. The broker validates **syntax, types and registration only**. It never consults trusted state
-   (orders, accounts, balances), so propose is not an existence oracle (PC-10). Any failure →
-   `invalid_argument`.
-5. On success the broker creates an immutable pending record (§3), and returns:
-   - `pending_id`: 16 bytes from the broker's CSPRNG, base64url (22 chars);
-   - `confirm_url`: `https://<auth origin>/confirm/<pending_id>`, with no other component (PC-11);
-   - `expires_at`: Unix seconds.
+- `op` MUST be declared `write` with `requires_confirmation`, and allowed for this `wid` (§5).
+- `params` MUST contain exactly the declared parameters, typed per grant-v1 §6.2 (integers in minor
+  units ≤ 2^53 − 1).
+- `approver` follows §2.4.
+- The broker checks **syntax, types and registration only**, never trusted state (PC-10). Any failure
+  gives `invalid_argument`.
+- On success it creates an immutable record (§3) and returns:
+  - `pending_id`: 16 bytes from the broker CSPRNG, as canonical unpadded base64url (22 chars);
+  - `confirm_url`: `https://<auth origin>/confirm/<pending_id>`, with nothing else in it;
+  - `expires_at`.
+- Re-proposals always create new records.
 
-   Identical re-proposals create new records; they never update an existing one (PC-04).
+**`effect.status`**
+- It is answered only for records whose `wid` is the caller's.
+- In every other case (another workload's record, unknown, non-canonical or pruned id) it returns
+  `not_found`, with an identical body and timing.
+- `outcome.class` ∈ `succeeded | failed | unknown | denied | expired`.
+- `receipt_id` is null until the record is in a final state. It is then 16 random bytes in base64url,
+  never sequential.
+- The response never contains the approver, facts, grant or upstream text.
 
-**`effect.status`.** Answered only if the record's `wid` equals the caller's `wid`. For any other caller,
-a malformed id, an unknown id, or a pruned id, the answer is `not_found` with identical timing and body
-(PC-10). The result carries:
-- `state`;
-- `outcome.class` ∈ `succeeded | failed | unknown | denied | expired`;
-- an opaque `receipt_id` (null until the effect is final, ADR-0007).
+**Read methods** need a grant-v1 **read** grant (`knd = 2`, signed by the authority, §4.3) whose `rop`
+contains the method. The broker verifies it with `peer_wid` = this socket's `wid`. The query filters by the
+grant's `ten`/`sub`. A missing or foreign resource is answered with `grant_denied`.
 
-It never returns the approver, the trusted facts, the grant, or upstream error text.
+A `knd = 1` grant on socket W is answered with `grant_denied` (broker-facing code `grant_channel_invalid`).
 
-**Read methods** take a grant-v1 **read** grant (`knd = 2`) whose `rop` contains the method. The broker
-verifies it with `peer_wid` = this socket's `wid` (grant-v1 §7.2, §7.4), and the query filters by the
-grant's `ten` and `sub` (`owner_scoped`). A non-owned or nonexistent resource yields `grant_denied`,
-indistinguishable from other denials.
+### 2.4 Intended approver and mandates (PC-01, PC-06, EP-03, EP-08)
 
-A grant with `knd = 1` presented on a workload socket is rejected with `grant_denied` (broker-facing
-code `grant_channel_invalid`). Write grants are accepted only on the authority socket (PC-13).
+| Registration `approver_source` | Propose rule | Mandates | Operations allowed |
+|---|---|---|---|
+| `enrolled{ten, sub}`: agents and single-principal apps | `approver` MUST equal the enrolment | MAY apply (mandate spec), looked up by `(wid, enrolled principal)` | all declared |
+| `named`: multi-user apps | `approver.ten` ∈ registered tenants; `sub` is any ID | **never**: every write needs explicit confirmation in v1 | only operations without `destination: true` parameters (for example `payments.refund`, not `ledger.transfer`) |
 
-### 2.4 Intended approver (PC-01, PC-06)
-
-Each workload registration declares `approver_source`:
-
-| `approver_source` | Rule at propose time | Page banner |
-|---|---|---|
-| `enrolled{ten, sub}` (agents, single-principal apps) | `approver` MUST equal the enrolment exactly | none |
-| `named` (multi-user web apps) | `approver.ten` MUST be one of the workload's registered tenants; `sub` is any ID | "Requested by <workload display name>. It was not necessarily started by you." |
-
-The broker stores the approver on the record. Only a session whose `(ten, sub)` equals it may view or
-approve the record (§4). The operation's trusted-fact checks for that subject are also required (§5).
-Mandates (specified separately) are looked up by `(wid, approver)` as stored, never by a proposal field.
+A mandate-based approval, when specified, MUST also go through the authority with a check that does not
+depend on broker state alone.
 
 ### 2.5 Limits
 
-| Limit | Default | Exceeded → |
+| Limit | Default | When exceeded |
 |---|---|---|
-| Outstanding `PENDING` records per `wid` | 32 | `limit_exceeded` |
-| Outstanding `PENDING` records per `(wid, approver)` | 8 | `limit_exceeded` |
-| Proposal rate per `wid` | token bucket: 10/min, burst 10 | `limit_exceeded` |
+| `PENDING` records per `wid` / per `(wid, approver)` | 32 / 8 | `limit_exceeded` |
+| Proposal rate per `wid` | 10/min, burst 10 | `limit_exceeded` |
 | `effect.status` rate per `wid` | 120/min | `limit_exceeded` |
-| Pending expiry (`expires_at − created_at`) | 600 s (configurable 60–900 s) | record → `EXPIRED` |
-| Approval-to-delivery deadline | 60 s | `APPROVED` → `EXPIRED` |
+| Pending lifetime (`expires_at − created_at`) | 600 s (60–900) | `PENDING → EXPIRED` |
+| Execution window after approval | the grant's `exp + skew` (≤ 35 s) | `APPROVED → EXPIRED` |
 
-Limits are checked before any record is written, and the uniform error is used for all of them (PC-09).
+A `named` workload can exhaust its own per-`wid` quota by rotating `sub`. That denies service only to its
+own users and is accepted.
 
-### 2.6 Client-facing error codes (closed set, static messages)
+### 2.6 Client-facing error codes
 
 `malformed_request`, `unsupported_version`, `request_too_large`, `unknown_operation`,
 `operation_not_permitted`, `invalid_argument`, `limit_exceeded`, `not_found`, `grant_denied`,
-`unavailable`.
-
-Detailed reasons go only to the broker's audit log.
+`unavailable`. Each has a static message. Details go to the audit log only.
 
 ## 3. Pending-effect record
 
-### 3.1 Fields
+### 3.1 Storage and fields
 
-Stored in the broker database (table `pending_effect`). Only the broker reads or writes it. The gateway
-and the authority see only what §4/§6 return.
+The record lives in the broker's database, in the **same** database as `consumed_grant`, the effect
+tables and the adapter states (`RESERVED`/`DISPATCHED`). The ADR-0006 restore runbook covers them
+together.
 
 | Field | Type | Mutable |
 |---|---|---|
 | `pending_id` | 16 bytes, primary key | no |
-| `broker_id` | ID | no |
-| `wid` | ID | no |
-| `ten`, `approver_sub` | ID | no |
-| `op`, `opv` | op name, uint | no |
-| `params` | map name → uint \| tstr, as validated | no |
-| `created_at`, `expires_at` | uint seconds | no |
-| `digest` | 32 bytes (§3.2), computed at creation | no |
-| `state` | §3.3 | CAS only |
-| `state_changed_at` | uint | with `state` |
-| `grant_jti` | = `pending_id` once delivered | set once |
-| `outcome_class`, `receipt_id` | per §2.3 | set once, at a final state |
+| `broker_id`, `wid`, `ten`, `approver_sub`, `op` | text | no |
+| `opv`, `created_at`, `expires_at` | uint | no |
+| `params` | name → value | no |
+| `param_types` | name → type | no |
+| `display` | per §3.2 key 11 | no |
+| `digest` | 32 bytes | no |
+| `state`, `state_changed_at` | §3.3 | by conditional update only |
+| `grant` | bytes, set at `APPROVED` | set once |
+| `outcome_class`, `receipt_id` | | set once, in a final state |
 
-Immutability is enforced in the schema: the broker's database role has `UPDATE` only on the mutable
-columns. An `UPDATE` trigger rejects changes to any other column.
+The broker's DB role may update only the mutable columns. A trigger rejects any other update.
 
-### 3.2 Canonical digest (gateway and broker MUST compute identical bytes)
+### 3.2 Digest (normative; the broker, gateway and authority MUST produce identical bytes)
 
 ```
 digest = SHA-256( "nodkey.pending.v1" || 0x00 || dcbor(M) )
-M = { 0: pending_id (bstr 16), 1: broker_id (tstr), 2: wid (tstr), 3: ten (tstr),
-      4: approver_sub (tstr), 5: op (tstr), 6: opv (uint),
-      7: { param name (tstr): value (uint | tstr), ... },
-      8: created_at (uint), 9: expires_at (uint) }
 ```
 
-- `dcbor` is the core deterministic encoding of grant-v1 §4: shortest form, definite lengths, and map
-  keys sorted by their encoded bytes, so text keys sort shorter first.
-- No floats, tags, negative integers, or other types are allowed.
-- The digest covers exactly the values the grant will bind, plus identity and expiry.
-- Trusted facts are **not** part of it: they are shown for information and re-checked under lock at
-  approval and at execution (§3.3, §5).
-- The broker returns the record fields with the render response (§4.1). The gateway MUST recompute the
-  digest from the fields it renders and MUST refuse to render (uniform error) if it differs from the
-  broker's.
+The tag versions the *record format*, not the protocol. `dcbor` is grant-v1 §4: shortest-form heads,
+definite lengths, and map keys in bytewise order of their **encoded** bytes, so text keys sort shorter
+first. No floats, tags, negative integers, booleans or nulls.
 
-### 3.3 State machine (every transition is a single conditional `UPDATE … WHERE state = <from>`; affected rows = 1 or the transition fails)
+| Key | Field | CBOR type | Value rule |
+|---|---|---|---|
+| 0 | `pending_id` | bstr(16) | the 16 bytes from a **canonical** decode of the 22-char base64url text (grant-v1 §2 rules: alphabet, no padding, 4 trailing bits zero). Non-canonical text is rejected, not normalized |
+| 1 | `broker_id` | tstr | ID (`0x21–0x7E`, 1–128 bytes) |
+| 2 | `wid` | tstr | ID, 1–256 |
+| 3 | `ten` | tstr | ID, 1–128 |
+| 4 | `approver_sub` | tstr | ID, 1–256 |
+| 5 | `op` | tstr | op name |
+| 6 | `opv` | uint | |
+| 7 | params | map tstr → uint \| tstr | **every** declared parameter (including `free` ones). The CBOR type comes from the **declared type** (key 10), never from the JSON value type: `uint` → CBOR uint (JSON integer, ≤ 2^53 − 1); any text type → tstr (JSON string). The value must satisfy the grant-v1 §6.2 grammar. A JSON value of the other kind is rejected |
+| 8 | `created_at` | uint | Unix seconds |
+| 9 | `expires_at` | uint | Unix seconds |
+| 10 | param types | map tstr → tstr | declared type name for each parameter in key 7 |
+| 11 | display | map tstr → uint \| tstr | broker-trusted presentation facts that change how values read: for amounts `{"amount_exponent": uint, "currency": tstr}` from the broker's ISO 4217 table; `{}` if none. Text 0–64 bytes of `0x20–0x7E` |
 
-| From → To | Actor (channel) | Additional conditions in the same statement/transaction |
+Further rules:
+- **Text:** the exact UTF-8 bytes of the JSON string after standard JSON unescaping. There is no Unicode
+  normalization, trimming or case folding. All allowed text is ASCII.
+- **Hex digest** (in forms and messages): exactly 64 lowercase hex characters. It is decoded before
+  comparison; uppercase or any other length is rejected.
+
+Each party computes the digest **itself**:
+- the broker, at creation, from its validated values;
+- the gateway, from the render response it displays (it formats amounts **only** with key 11's exponent);
+- the authority, from the record it fetches.
+
+Vectors DG-01..DG-10 fix the bytes, including:
+- a numeric-looking `account_id`;
+- 2^53 − 1;
+- escaped JSON text;
+- the display exponent;
+- a free-text parameter;
+- rejections for an alias `pending_id`, a type mismatch, a missing parameter, and a non-ASCII ID.
+
+### 3.3 State machine
+
+Every transition is one conditional `UPDATE … WHERE pending_id = ? AND state = <from> AND <conditions>`.
+It takes effect only if exactly one row is updated. Concurrent attempts are serialized with
+`SELECT … FOR UPDATE` (PostgreSQL, ADR-0006 §1). Lazy expiry: every access to a non-final record first
+applies the applicable expiry transition.
+
+| From → To | Trigger | Conditions (same statement or transaction) |
 |---|---|---|
-| (new) → `PENDING` | broker (workload `effect.propose`) | the §2.5 limits hold |
-| `PENDING` → `APPROVED` | gateway (`pending.approve`) | `digest` = the supplied digest; `now < expires_at`; supplied `(ten, sub)` = `(ten, approver_sub)`; the operation's approval checks (§5) pass under row locks |
-| `PENDING` → `DENIED` | gateway (`pending.deny`) | as for approve, minus the fact checks |
-| `PENDING` → `EXPIRED` | broker sweeper, or lazily on access | `now ≥ expires_at` |
-| `APPROVED` → `EXPIRED` | broker sweeper | `now ≥ state_changed_at + 60` and `grant_jti` is null |
-| `APPROVED` → `EXECUTING` | broker (authority `grant.deliver`) | the grant verifies and matches the record (§6); `grant_jti` is set |
-| `EXECUTING` → `SUCCEEDED \| FAILED \| UNKNOWN` | broker effect transaction / adapter | grant-v1 §7.3 W10–W14, plus the adapter states of research 06 §2.2 (`RESERVED`/`DISPATCHED` are sub-states of `EXECUTING`). Denials at execution (for example remaining refundable now too low) → `FAILED`, `outcome.class = denied` |
-| `UNKNOWN` → `SUCCEEDED \| FAILED` | reconciler only | research 06 §2.2; never by retry without upstream deduplication |
+| (new) → `PENDING` | `effect.propose` (W) | §2.5 limits |
+| `PENDING` → `DENIED` | `pending.deny` (G) | digest equal; `(ten, sub)` = approver; `now < expires_at` |
+| `PENDING` → `EXPIRED` | sweeper or lazily | `now ≥ expires_at` |
+| `PENDING` → `APPROVED` | `grant.deliver` (A) | §4.2 checks; `now < expires_at`; approval checks (§5) under lock; stores `grant` |
+| `APPROVED` → `SUCCEEDED \| FAILED` | execution transaction (§4.4), internal effects | grant-v1 W10–W14 in the same transaction |
+| `APPROVED` → `EXECUTING` | execution transaction, external effects | W10–W13 and the ADR-0006 T1 `RESERVED` insert, in the same transaction |
+| `APPROVED` → `EXPIRED` | execution attempt or sweeper | `now ≥ grant.exp + skew` (the grant can no longer verify; nothing was consumed) |
+| `EXECUTING` → `SUCCEEDED \| FAILED \| UNKNOWN` | adapter T2/T3 (research 06 §2.2) | `RESERVED`/`DISPATCHED` are sub-states of `EXECUTING` |
+| `UNKNOWN` → `SUCCEEDED \| FAILED` | reconciler only | research 06 §2.2 |
 
-There are no other transitions. `DENIED`, `EXPIRED`, `SUCCEEDED` and `FAILED` are final.
+There are no other transitions. Final states: `DENIED`, `EXPIRED`, `SUCCEEDED`, `FAILED`.
 
-## 4. Gateway ↔ broker (gateway socket)
+A denial at execution time (for example, the remaining refundable amount is now too low) gives `FAILED`
+with `outcome.class = denied`.
 
-The gateway can render and decide; it **cannot sign**. It holds no grant key, and the broker accepts no
-grant on this socket. Every gateway request carries the session subject the gateway authenticated
-(`{"ten","sub"}`).
+## 4. Approval, issuance and execution
 
-### 4.1 `pending.render{pending_id, subject}`
+### 4.1 Gateway → broker (socket G): render and deny
 
-The broker:
-1. loads the record;
-2. requires `subject = (ten, approver_sub)`;
-3. requires the operation's approval checks (§5) to pass, read-only.
+The gateway sends `{"subject": {"ten","sub"}}` from its verified session with every request.
 
-If any check fails, or the record does not exist, it returns `not_available`: one code, one body, the
-same for every cause (PC-03).
+**`pending.render{pending_id, subject}`**
+- Requires `subject = (ten, approver_sub)` and the approval checks of §5 (read-only).
+- On any failure or unknown id it returns `not_available`: one body for every cause (PC-03).
+- Otherwise it returns:
+  - the §3.2 fields;
+  - `digest` (hex) and `state`;
+  - `facts` (§5);
+  - `context`:
+    - `pending_from_workload_for_subject`;
+    - `recent_identical` (same `wid`, approver, `op` and params in the last 30 min, with states);
+    - `other_open_on_resource` (§5);
+    - `workload_display_name`;
+    - `approver_source`.
+- The gateway recomputes the digest from these fields. On a mismatch it renders the uniform error.
 
-Otherwise it returns:
-- `record`: all §3.1 immutable fields, plus `state`;
-- `digest`;
-- `facts`: the per-operation trusted facts of §5, resolved now;
-- `context`:
-  - `pending_from_workload_for_subject`: count (PC-08);
-  - `recent_identical`: records of the same `(wid, approver, op, params)` in the last 30 min, with state;
-  - `workload_display_name`: from registration;
-  - `approver_source`.
+**`pending.deny{pending_id, digest, subject}`** runs the §3.3 transition. It returns `ok` or `not_available`.
 
-### 4.2 `pending.approve{pending_id, digest, subject}` / `pending.deny{pending_id, digest, subject}`
+The gateway can neither approve on the broker nor sign anything. The broker accepts no grant on socket G.
 
-Each runs the §3.3 CAS. The result is `ok` or `not_available`; failure causes are uniform.
+### 4.2 Gateway → authority (socket I): `approve` and `read_grant`
 
-After `ok` on approve, the gateway sends `issue{pending_id}` on the issue socket (§6). This is the gateway's
-only role in issuance. If that call fails, the record expires 60 s after approval (§2.5).
+**`approve{pending_id, digest_shown, subject}`.** It is sent after the §7.3 checks pass. The authority:
+
+1. Validates the input: canonical `pending_id`, 64-char lowercase-hex `digest_shown`, ID-valid `subject`.
+2. Sends `pending.get{pending_id}` on socket A. This call is read-only. It returns the §3.2 fields,
+   `state` and `digest` for any record, or `not_found`.
+3. Requires all of these:
+   - `state = PENDING`;
+   - `now < expires_at`;
+   - its **own** recomputed digest = `digest_shown`, and also = the broker's `digest`;
+   - `subject = (ten, approver_sub)`;
+   - the workload's `approver_source` permits the operation (§2.4).
+
+   It has the operation and workload registrations in its own configuration, as copies of the broker's.
+   Their equality is checked at start-up through `config.digest` on socket A. Any failure → `not_available`.
+4. **Exactly-once at the authority.** It inserts into its own durable store (synchronous commit or fsync):
+
+   `issuance(jti = pending_id PRIMARY KEY, digest, ten, sub, wid, op, signed_at, grant, status)`
+
+   - If a row exists with the same digest and subject, it does not sign again: it re-delivers the stored
+     `grant` bytes (step 6).
+   - If a row exists with a different digest or subject, it returns `not_available` and raises an alarm.
+5. Signs a grant-v1 write grant from the fetched record only:
+
+   | Field | Value |
+   |---|---|
+   | `iss` | its issuer |
+   | `aud` | `broker_id` |
+   | `jti` | `pending_id` |
+   | `iat` | its own clock |
+   | `nbf` | `iat` |
+   | `exp` | `iat + 30` |
+   | `wid`, `ten` | from the record |
+   | `sub` | `approver_sub` |
+   | `op`, `opv` | from the record |
+   | `res` / `con` | from params per the declaration (all exact) |
+   | `use` | 1 |
+   | `knd` | 1 |
+   | `cfm` | 1 |
+
+   Stores the bytes, then sets `status = signed`.
+6. Sends `grant.deliver{pending_id, grant}` on socket A (§4.3). It records the result as
+   `status ∈ {accepted, rejected, expired}`:
+   - `unavailable` or a lost response: retry with the **same bytes** until `exp`;
+   - no `accepted` by `exp + skew`: mark `expired`. The broker can no longer execute that grant (§3.3).
+7. Returns `ok` (on `accepted`) or `not_available` to the gateway. The gateway shows a neutral
+   "submitted" page in both cases, plus the record state from a fresh render.
+
+`jti = pending_id` overrides grant-v1 §9 ("Authority generates `jti`") for this flow:
+- the value is the broker's 128-bit CSPRNG id;
+- the authority never signs two different grants with one `jti` (step 4);
+- read-grant `jti`s come from the authority's CSPRNG and share the `iss` namespace (collision probability
+  negligible; read grants are not consumed).
+
+**`read_grant{subject, wid, rop}`** (EP-05). Read grants are signed **only** by the authority, on request
+from the gateway, for a same-origin or top-level document navigation (ADR-0003 Profile 1 for reads). The
+authority:
+- requires every `rop` entry to be a `read` operation allowed for `wid`;
+- requires `subject.ten` to be among the tenants of `wid`;
+- signs `knd = 2` with `sub`/`ten` from `subject`, `iat` from its clock and `exp = iat + 30`;
+- returns it to the gateway, which attaches it to the forwarded request.
+
+The gateway holds no key.
+
+### 4.3 Authority → broker (socket A): `pending.get`, `grant.deliver`
+
+**`grant.deliver{pending_id, grant}`.** In one transaction, the broker:
+1. locks the record;
+2. if `state = APPROVED` and the stored `grant` equals the delivered bytes, returns `accepted`
+   (idempotent);
+3. otherwise requires `state = PENDING` and `now < expires_at`, and then requires:
+   - the grant to verify per grant-v1 §7.2 steps 1–9, with `peer_wid` := the record's `wid`;
+   - `knd = 1` and `cfm = 1`;
+   - `jti = pending_id`;
+   - `wid`, `ten`, `sub = approver_sub`, `op`, `opv` and every parameter to equal the record;
+   - the approval checks of §5 to pass under lock.
+4. sets `APPROVED` and stores `grant`;
+5. commits, and returns `accepted`.
+
+Results:
+
+| Result | Meaning |
+|---|---|
+| `accepted` | approval stored |
+| `rejected` | verification or match failed; alarm on a match failure |
+| `expired` | record no longer `PENDING`, or past `expires_at` |
+| `unavailable` | DB failure; nothing changed; retry allowed |
+
+### 4.4 Execution and recovery (EP-01)
+
+After `accepted`, and in a **recovery loop** (at start-up, then every 5 s, for every `APPROVED` record),
+the broker runs the **execution transaction**:
+
+1. `SELECT … FOR UPDATE` the record with `state = APPROVED`. If it is no longer `APPROVED`, stop.
+2. If `now ≥ grant.exp + skew`, set `APPROVED → EXPIRED` and commit. The grant was never used. Stop.
+3. Verify the stored grant (grant-v1 §7.2 steps 1–9, `peer_wid` := the record's `wid`).
+4. Run grant-v1 §7.3:
+   - W10 consumption, with `request_hash` over the record's params;
+   - savepoint;
+   - W11–W13;
+   - W14, including the §5 execution checks under lock.
+5. For **internal effects** (ledger): perform the effect and set `SUCCEEDED`, or on denial roll back to
+   the savepoint and set `FAILED/denied` with `consumed_grant.outcome = DENIED`. Then commit.
+6. For **external effects**: insert the ADR-0006/research 06 T1 `RESERVED` row and set
+   `APPROVED → EXECUTING`. Then commit. T2/T3 follow in their own transactions.
+
+Every step above happens in **one** transaction. If anything fails before commit (crash, lock timeout,
+recording failure), everything rolls back. The record stays `APPROVED`, nothing is consumed, and the
+recovery loop retries until success or until step 2 expires it.
+
+So there is no `EXECUTING` record without a consumed grant, and no consumed grant without a recorded
+decision. The grant-v1 rule "a recording failure means no decision" holds, because the retry simply
+decides later.
+
+Restoring a database backup MUST follow ADR-0006 §9 (revoke or rotate before serving). Otherwise a
+restored `APPROVED` row whose grant is still unexpired could execute again. With the 30 s grant TTL, this
+risk lasts only 35 s after the backup was taken.
 
 ## 5. Operation declarations (Phase 3/4)
 
-The grant-related members follow grant-v1 §6.1. The v2-only members (`approval_checks`, `facts`,
-`display`) live in the broker's effects configuration. Every write below has `kind: write`,
-`requires_confirmation: true`, `opv: 1`.
+The grant-related members follow grant-v1 §6.1. The approval checks, facts and display members live in
+the effects configuration. Every write has `requires_confirmation: true` and `opv: 1`. Approval checks run:
+- at render (read-only);
+- at `grant.deliver`, under lock;
+- again during execution, under lock.
 
-| Operation | Kind | Parameters (grant-v1 placement / class / type) | Approval checks (at render, at approve CAS, and again at execution under lock) | Facts shown on the page |
-|---|---|---|---|---|
-| `ledger.transfer` (continuity) | write | `from` res0 exact `account_id`; `to` con0 exact `account_id`, `destination: true`; `amount_minor` con1 exact `uint` (≥ 1) | `from` exists in `ten` and is owned by the approver | `from` owned by you: yes; current balance of `from`; `to` is "one of your accounts" or "an account not owned by you" (existence of others' accounts is not revealed); amount formatted with the ledger currency's ISO 4217 exponent |
-| `payments.refund` | write | `order_id` res0 exact `uint`; `amount_minor` con0 exact `uint` (≥ 1); `currency` con1 exact `currency` | the order exists in `ten`; `owner = approver`; `currency = order.currency`; order status ≠ `disputed` | order id; captured amount; already refunded or encumbered (`RESERVED`, `DISPATCHED`, `UNKNOWN`, `SUCCEEDED`); `remaining_refundable`; warning if any `DISPATCHED`/`UNKNOWN` effect exists on the order; amount formatted with the **broker-trusted** ISO 4217 exponent table; "refund goes to the original payment method" |
-| `ledger.get_balance` | read | `account`: `owner_scoped` `account_id` | owner = grant `sub` (in-query) | — |
-| `payments.get_order` | read | `order_id`: `owner_scoped` `uint` | owner = grant `sub` (in-query) | — |
+| Operation | Parameters | Approval checks | Facts shown |
+|---|---|---|---|
+| `ledger.transfer` (write; `enrolled` workloads only) | `from` res0 exact `account_id`; `to` con0 exact `account_id`, `destination: true`; `amount_minor` con1 exact `uint` ≥ 1 | `from` exists in `ten` and is owned by the approver | "from: your account"; balance of `from`; `to`: "one of your accounts" or "not owned by you" (existence is not revealed); amount with the ledger currency's exponent (display key 11) |
+| `payments.refund` (write) | `order_id` res0 exact `uint`; `amount_minor` con0 exact `uint` ≥ 1; `currency` con1 exact `currency` | order exists in `ten`; `owner = approver`; `currency = order.currency`; **`order.status ∈ {captured, partially_refunded}`** (allow-list; any other or unknown status fails) | order id; captured amount; refunded and encumbered amounts (`RESERVED`, `DISPATCHED`, `UNKNOWN`, `SUCCEEDED`); `remaining_refundable`; `other_open_on_resource` = count and amounts of other `PENDING`/`APPROVED`/`EXECUTING` records on the order; warning on any `DISPATCHED`/`UNKNOWN`; amount with the broker's ISO 4217 exponent (key 11); "refunded to the original payment method" |
+| `ledger.get_balance` (read) | `account` `owner_scoped` `account_id` | owner = grant `sub` (in query) | — |
+| `payments.get_order` (read) | `order_id` `owner_scoped` `uint` | owner = grant `sub` (in query) | — |
 
-**Refund execution** (research 06 §2.3) re-checks, inside the effect transaction under the order lock:
+**Refund execution** re-checks under the order lock:
 - `1 ≤ amount_minor ≤ remaining_refundable`;
 - no `DISPATCHED`/`UNKNOWN` effect on the order (AR-10);
 - every approval check.
 
-`charge_id` comes from the broker's `orders` row, never from the workload. A refund that later fails
-keeps its amount encumbered until it is released.
+`charge_id` comes only from the broker's `orders` row.
 
-`facts` are display-only. They never change what the grant binds.
+An amount encumbered by a failed or unknown refund is released **only by the reconciler**, after the
+provider confirms a final failure (research 06 §2.2).
 
-## 6. Authority ↔ broker (authority socket) and issuance
+Facts are informational and can be up to 300 s stale (the token lifetime). Execution re-checks decide.
 
-1. The gateway sends `issue{pending_id}` to the authority on the issue socket. The authority ignores any
-   other content.
-2. The authority sends `pending.fetch_approved{pending_id}` on the authority socket. The broker returns
-   the record's immutable fields and `digest` only if all of these hold:
-   - `state = APPROVED`;
-   - `grant_jti` is null;
-   - the record is not past its delivery deadline.
+## 6. Residuals (published)
 
-   Otherwise it returns `not_available`.
-3. The authority recomputes the digest (§3.2) and aborts on a mismatch. It then signs a grant-v1 write
-   grant **from the fetched record only**:
-
-   | Field | Value |
-   |---|---|
-   | `iss` | its issuer name |
-   | `aud` | `broker_id` |
-   | `jti` | `pending_id` |
-   | `iat` | its own clock; `nbf = iat`; `exp = iat + 30` |
-   | `wid`, `ten` | from the record |
-   | `sub` | `approver_sub` |
-   | `op`, `opv` | from the record |
-   | `res`/`con` | from `params` per the declaration (all exact) |
-   | `use` | 1 |
-   | `knd` | 1 |
-   | `cfm` | 1 |
-4. The authority sends `grant.deliver{pending_id, grant}`. The broker:
-   - (a) verifies the grant with grant-v1 §7.2 steps 1–9, using `peer_wid` := the record's `wid`;
-   - (b) requires `jti = pending_id`, and requires `wid`, `ten`, `sub`, `op`, `opv` and every parameter
-     to equal the record;
-   - (c) runs the CAS `APPROVED → EXECUTING`, setting `grant_jti`;
-   - (d) runs grant-v1 §7.3 (W10 consumption with `request_hash` over the record's params, through W14)
-     and the effect.
-
-   Results:
-
-   | Outcome | Response |
-   |---|---|
-   | Delivery accepted | `accepted` |
-   | A grant was already delivered for this record (`grant_jti` set) | `already_delivered` |
-   | Any other failure | `not_available` (the cause goes to the audit log; a mismatch in (b) also raises an alarm) |
-
-**Exactly-once.** `jti = pending_id` and the `APPROVED → EXECUTING` CAS together mean that at most one
-grant per record is ever consumed. (This refines grant-v1 §9 "Authority generates `jti`": for this
-flow `jti` is the broker's 128-bit CSPRNG pending id, unique per record.) If the authority retries after a lost response, it signs again and
-gets `already_delivered`; the extra grant is inert. The authority keeps no issuance state.
+- **Session approval.** Approval is session-based in Phase 3 (test login): SI-20 is **PARTIALLY MET**.
+  With passkeys, the WebAuthn challenge MUST be the digest, and the authority MUST verify the assertion
+  itself.
+- **Compromised gateway** (J): approves any existing record as any logged-in user.
+- **Compromised authority** (J): signs anything.
+- **Compromised broker** (J): needs no grant for its own credentials, but cannot obtain grants without a
+  gateway approval.
+- **Proposed values.** Displayed values are the workload's proposal. Only their equality with what
+  executes is guaranteed (PC-12).
+- **Named approvers.** Under `named`, a compromised app can send users approval links for effects they
+  never started. The banner and per-operation limits (§2.4) bound this; user vigilance remains a residual
+  (EP-08, PC-08).
+- **Execution oracle.** `outcome.class` after an approved `ledger.transfer` reveals whether `to` exists at
+  execution (EP-12). Accepted: it requires a user approval.
+- **Phishing.** Look-alike phishing of the auth origin remains until passkeys (PC-11).
 
 ## 7. Confirmation page contract (auth origin)
 
 ### 7.1 GET `/confirm/<pending_id>`
 
-- `pending_id` MUST match the 22-char base64url grammar. Otherwise the uniform error.
-- Without a session, the request redirects to login on the auth origin and returns to the **same path**
-  afterwards. The page accepts no query parameters (PC-11).
-- The gateway calls `pending.render` and verifies the digest (§3.2).
-- If the record is final or `APPROVED`, its state is shown to the intended approver without an action
-  form.
+1. The path must be exactly `/confirm/` followed by a canonical 22-char id, with no query. Anything else
+   gets the uniform error.
+2. Without a session, the gateway stores the return path **server-side**, keyed by its login state, and
+   redirects to login. After login it returns only to `/confirm/<that id>` (EP-13).
+3. The gateway runs `pending.render` (§4.1) and the digest check.
+4. If the record is not `PENDING`, its state is shown to the intended approver, with no form.
 
-The page displays:
-- operation label (static per-operation template);
-- every parameter value in full: no truncation, monospace, escaped;
-- formatted amounts;
+The page shows:
+- the operation label (static template);
+- every parameter in full: escaped, monospace, never truncated;
+- amounts formatted only with display key 11;
 - the `pending_id`;
-- the workload display name, plus the banner of §2.4 when applicable;
-- `created_at`, `expires_at`;
-- the §5 facts;
-- the §4.1 context;
-- a form with "Approve" and "Deny".
-
-The form carries `pending_id`, `digest` (hex) and an **approval token**.
+- the workload display name;
+- `created_at` and `expires_at`;
+- the facts and context of §4.1;
+- for `named` workloads, directly above the buttons: **"Approve only if you just asked <workload> to do
+  this."**;
+- a form with `token`, `digest` (lowercase hex) and two submit buttons, `decision=approve` and
+  `decision=deny`.
 
 ### 7.2 Approval token
 
 | Property | Rule |
 |---|---|
-| Value | 32 bytes from the gateway's CSPRNG, base64url (43 chars) |
-| Storage | the gateway's server-side session store maps `token → {session_id, pending_id, digest, expires_at}` |
-| `expires_at` | `min(render + 300 s, record.expires_at)` |
-| Issuance | one token per render; a re-render issues a new token and invalidates the previous one for that `(session, pending_id)` |
-| Use | single use: atomically deleted on first use, whatever the outcome |
+| Value | 32 bytes from the gateway CSPRNG, base64url (43 chars) |
+| Storage | `token → {session_id, pending_id (bytes), digest (bytes), expires_at = min(render + 300 s, record.expires_at)}` |
+| Re-render | invalidates the previous token for that `(session, pending_id)` |
+| Use | single use; deleted atomically at its first presentation, **even if a later step fails**, so a stale render cannot be retried |
 
-### 7.3 POST `/confirm/<pending_id>/decision` — all checks, in order. Any failure → the uniform error, no state change
+### 7.3 POST `/confirm/<pending_id>/decision`
 
-1. Method is POST and `Content-Type: application/x-www-form-urlencoded`. The form fields are exactly
-   `token`, `digest`, `decision` (`approve` or `deny`).
-2. Provenance (SI-21, PC-02):
-   - If `Sec-Fetch-Site` is present, it MUST be `same-origin` relative to the auth origin, and
-     `Sec-Fetch-Mode` MUST be `navigate`.
-   - If `Sec-Fetch-Site` is absent, `Origin` MUST be present and exactly equal to the auth origin.
-   - `same-site`, `cross-site` and `none` are rejected, as are an app-origin `Origin`, a missing `Origin`
-     when `Sec-Fetch-Site` is missing, and `Origin: null`.
-3. A valid session exists on the auth origin (`__Host-` cookie, ADR-0003 Phase 3 profile items 2–3).
-4. The token exists, is unexpired, and is bound to this session, this `pending_id` and this `digest`. It is
-   consumed at this point.
-5. `pending.approve` or `pending.deny` with the session subject.
+All checks run in order. Any failure gives the uniform error and causes no state change.
 
-### 7.4 Headers on every auth-origin confirmation response
+1. Path rules as in §7.1. Method POST, `Content-Type: application/x-www-form-urlencoded`, fields exactly
+   `token`, `digest`, `decision`.
+2. Provenance (SI-21):
+   - if `Sec-Fetch-Site` is present, it MUST be `same-origin` and `Sec-Fetch-Mode` MUST be `navigate`;
+   - otherwise `Origin` MUST exactly equal the auth origin;
+   - `Origin: null` is rejected.
+3. A valid auth-origin session (`__Host-` cookie, ADR-0003 Profile 2–3).
+4. The token is valid and bound to this session, `pending_id` and digest. It is consumed here.
+5. On `approve`: send `approve{pending_id, digest_shown, subject}` on socket I. On `deny`: send
+   `pending.deny` on socket G. Either way, show a neutral result page.
 
-- `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self';
-  frame-ancestors 'none'; base-uri 'none'`;
+### 7.4 Headers on every confirmation response
+
+- `Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`;
 - no scripts;
-- `Cross-Origin-Opener-Policy: same-origin`;
-- `Cross-Origin-Resource-Policy: same-origin`;
+- COOP `same-origin`;
+- CORP `same-origin`;
 - `X-Frame-Options: DENY`;
 - `Cache-Control: no-store`;
 - `Referrer-Policy: no-referrer`;
-- `X-Content-Type-Options: nosniff`.
+- `nosniff`.
 
 ### 7.5 Uniform error
 
-For every failure the response is identical:
-- status 404;
-- body "This request is not available.";
-- the §7.4 headers.
+The uniform error is status 404, body "This request is not available.", with the §7.4 headers. It is
+identical for every cause: unknown, foreign, expired or decided id (for a non-approver); wrong subject;
+failed check; bad token; bad provenance; digest mismatch.
 
-This covers: unknown, expired or decided record (for non-approvers); wrong subject; failed facts; bad
-token; bad provenance; digest mismatch.
+### 7.6 Passkeys (future)
 
-**Residuals (published).**
-- Approval is session-based in Phase 3 (test login), so SI-20 is **PARTIALLY MET**. With passkeys, the
-  WebAuthn challenge MUST be `digest`.
-- A compromised gateway can approve anything (attacker J, out of scope).
-- The workload's proposed values are shown as proposed; only their equality with what executes is
-  guaranteed (PC-12).
-- Approval fatigue and look-alike phishing of the auth origin remain until passkeys exist (PC-08,
-  PC-11).
+When passkeys land, the approve form carries a WebAuthn assertion with user verification and
+`challenge = digest`. The authority verifies it against the approver's registered credential before
+step 4 of §4.2. A compromised gateway can then no longer approve on a user's behalf.
 
-## 8. Test plan (each case must have an automated test; results reported PASS / FAIL / NOT TESTED)
+## 8. Test plan
+
+Every case needs an automated test, reported as PASS, FAIL or NOT TESTED.
 
 | # | Case | Expected | Maps to |
 |---|---|---|---|
-| T01 | Approve by a logged-in user who is not the intended approver (same and other tenant) | uniform error; state stays `PENDING` | PC-01, SI-20 |
-| T02 | `enrolled` workload proposes with a different approver | `invalid_argument` | PC-01, PC-06 |
-| T03 | `named` workload; approver does not own the order | page: uniform error; approve CAS fails | PC-01, PC-03, SI-10 |
-| T04 | App-origin `fetch` POST to the decision endpoint with credentials (`Sec-Fetch-Site: same-site`) | uniform error | PC-02, SI-21 |
-| T05 | App-origin HTML form POST (top-level navigation, `same-site`) | uniform error | PC-02, SI-21 |
-| T06 | POST with no Fetch Metadata and no `Origin`; with `Origin: null`; with `Origin` = app origin | uniform error | PC-02, SI-21 |
-| T07 | Valid POST with a missing, reused, other-session, other-pid, or expired token | uniform error; a reused token never succeeds twice | PC-02, PC-04 |
-| T08 | Digest in the POST ≠ stored digest (record re-proposed, values changed) | CAS fails; uniform error | PC-04, SI-20 |
-| T09 | Attempt to modify a pending record (repeat propose, direct DB update by the broker role) | new pid / rejected by the trigger | PC-04 |
-| T10 | Render for nonexistent vs foreign vs expired pid: byte-identical responses, timing within tolerance | identical | PC-03, PC-10 |
-| T11 | `effect.status` from another `wid` for a valid pid; for an unknown pid | `not_found`, identical | PC-10 |
-| T12 | `effect.propose` for an existing vs nonexistent order | identical success (no fact lookup) | PC-10 |
-| T13 | Confirmation page framed by the app origin; opened via `window.open` from the app | blocked by the headers; no opener access | PC-05 |
-| T14 | Confirmation URL with extra query parameters or a path suffix | uniform error; no redirect | PC-11 |
-| T15 | Write grant (`knd = 1`) presented on a workload socket | `grant_denied` (`grant_channel_invalid`) | PC-13, SI-05 |
-| T16 | Grant delivered on the gateway socket; peer with the wrong uid on the authority socket | rejected; connection closed | PC-13, SI-05 |
-| T17 | Authority asked to issue for a `PENDING`, `DENIED`, `EXPIRED`, or already-delivered record | no grant / `already_delivered` | SI-20, SI-09 |
-| T18 | Delivered grant whose params differ from the record (forged by a test authority key) | `not_available` + alarm; no effect | SI-06 |
-| T19 | Two concurrent deliveries for one record; N = 64 concurrent approves | one `EXECUTING`; one effect | SI-09 |
-| T20 | Refund amount > remaining refundable at execution (a second refund executed in between) | `FAILED`/`denied`; no upstream call | SI-11, research 06 |
-| T21 | Refund while another effect on the order is `UNKNOWN` | `FAILED`/`denied` | AR-10, SI-15 |
-| T22 | Refund currency ≠ order currency | approval check fails (uniform) | SI-10 |
-| T23 | Outstanding limits and rate limits exceeded; another `wid` unaffected | `limit_exceeded`; other `wid` proceeds | PC-09 |
-| T24 | Approve after `expires_at`; approve after `APPROVED → EXPIRED` | uniform error; no grant | SI-20 |
-| T25 | Duplicate identical proposals: the page shows `recent_identical` and the pending count | shown | PC-08 |
-| T26 | Read grant for a non-owned account/order; read grant used for `effect.propose` or a write | `grant_denied` | SI-06, SI-10 |
+| T01 | Approve by a logged-in non-approver (same and other tenant) | uniform error; stays `PENDING` | PC-01, SI-20 |
+| T02 | `enrolled` workload names another approver | `invalid_argument` | PC-01 |
+| T03 | `named`: the approver does not own the order | uniform error at render and approval | PC-01, PC-03, SI-10 |
+| T04 | App-origin `fetch` POST with credentials (`same-site`) | uniform error | PC-02, SI-21 |
+| T05 | App-origin form POST | uniform error | PC-02, SI-21 |
+| T06 | No Fetch Metadata and no `Origin`; `Origin: null`; `Origin` = app origin | uniform error | PC-02 |
+| T07 | Token missing, reused, from another session or pid, or expired | uniform error; never succeeds twice | PC-02, PC-04 |
+| T08 | Submitted digest ≠ stored digest | no grant | PC-04, SI-20 |
+| T09 | Re-propose; DB role update of an immutable column | new pid; the trigger rejects the update | PC-04 |
+| T10 | Render of a nonexistent, foreign or expired pid | byte-identical responses | PC-03, PC-10 |
+| T11 | `effect.status` from another `wid`; unknown or non-canonical pid | `not_found`, identical | PC-10 |
+| T12 | Propose for an existing vs a nonexistent order | identical success | PC-10 |
+| T13 | Page framed by, or opened from, the app origin | blocked; no opener access | PC-05 |
+| T14 | Query or path suffix on the confirm URL | uniform error | PC-11 |
+| T15 | `knd = 1` grant on socket W | `grant_channel_invalid` | PC-13 |
+| T16 | Grant on socket G; wrong-uid peer on A | rejected; connection closed | PC-13 |
+| T17 | `approve` for a `DENIED`, `EXPIRED` or `APPROVED` record | no new grant | SI-20, SI-09 |
+| T18 | Delivered grant whose params differ from the record (test key) | `rejected` + alarm | SI-06 |
+| T19 | 64 concurrent approves; approve racing deny | one decision; at most one effect | SI-09 |
+| T20 | Refund exceeds `remaining_refundable` at execution | `FAILED/denied`; no upstream call | SI-11 |
+| T21 | Refund while another effect on the order is `UNKNOWN` | `FAILED/denied` | AR-10, SI-15 |
+| T22 | Refund currency ≠ order currency | uniform error | SI-10 |
+| T23 | Limits exceeded; another `wid` unaffected | `limit_exceeded`; the other `wid` proceeds | PC-09 |
+| T24 | Approve after `expires_at` | no grant | SI-20 |
+| T25 | Duplicates: `recent_identical` and pending count shown | shown | PC-08 |
+| T26 | Read grant for a foreign resource; read grant used for propose or a write | `grant_denied` | SI-06 |
 | T27 | v1 message on a v2 socket and vice versa | `unsupported_version` | §2.1 |
-| T28 | Gateway digest computation vs broker: shared vectors (field orderings, long and short param names) | identical bytes | §3.2 |
-| T29 | Kill the authority between approve and deliver | record `EXPIRED` after 60 s; no effect | §2.5 |
-| T30 | Crash at each state boundary (`EXECUTING`/`RESERVED`/`DISPATCHED`) | as research 06 §2.2; never a duplicate effect | SI-09, SI-15 |
+| T28 | Digest vectors DG-01..10 in broker, gateway and authority code | identical bytes / rejections | EP-04 |
+| T29 | Authority killed between `approve` and delivery; restarted | re-delivers stored bytes before `exp`; otherwise the record expires; no effect after expiry | EP-06 |
+| T30 | Crash at each boundary (`APPROVED` before commit, `RESERVED`, `DISPATCHED`) | never a duplicate effect; research 06 states | SI-09, SI-15 |
+| T31 | `named` workload proposes within another user's active mandate | confirmation still required | EP-03, PC-06 |
+| T32 | v1 socket outside the `demo1` profile; v1 and v2 on one broker or DB | refuses to start | EP-10 |
+| T33 | Forced failure in the execution transaction (W10 insert, savepoint record, commit) | record stays `APPROVED`; the recovery loop completes it or expires it; never stuck in `EXECUTING` | EP-01, SI-09 |
+| T34 | Delivery after `expires_at`; execution after `grant.exp + skew` | `expired`; `APPROVED → EXPIRED`; nothing consumed | EP-06 |
+| T35 | Broker row forced to `APPROVED` with no gateway approval; `approve` whose digest or subject ≠ record | no grant (the authority's checks and the broker's `PENDING` precondition) | EP-02, SI-20 |
+| T36 | Write grant from a gateway-held or foreign key delivered on A | `rejected` (unknown kid / signature) | EP-05, SI-05 |
+| T37 | Digest edge cases: alias pid, numeric-looking text, escaped JSON, uppercase hex, type mismatch | as DG vectors; uppercase hex rejected | EP-04 |
+| T38 | Approve, deny and expiry racing at `expires_at ± 1 s` | exactly one transition | §3.3 |
+| T39 | Revocation or key revocation between approval and execution | `FAILED/denied` (W13) or `rejected`; no effect | SI-08 |
+| T40 | Ownership or order status changes between approval and execution (including an unknown status) | `FAILED/denied` | SI-10, SI-11, EP-07 |
+| T41 | Two pending full-amount refunds on one order, both approved | first succeeds, second `FAILED/denied`; second page shows the first in `other_open_on_resource` | EP-07 |
+| T42 | Start-up refusals of §1.2 (shared uid, uid collision, shared directory, manifest absent without the flag) | refuses | EP-09 |
+| T43 | Wrong-uid peer on I; workload probing each control path | rejected / path absent | §1.2 |
+| T44 | Crafted login return target; `same-origin` with `Sec-Fetch-Mode: cors` | uniform error; returns only to the canonical confirm path | EP-13, SI-21 |
+| T45 | `effect.status` field set for `DENIED`, `EXPIRED`, `UNKNOWN`; `receipt_id` rules | as §2.3 | PC-10 |
+| T46 | Authority retry after a lost `accepted`; authority restarted mid-issuance | the same bytes, `accepted` (idempotent); never a second signature for one `jti` | §4.2, SI-09 |
+
+## 9. Changes from Draft 1
+
+| Change | Reason |
+|---|---|
+| Approval goes gateway → authority (`approve` on socket I). The authority fetches the record read-only, checks the digest and subject, keeps a durable issuance store, signs, and delivers. The broker stores the grant at `PENDING → APPROVED`. New trust table (§1.1). | EP-02 |
+| Execution in one transaction from `APPROVED` (consumption, effect or `RESERVED`, state). Recovery loop. `unavailable` deliver result. Idempotent re-delivery replaces `already_delivered`. | EP-01, EP-11 |
+| Mandates only for `enrolled` workloads. `named` workloads cannot use mandates or destination operations. | EP-03, EP-08 |
+| Digest fully normative (types from the declaration, canonical `pending_id`, text and hex rules, all parameters, display key 11, type key 10). Vectors in `tests/vectors/effect-v2/`. | EP-04 |
+| Read grants signed only by the authority (`read_grant`). The gateway holds no key. | EP-05 |
+| Delivery requires `PENDING` and `now < expires_at`. Execution expires at `grant.exp + skew`. Lazy expiry in all states. | EP-06 |
+| Refund status allow-list; `other_open_on_resource`; reconciler-only release; staleness residual. | EP-07 |
+| Banner next to the buttons. | EP-08 |
+| Per-socket directories and modes; the manifest is required unless an explicit flag is set; uid namespace rule. | EP-09 |
+| Start-up refusals for v1 outside `demo1`. | EP-10 |
+| Opaque random `receipt_id`; execution-oracle residual. | EP-12 |
+| Server-side login return; PostgreSQL locking; token consumed on failure; domain-tag note; quota note. | EP-13 |
+| Tests T31–T46; T28–T30 extended. | review |

@@ -102,3 +102,36 @@ re-enabled per operation; the grant format is unchanged.
    are shown as such; free-text parameters are not displayed in Phase 3 operations; the confirmation
    URL contains only the pending id (no redirect parameter). Phase 3 approval is session-based, so SI-20
    is reported **PARTIALLY MET** until WebAuthn approval is implemented.
+
+## Amendment 1 (2026-10-25): approval channel and grant custody
+
+Specified in [`docs/specs/effect-protocol-v2.md`](../specs/effect-protocol-v2.md) Draft 2 and required by
+review EP-02 ([`docs/reviews/2026-10-25-effect-protocol-v2-review.md`](../reviews/2026-10-25-effect-protocol-v2-review.md)).
+The status of this ADR is unchanged.
+
+**Approval path.**
+- On approval, the gateway sends `approve{pending_id, digest_shown, subject}` to the **authority**, over a
+  Unix socket that only the gateway and the authority mount.
+- The authority:
+  1. fetches the pending record read-only from the broker;
+  2. recomputes the digest, requires it to equal `digest_shown`, and requires `subject` to equal the
+     intended approver;
+  3. records the issuance of `jti = pending_id` in its own durable store (exactly once);
+  4. signs the grant and delivers it to the broker.
+- The broker stores the grant with the record (`PENDING → APPROVED`). It executes the grant, consumes it,
+  and performs the effect (or the `RESERVED` transition) in one transaction, with a recovery loop.
+
+**Consequence: two independent inputs per grant.** A grant now needs both a gateway approval and a
+matching broker record. Compromise of the broker's database or request parsing alone therefore cannot
+produce a grant. This narrows the "Signed grants still matter" consequence to what the design delivers.
+
+**Trust in the gateway.**
+- The gateway is trusted for the session subject and is in the TCB.
+- A compromised gateway can approve any existing record as any logged-in user until passkey approval
+  (WebAuthn over the digest, verified by the authority) is implemented.
+
+**Read grants.** Read grants are signed only by the authority, on a request from the gateway. The gateway
+holds no signing key.
+
+**Mandates.** Mandates apply only to workloads bound to a single principal. Multi-user applications need
+explicit confirmation for every write in v1.
