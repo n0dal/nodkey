@@ -10,7 +10,7 @@ COPY crates/nodkey-gateway/src ./src
 COPY crates/nodkey-gateway/static ./static
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/crates/nodkey-gateway/target \
-    cargo build --locked --release --features test-login --bin nodkey-gateway \
+    cargo build --locked --release --features test-login,dev-tls --bin nodkey-gateway \
  && cp target/release/nodkey-gateway /nodkey-gateway
 
 FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS runtime

@@ -198,16 +198,17 @@ networks:
 
 # Socket volumes are tmpfs-backed (non-persistent, noexec). Each socket has its own directory
 # (the volume root) with no "other" bits: owner = listener, group = the one permitted client.
-# The I directory is setgid so the authority's 0660 socket gets the gateway's group.
+# Socket directories are setgid so each 0660 socket inherits its one permitted client's group
+# (the listener's own gid would otherwise lock the client out, or need a shared group).
 volumes:
   sock-wl-app:
-    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10001,mode=0750" }
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10001,mode=2750" }
   sock-wl-app2:
-    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10003,mode=0750" }
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10003,mode=2750" }
   sock-gw-broker:
-    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10005,mode=0750" }
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10005,mode=2750" }
   sock-au-broker:
-    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10004,mode=0750" }
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10004,mode=2750" }
   sock-gw-authority:
     driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10004,gid=10005,mode=2750" }
   app-http:

@@ -3,7 +3,7 @@
  "db":{"host":"db","port":5432,"dbname":"ledger","user":"nodkey_broker","password_file":"/run/secrets/db_broker_password"},
  "registry_path":"/etc/nodkey/keys.json","operations_path":"/etc/nodkey/operations.json",
  "authority_workloads_path":"/etc/nodkey/workloads.json",
- "limits":{"pending_per_wid":32,"pending_per_approver":32,"proposals_per_min":120,"proposal_burst":60,"status_per_min":1200,"pending_lifetime_s":60},
+ "limits":{"pending_per_wid":32,"pending_per_approver":32,"proposals_per_min":120,"proposal_burst":60,"status_per_min":1200,"pending_lifetime_s":60,"reads_per_min":600,"db_conns_per_wid":2},
  "gateway":{"socket_path":"/run/nodkey/gw-broker/broker.sock","uid":10005},
  "authority":{"socket_path":"/run/nodkey/au-broker/broker.sock","uid":10004},
  "workloads":[

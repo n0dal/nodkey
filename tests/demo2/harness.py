@@ -172,25 +172,47 @@ def get_confirm(cli, pid):
     return cli.request(AUTH_ORIGIN, "GET", f"/confirm/{pid}", sec_fetch="navigate")
 
 
-def approve(cli, pid, token, digest, **kw):
+TYPED_RE = re.compile(r'name="(confirm_[a-z_]+)"')
+INERT_SECONDS = 1.6  # the gateway rejects approvals sooner than 1.5 s after rendering (GW-R-01)
+
+
+def fmt_minor(n, exponent=2):
+    """Format minor units the way the confirmation page displays them (EUR: exponent 2)."""
+    return f"{n // 10**exponent}.{n % 10**exponent:0{exponent}d}"
+
+
+def typed_fields(pid, page):
+    """What a user types to approve: each displayed amount, exactly as shown (GW-R-01)."""
+    params = json.loads(record_params(pid) or "{}")
+    out = {}
+    for field in TYPED_RE.findall(page):
+        out[field] = fmt_minor(int(params[field[len("confirm_"):]]))
+    return out
+
+
+def approve(cli, pid, token, digest, typed=None, **kw):
     body = f"token={token}&digest={digest}&decision=approve"
+    for k, v in (typed or {}).items():
+        body += f"&{k}={v}"
     return cli.request(AUTH_ORIGIN, "POST", f"/confirm/{pid}/decision", body=body, **kw)
 
 
-def approve_with_retry(cli, pid, tries=5):
-    """A real browser approval, re-rendering a fresh token each try. Works around component defect
-    DEMO2-F02 (authority does not retry a stale pooled socket A connection, so the first approval
-    after >10 s of A-channel idleness fails; a re-render + re-approve reconnects). Returns the
-    final record state."""
-    for i in range(tries):
-        _, _, page = get_confirm(cli, pid)
-        tok, dig = TOKEN_RE.search(page), DIGEST_RE.search(page)
-        if not tok:  # already decided (e.g. already APPROVED on a previous try)
-            break
-        approve(cli, pid, tok.group(1), dig.group(1), sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
-        time.sleep(1.5)
-        if record_state(pid) in ("APPROVED", "EXECUTING", "SUCCEEDED", "FAILED"):
-            break
+def approve_with_retry(cli, pid):
+    """One real browser approval: render, wait past the inert period, type the amount, approve.
+    Exactly one attempt (no retry): the former retry loop that worked around DEMO2-F02 is removed
+    now that the authority reconnects on a stale socket-A connection. Returns the record state."""
+    _, _, page = get_confirm(cli, pid)
+    tok, dig = TOKEN_RE.search(page), DIGEST_RE.search(page)
+    if not tok:
+        return record_state(pid)
+    time.sleep(INERT_SECONDS)
+    approve(cli, pid, tok.group(1), dig.group(1), typed=typed_fields(pid, page),
+            sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
+    for _ in range(20):  # execution is asynchronous; wait for a terminal or approved state
+        st = record_state(pid)
+        if st in ("SUCCEEDED", "FAILED", "UNKNOWN", "DENIED", "EXPIRED"):
+            return st
+        time.sleep(0.25)
     return record_state(pid)
 
 
@@ -367,16 +389,19 @@ def attack4_token():
     login_auth(alice, 0, return_to_confirm_pid=pid)
     _, _, page = get_confirm(alice, pid)
     tok, dig = TOKEN_RE.search(page).group(1), DIGEST_RE.search(page).group(1)
+    typed = typed_fields(pid, page)
+    # Wait past the inert period so every rejection below is for the reason under test, not timing.
+    time.sleep(INERT_SECONDS)
     # wrong session: a second browser as alice (different session id) presenting this token.
     other = Client(CTX)
     login_auth(other, 0, return_to_confirm_pid=pid2)
-    st_wrong_sess, _, _ = approve(other, pid, tok, dig, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
+    st_wrong_sess, _, _ = approve(other, pid, tok, dig, typed=typed, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
     # wrong pid: present the token against a different pid.
-    st_wrong_pid, _, _ = approve(alice, pid2, tok, dig, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
+    st_wrong_pid, _, _ = approve(alice, pid2, tok, dig, typed=typed, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
     # correct use: the token is single-use (consumed at first presentation).
-    st_ok, _, _ = approve(alice, pid, tok, dig, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
+    st_ok, _, _ = approve(alice, pid, tok, dig, typed=typed, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
     # reuse the same (now consumed) token again -> must 404 regardless of what happened above.
-    st_reuse, _, _ = approve(alice, pid, tok, dig, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
+    st_reuse, _, _ = approve(alice, pid, tok, dig, typed=typed, sec_fetch="navigate", origin_hdr=AUTH_ORIGIN)
     # drive to success (fresh tokens) to show a valid approval does execute, exactly once.
     state = approve_with_retry(alice, pid)
     ok1, _ = wait_state(pid, "SUCCEEDED", 25)
@@ -534,7 +559,9 @@ def _approve_then_kill(service, amount):
     _, _, page = get_confirm(cli, pid)
     tok, dig = TOKEN_RE.search(page), DIGEST_RE.search(page)
     if tok:
-        t = threading.Thread(target=lambda: approve(cli, pid, tok.group(1), dig.group(1),
+        typed = typed_fields(pid, page)
+        time.sleep(INERT_SECONDS)
+        t = threading.Thread(target=lambda: approve(cli, pid, tok.group(1), dig.group(1), typed=typed,
                                                      sec_fetch="navigate", origin_hdr=AUTH_ORIGIN))
         t.start()
     compose("kill", service, check=False)
