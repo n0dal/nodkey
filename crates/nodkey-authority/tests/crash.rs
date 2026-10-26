@@ -97,7 +97,11 @@ async fn t29_kill_between_sign_and_delivery_then_restart() {
 
     // The row was durable before delivery.
     {
-        let s = Store::open(&dir.join("issuance.log")).unwrap();
+        let s = Store::open(
+            &dir.join("issuance.log"),
+            nodkey_authority::own_uid().unwrap(),
+        )
+        .unwrap();
         let row = s.get(&PendingId::parse(&pid).unwrap()).unwrap();
         assert_eq!(row.status, Status::Signed);
         assert_eq!(row.grant, delivered);
@@ -149,7 +153,11 @@ async fn t29_restart_after_exp_marks_expired_without_delivery() {
     let broker = FakeBroker::start(&dir, &keys.registry_json).await;
     let t = now();
     {
-        let mut s = Store::open(&dir.join("issuance.log")).unwrap();
+        let mut s = Store::open(
+            &dir.join("issuance.log"),
+            nodkey_authority::own_uid().unwrap(),
+        )
+        .unwrap();
         s.insert(Issuance {
             jti: PendingId([3; 16]),
             digest: [3; 32],

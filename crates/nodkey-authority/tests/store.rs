@@ -8,6 +8,11 @@ use common::tmpdir;
 use nodkey_authority::digest::PendingId;
 use nodkey_authority::store::{Issuance, Status, Store, StoreError};
 
+fn uid(d: &std::path::Path) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(d).unwrap().uid()
+}
+
 fn row(n: u8) -> Issuance {
     Issuance {
         jti: PendingId([n; 16]),
@@ -28,12 +33,12 @@ fn rows_and_statuses_survive_reopen() {
     let d = tmpdir("st-reopen");
     let p = d.join("issuance.log");
     {
-        let mut s = Store::open(&p).unwrap();
+        let mut s = Store::open(&p, uid(&d)).unwrap();
         s.insert(row(1)).unwrap();
         s.insert(row(2)).unwrap();
         s.set_status(&PendingId([1; 16]), Status::Accepted).unwrap();
     } // "crash": dropped without any shutdown step
-    let s = Store::open(&p).unwrap();
+    let s = Store::open(&p, uid(&d)).unwrap();
     assert_eq!(s.len(), 2);
     assert_eq!(s.get(&PendingId([1; 16])).unwrap().status, Status::Accepted);
     let r2 = s.get(&PendingId([2; 16])).unwrap();
@@ -47,7 +52,7 @@ fn at_most_one_row_per_jti_across_restarts() {
     let d = tmpdir("st-once");
     let p = d.join("issuance.log");
     {
-        let mut s = Store::open(&p).unwrap();
+        let mut s = Store::open(&p, uid(&d)).unwrap();
         s.insert(row(1)).unwrap();
         let mut other = row(1);
         other.digest = [9; 32];
@@ -55,7 +60,7 @@ fn at_most_one_row_per_jti_across_restarts() {
         assert_eq!(s.insert(other), Err(StoreError::Exists));
     }
     for _ in 0..3 {
-        let mut s = Store::open(&p).unwrap();
+        let mut s = Store::open(&p, uid(&d)).unwrap();
         let mut other = row(1);
         other.grant = vec![0xd2, 8];
         assert_eq!(s.insert(other), Err(StoreError::Exists));
@@ -69,7 +74,7 @@ fn at_most_one_row_per_jti_across_restarts() {
 fn final_status_is_final() {
     let d = tmpdir("st-final");
     let p = d.join("issuance.log");
-    let mut s = Store::open(&p).unwrap();
+    let mut s = Store::open(&p, uid(&d)).unwrap();
     s.insert(row(1)).unwrap();
     s.set_status(&PendingId([1; 16]), Status::Expired).unwrap();
     assert_eq!(
@@ -87,7 +92,7 @@ fn torn_tail_is_truncated_and_earlier_rows_kept() {
     let d = tmpdir("st-torn");
     let p = d.join("issuance.log");
     {
-        let mut s = Store::open(&p).unwrap();
+        let mut s = Store::open(&p, uid(&d)).unwrap();
         s.insert(row(1)).unwrap();
     }
     let good = std::fs::read(&p).unwrap();
@@ -96,13 +101,13 @@ fn torn_tail_is_truncated_and_earlier_rows_kept() {
     f.write_all(b"0123abcd {\"k\":\"issue\",\"jti\":\"AgICAgICAg")
         .unwrap();
     drop(f);
-    let mut s = Store::open(&p).unwrap();
+    let mut s = Store::open(&p, uid(&d)).unwrap();
     assert_eq!(s.len(), 1);
     assert_eq!(std::fs::read(&p).unwrap(), good);
     // The torn row was never acknowledged; inserting it now works.
     s.insert(row(2)).unwrap();
     drop(s);
-    assert_eq!(Store::open(&p).unwrap().len(), 2);
+    assert_eq!(Store::open(&p, uid(&d)).unwrap().len(), 2);
 }
 
 #[test]
@@ -110,7 +115,7 @@ fn corruption_refuses_to_open() {
     let d = tmpdir("st-corrupt");
     let base = d.join("base.log");
     {
-        let mut s = Store::open(&base).unwrap();
+        let mut s = Store::open(&base, uid(&d)).unwrap();
         s.insert(row(1)).unwrap();
         s.insert(row(2)).unwrap();
     }
@@ -133,11 +138,62 @@ fn corruption_refuses_to_open() {
     for (i, content) in bad_cases.iter().enumerate() {
         let p = d.join(format!("bad{i}.log"));
         std::fs::write(&p, content).unwrap();
+        set_mode(&p, 0o600);
         assert!(
-            matches!(Store::open(&p), Err(StoreError::Corrupt(_))),
+            matches!(Store::open(&p, uid(&d)), Err(StoreError::Corrupt(_))),
             "case {i}"
         );
     }
+}
+
+fn set_mode(p: &std::path::Path, m: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+}
+
+#[test]
+fn au_r_08_complete_tail_without_newline_is_kept() {
+    let d = tmpdir("st-tail");
+    let p = d.join("issuance.log");
+    {
+        let mut s = Store::open(&p, uid(&d)).unwrap();
+        s.insert(row(1)).unwrap();
+        s.insert(row(2)).unwrap();
+    }
+    let mut text = std::fs::read(&p).unwrap();
+    assert_eq!(text.pop(), Some(b'\n'));
+    std::fs::write(&p, &text).unwrap();
+    let s = Store::open(&p, uid(&d)).unwrap();
+    assert_eq!(s.len(), 2, "durable record kept");
+    assert_eq!(*s.get(&PendingId([2; 16])).unwrap(), row(2));
+    drop(s);
+    assert!(std::fs::read(&p).unwrap().ends_with(b"\n"));
+}
+
+#[test]
+fn au_r_02_store_permissions_owner_and_symlink() {
+    let d = tmpdir("st-perm");
+    let p = d.join("issuance.log");
+    drop(Store::open(&p, uid(&d)).unwrap());
+    use std::os::unix::fs::MetadataExt;
+    assert_eq!(std::fs::metadata(&p).unwrap().mode() & 0o777, 0o600);
+    for m in [0o640, 0o604, 0o644] {
+        set_mode(&p, m);
+        assert!(
+            matches!(Store::open(&p, uid(&d)), Err(StoreError::Corrupt(_))),
+            "{m:o}"
+        );
+    }
+    set_mode(&p, 0o600);
+    assert!(Store::open(&p, uid(&d) + 1).is_err());
+    let l = d.join("link.log");
+    std::os::unix::fs::symlink(&p, &l).unwrap();
+    assert!(Store::open(&l, uid(&d)).is_err());
+    // A dangling symlink is not followed to create a file elsewhere.
+    let dl = d.join("dangling.log");
+    std::os::unix::fs::symlink(d.join("elsewhere.log"), &dl).unwrap();
+    assert!(Store::open(&dl, uid(&d)).is_err());
+    assert!(!d.join("elsewhere.log").exists());
 }
 
 fn sha(s: &str) -> [u8; 32] {
@@ -149,6 +205,9 @@ fn sha(s: &str) -> [u8; 32] {
 fn second_process_cannot_open_the_same_store() {
     let d = tmpdir("st-lock");
     let p = d.join("issuance.log");
-    let _s = Store::open(&p).unwrap();
-    assert!(matches!(Store::open(&p), Err(StoreError::Corrupt(_))));
+    let _s = Store::open(&p, uid(&d)).unwrap();
+    assert!(matches!(
+        Store::open(&p, uid(&d)),
+        Err(StoreError::Corrupt(_))
+    ));
 }

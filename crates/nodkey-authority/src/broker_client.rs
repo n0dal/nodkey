@@ -24,6 +24,9 @@ use crate::wire::{
     read_frame, write_line,
 };
 
+const STALE_WRITE: &str = "stale connection: write failed";
+const STALE_EOF: &str = "stale connection: closed before response";
+
 /// Record states (§3.3).
 pub const STATES: [&str; 8] = [
     "PENDING",
@@ -133,7 +136,7 @@ impl BrokerClient {
         let id = format!("a-{}", self.counter.fetch_add(1, Ordering::Relaxed));
         let req = json!({"v": PROTOCOL_VERSION, "id": id, "op": op, "args": args});
         if !write_line(&mut conn.writer, &req).await {
-            return Err(CallError::Unavailable("write"));
+            return Err(CallError::Unavailable(STALE_WRITE));
         }
         let mut buf = Vec::new();
         match tokio::time::timeout(
@@ -143,6 +146,8 @@ impl BrokerClient {
         .await
         {
             Ok(Ok(Frame::Line)) => {}
+            // Closed before any response byte: typically the broker closed an idle connection.
+            Ok(Ok(Frame::Eof)) => return Err(CallError::Unavailable(STALE_EOF)),
             Ok(_) => return Err(CallError::Unavailable("read")),
             Err(_) => return Err(CallError::Unavailable("response timeout")),
         }
@@ -177,18 +182,36 @@ impl BrokerClient {
         }
     }
 
+    /// Sends one request. A **reused** connection that turns out to be stale (the write fails, or
+    /// the peer closes before any response byte; the broker closes idle connections after its
+    /// read timeout) is replaced once by a fresh, re-verified connection and the request is sent
+    /// again (DEMO2-F02). This is safe for every socket-A call: `config.digest` and
+    /// `pending.get` are read-only, and `grant.deliver` resends the identical, already durable
+    /// bytes, which the broker treats idempotently (§4.3 step 2). Nothing is ever re-signed here.
     async fn call(&self, op: &str, args: Value) -> Result<Map<String, Value>, CallError> {
         let mut guard = self.conn.lock().await;
-        if guard.is_none() {
+        let mut reused = guard.is_some();
+        if !reused {
             *guard = Some(self.connect().await?);
         }
-        let conn = guard.as_mut().expect("connected above");
-        let r = self.exchange(conn, op, args).await;
-        if matches!(r, Err(CallError::Unavailable(_))) {
-            // The stream may hold a late response; never reuse it.
-            *guard = None;
+        loop {
+            let conn = guard.as_mut().expect("connected above");
+            let r = self.exchange(conn, op, args.clone()).await;
+            if matches!(r, Err(CallError::Unavailable(_))) {
+                // The stream may hold a late response; never reuse it.
+                *guard = None;
+            }
+            match r {
+                Err(CallError::Unavailable(why))
+                    if reused && (why == STALE_WRITE || why == STALE_EOF) =>
+                {
+                    log::event("broker_reconnect", json!({"op": op, "detail": why}));
+                    reused = false;
+                    *guard = Some(self.connect().await?);
+                }
+                r => return r,
+            }
         }
-        r
     }
 
     /// Connects (if needed) and verifies the broker uid and `config.digest`.

@@ -87,7 +87,11 @@ This deliberately merges spec steps 4 and 5 ("insert, sign, store bytes, set `si
 durable record. The result is the same guarantee, without an "inserted but unsigned" state.
 
 **Recovery and failure handling.**
-- A torn final line (no newline) is truncated, because that append never returned.
+- The store file must be a regular file (not a symlink) owned by the authority uid with mode 0600; a
+  new one is created with `O_EXCL` (AU-R-02).
+- A final line without a newline is kept (newline appended, alarm) if its checksum verifies; any other
+  newline-less tail is a torn append that never returned and is truncated, with an alarm (AU-R-08).
+- Appends are refused with an alarm above 768 MiB, below the 1 GiB open limit (AU-R-07).
 - Any complete corrupt line refuses to open: bad checksum, duplicate `jti`, status for an unknown
   `jti`, a transition out of a final status, or an empty line.
 - A failed write poisons the store until restart (fail closed).
@@ -107,16 +111,31 @@ timeouts. The §2.2 envelope is `{"v":2,"id","op","args"}`, answered by
 | A | `grant.deliver` | `{pending_id, grant}` | `{status: accepted\|rejected\|expired}`; error `unavailable` |
 
 On socket I, envelope errors are `malformed_request`, `unsupported_version`, `request_too_large` and
-`unknown_operation`. A connection whose `SO_PEERCRED` uid is not `gateway_uid` is closed without a
+`unknown_operation`.
+
+Socket A keeps one connection. If a **reused** connection turns out to be stale (the write fails, or
+the broker closes it before any response byte, as the broker does after 10 s idle), the client
+reconnects (re-checking peer uid and `config.digest`) and resends the request **once** (DEMO2-F02).
+That is safe for every A call: `config.digest` and `pending.get` are read-only, and `grant.deliver`
+resends the identical bytes, already durable, which the broker accepts idempotently. A failure on a
+fresh connection is not retried.
+
+A connection whose `SO_PEERCRED` uid is not `gateway_uid` is closed without a
 response, and an alarm is logged. On socket A, the authority checks the broker's peer uid as well.
 
 ## Configuration files (admin-only; strict JSON)
+
+Every configuration file (config, operations, workloads, manifest) must be a regular file (not a
+symlink, dev/ino re-checked after open) owned by root or the authority uid and not writable by group
+or other; its parent directory must satisfy the same owner and write rules (AU-R-02).
 
 - `nodkey.authority-config.v1`. Fields:
   - `issuer`, `broker_id`, `signing_key_path`, `signing_kid`, `store_path`;
   - `gateway_socket`, `broker_socket`;
   - `authority_uid`, `gateway_uid`, `broker_uid`, `workload_uids`;
-  - `operations_path` (grant-v1 §6.1), `workloads_path`, `manifest_path` (nullable);
+  - `operations_path` (grant-v1 §6.1), `workloads_path`, `manifest_path` (required member: `null`
+    or an absolute path);
+  - `ledger_currency` (ISO 4217; display facts of operations without a `currency` parameter);
   - `grant_ttl_secs` (1–30), `skew_secs` (0–5), `approve_reply_timeout_ms`, `broker_call_timeout_ms`.
 - `nodkey.workloads.v1`: `[{wid, tenants, approver_source: "named" | {"enrolled":{ten,sub}}, write_ops, read_ops}]`.
   Load refuses:
@@ -136,7 +155,37 @@ response, and an alarm is logged. On socket A, the authority checks the broker's
 | AU-4 | §1.2 | "Directory 0700 owned by the connecting peer" conflicts with the listener creating the socket in it. | The directory must have no "other" bits; the socket is 0660; `SO_PEERCRED` is authoritative. |
 | AU-5 | §4.2 steps 4–5 | Insert-then-sign leaves an "inserted, unsigned" row whose restart behaviour is unspecified. | One durable record with the bytes (see the store section). |
 | AU-6 | §4.2 step 7 | How long the gateway waits for a delivery result is unspecified (up to 30 s). | Bounded by `approve_reply_timeout_ms`; delivery continues in the background. |
-| AU-7 | grant-v1 §7.6 / §9 | No clock high-water mark is required of the authority. A clock rollback could produce `iat` earlier than a `revoked_before` row. | Not implemented. |
+| AU-7 | grant-v1 §7.6 / §9 | No clock rule is required of the authority. *Corrected (AU-R-04):* a rollback is fail-safe for `revoked_before` (earlier `iat` revokes more; write grants just expire). The unsafe direction is a **forward** jump: read grants with a future `iat` escape a later `revoked_before` (REV-09). | Implemented: clock errors (value below 2024-01-01) refuse to sign; signing refuses while `now + skew` is below the high-water mark (latest stored write `iat`, plus any `iat` since start). Forward-jump detection needs the broker's time on socket A: not implemented (protocol change outside this crate). |
+
+## Display facts (AU-R-01)
+
+The gateway formats amounts only with key 11, so the authority does not take key 11 on the broker's
+word. It derives it itself and requires `display` to be exactly that:
+- an operation with one `currency` parameter: `{amount_exponent: ISO 4217 exponent of that value,
+  currency: that value}`;
+- an operation with `amount_minor` and no currency parameter: the same for `ledger_currency`;
+- otherwise `{}`.
+
+The ISO 4217 table is the authority's own copy (same values as `broker/src/v2/decls.rs`). It is not
+part of `config.digest` (that would change the broker's digest definition); a mismatch fails closed per
+approval with a `broker_display_mismatch` alarm.
+
+## Review dispositions (`docs/reviews/2026-10-25-authority-review.md`)
+
+| Finding | Disposition |
+|---|---|
+| AU-R-01 | Fixed (above). |
+| AU-R-02 | Fixed: configuration-file and store checks. |
+| AU-R-03 | Fixed: for an `enrolled` workload, `read_grant` requires `subject` = the enrolment. |
+| AU-R-04 | Partly fixed (AU-7 row). Broker-time comparison rejected for now: it needs a socket-A protocol change in the broker. |
+| AU-R-05 | Fixed: every registered `wid` must be in the manifest; the control set includes the directories of the key, store, config, operations, workloads and manifest files; `manifest_path` is a required member and must be absolute. |
+| AU-R-06 | Fixed: logging writes with `writeln!` to locked stdout and ignores errors (no panic). |
+| AU-R-07 | Partly fixed: inserts refused above 768 MiB, with an alarm. Compaction rejected for now: it needs a spec rule for pruning final rows (`exp + skew + margin`). |
+| AU-R-08 | Fixed. |
+| AU-R-09 | Fixed: at most one delivery loop per `jti`; callers join it. The number of loops is bounded by the number of distinct signed rows. |
+| AU-R-10 | Rejected in code: `unsafe` is forbidden here and no safe crate is vendored. Deployment must set `LimitCORE=0` (or `ulimit -c 0`) and keep swap encrypted or disabled; see Limitations. |
+| AU-R-11 | Fixed: `created_at ≤ now + skew` and `0 < expires_at − created_at ≤ 900`. |
+| AU-R-12 | Fixed: an `accepted` row whose broker record is `PENDING` raises an alarm. A gateway retry after `APPROVED` still gets `not_available` (the gateway shows a neutral page). |
 
 ## Limitations
 
@@ -147,6 +196,8 @@ response, and an alarm is logged. On socket A, the authority checks the broker's
 - **Store growth.** The store is never compacted: it is limited to 1 GiB at open and its index is
   held in memory.
 - **Throughput.** There is one broker connection, and requests on it are serialized.
+- **Core dumps and swap.** The signing key is not `mlock`ed and core dumps are not disabled by the
+  process; the deployment must do it (AU-R-10).
 - **Read-grant origin.** `read_grant` trusts the gateway's same-origin/navigation check, which the
   authority cannot observe.
 
@@ -170,9 +221,9 @@ cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check
 | Suite | Covers |
 |---|---|
 | `tests/digest_vectors.rs` | DG-01..DG-10: byte-exact CBOR and digest; 4 rejections (T28, T37) |
-| `tests/approve.rs` | Happy path, with the grant verified by a fake broker using `nodkey_grant::verify` + `decide`; T01, T08, T16, T17, T19, T24, T34, T35, T37, T43, T46; enrolled and free-parameter operations; issuance conflict |
-| `tests/read_grant.rs` | `knd = 2` verifies for reads and never for writes (T26); refusals |
-| `tests/store.rs` | Reopen durability; one row per `jti` across restarts; torn tail; corruption refusals; `flock` |
+| `tests/approve.rs` | Happy path, with the grant verified by a fake broker using `nodkey_grant::verify` + `decide`; T01, T08, T16, T17, T19, T24, T34, T35, T37, T43, T46; enrolled and free-parameter operations; issuance conflict; DEMO2-F02 idle-close reconnect and bounded retry; AU-R-01 lying display; AU-R-04 clock; AU-R-11 lifetime |
+| `tests/read_grant.rs` | `knd = 2` verifies for reads and never for writes (T26); refusals; AU-R-03 enrolled principal only |
+| `tests/store.rs` | Reopen durability; one row per `jti` across restarts; torn tail; complete tail kept (AU-R-08); corruption refusals; `flock`; owner, mode and symlink refusals (AU-R-02) |
 | `tests/crash.rs` | T29/T46: **SIGKILL** of a child authority mid-delivery, restart, identical bytes re-delivered, no second signature; restart after `exp` marks the row expired; logs contain neither key nor grant |
-| `tests/config.rs` | T42 start-up refusals; strict config; workload registration refusals |
+| `tests/config.rs` | T42 start-up refusals; strict config; workload registration refusals; file owner/mode/symlink/parent-directory refusals (AU-R-02); manifest coverage (AU-R-05) |
 | unit tests | CBOR heads and ordering, hex and pending-id rules, framing, key-file permission, owner and symlink refusals |

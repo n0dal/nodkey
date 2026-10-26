@@ -5,6 +5,7 @@
 //! at start-up.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 
 use nodkey_grant::{Binding, OpKind, Operations};
@@ -19,9 +20,45 @@ const MAX_FILE_BYTES: u64 = 1 << 20;
 /// Label of the configuration digest compared with the broker's `config.digest` (§4.2 step 3).
 pub const CONFIG_DIGEST_LABEL: &[u8] = b"nodkey.authority-config-digest.v1";
 
-fn read_file(path: &Path) -> Result<Vec<u8>, String> {
+/// Checks that `meta` is administrator-controlled: owned by root or `owner_uid`, and not
+/// writable by group or other.
+fn admin_owned(meta: &std::fs::Metadata, owner_uid: u32) -> bool {
+    (meta.uid() == 0 || meta.uid() == owner_uid) && meta.mode() & 0o022 == 0
+}
+
+/// Reads an administrator-only file (SI-13, AU-R-02). Refuses:
+/// - a symlink or non-regular file;
+/// - a file or parent directory not owned by root or the authority uid;
+/// - a file or parent directory writable by group or other;
+/// - a file replaced between the check and the open (dev/ino).
+fn read_file(path: &Path, owner_uid: u32) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    let f = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let d = path.display();
+    let link = std::fs::symlink_metadata(path).map_err(|e| format!("{d}: {e}"))?;
+    if !link.file_type().is_file() {
+        return Err(format!("{d}: not a regular file (symlinks are refused)"));
+    }
+    if !admin_owned(&link, owner_uid) {
+        return Err(format!(
+            "{d}: must be owned by root or the authority uid and not group/other-writable"
+        ));
+    }
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .ok_or_else(|| format!("{d}: no parent directory"))?;
+    let pm = std::fs::metadata(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    if !admin_owned(&pm, owner_uid) {
+        return Err(format!(
+            "{}: directory must be owned by root or the authority uid and not group/other-writable",
+            parent.display()
+        ));
+    }
+    let f = std::fs::File::open(path).map_err(|e| format!("{d}: {e}"))?;
+    let meta = f.metadata().map_err(|e| format!("{d}: {e}"))?;
+    if meta.dev() != link.dev() || meta.ino() != link.ino() {
+        return Err(format!("{d}: file changed while opening"));
+    }
     let mut buf = Vec::new();
     f.take(MAX_FILE_BYTES + 1)
         .read_to_end(&mut buf)
@@ -54,7 +91,9 @@ struct RawConfig {
     workload_uids: Vec<u32>,
     operations_path: PathBuf,
     workloads_path: PathBuf,
-    manifest_path: Option<PathBuf>,
+    /// Required member; `null` or an absolute path (AU-R-05).
+    manifest_path: serde_json::Value,
+    ledger_currency: String,
     grant_ttl_secs: u64,
     skew_secs: u64,
     approve_reply_timeout_ms: u64,
@@ -104,6 +143,10 @@ pub struct Workloads {
 impl Workloads {
     pub fn get(&self, wid: &str) -> Option<&Workload> {
         self.by_wid.get(wid)
+    }
+
+    pub fn wids(&self) -> impl Iterator<Item = &str> {
+        self.by_wid.keys().map(String::as_str)
     }
 
     /// Parses and validates the registrations against the operation declarations.
@@ -207,6 +250,15 @@ pub struct Config {
     pub broker_uid: u32,
     pub workload_uids: Vec<u32>,
     pub manifest_path: Option<PathBuf>,
+    /// The parsed manifest, if `manifest_path` is set and the file exists (read at load, with the
+    /// same administrator-file checks).
+    pub manifest: Option<Manifest>,
+    /// ISO 4217 code of the ledger (display facts, AU-R-01).
+    pub ledger_currency: String,
+    /// The configuration file itself (for the manifest control set).
+    pub config_path: PathBuf,
+    pub operations_path: PathBuf,
+    pub workloads_path: PathBuf,
     pub grant_ttl_secs: u64,
     pub skew_secs: u64,
     pub approve_reply_timeout_ms: u64,
@@ -217,8 +269,18 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load(path: &Path) -> Result<Config, String> {
-        let raw: RawConfig = strict(&read_file(path)?, "config")?;
+    /// Loads the configuration. `owner_uid` is this process's uid; every file must be
+    /// administrator-controlled (see `read_file`).
+    pub fn load(path: &Path, owner_uid: u32) -> Result<Config, String> {
+        let raw: RawConfig = strict(&read_file(path, owner_uid)?, "config")?;
+        let manifest_path = match &raw.manifest_path {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(p) if Path::new(p).is_absolute() => Some(PathBuf::from(p)),
+            _ => return Err("config: manifest_path must be null or an absolute path".into()),
+        };
+        if crate::server::iso4217_exponent(&raw.ledger_currency).is_none() {
+            return Err("config: ledger_currency is not in the ISO 4217 table".into());
+        }
         if raw.format != "nodkey.authority-config.v1" {
             return Err("config: format".into());
         }
@@ -259,11 +321,11 @@ impl Config {
                 return Err(format!("config: path {} must be absolute", p.display()));
             }
         }
-        let ops_bytes = read_file(&raw.operations_path)?;
+        let ops_bytes = read_file(&raw.operations_path, owner_uid)?;
         let ops_text = std::str::from_utf8(&ops_bytes).map_err(|_| "operations: utf-8")?;
         let operations = Operations::load(ops_text)
             .map_err(|e| format!("operations: {} ({})", e.as_str(), e.detail()))?;
-        let wl_bytes = read_file(&raw.workloads_path)?;
+        let wl_bytes = read_file(&raw.workloads_path, owner_uid)?;
         let workloads = Workloads::load(&wl_bytes, &operations)?;
         Ok(Config {
             issuer: raw.issuer,
@@ -277,7 +339,21 @@ impl Config {
             gateway_uid: raw.gateway_uid,
             broker_uid: raw.broker_uid,
             workload_uids: raw.workload_uids,
-            manifest_path: raw.manifest_path,
+            manifest: match &manifest_path {
+                Some(p) if p.exists() => {
+                    let m: Manifest = strict(&read_file(p, owner_uid)?, "manifest")?;
+                    if m.format != "nodkey.deployment-manifest.v1" {
+                        return Err("manifest: format".into());
+                    }
+                    Some(m)
+                }
+                _ => None,
+            },
+            manifest_path,
+            ledger_currency: raw.ledger_currency,
+            config_path: path.to_owned(),
+            operations_path: raw.operations_path,
+            workloads_path: raw.workloads_path,
             grant_ttl_secs: raw.grant_ttl_secs,
             skew_secs: raw.skew_secs,
             approve_reply_timeout_ms: raw.approve_reply_timeout_ms,
@@ -291,14 +367,15 @@ impl Config {
 
 // ---- Start-up refusals (§1.2) ----
 
-#[derive(Debug, Deserialize)]
+/// Deployment manifest (`nodkey.deployment-manifest.v1`, spec gap AU-3).
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawManifest {
+pub struct Manifest {
     format: String,
     workload_mounts: Vec<RawMount>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawMount {
     wid: String,
@@ -370,16 +447,34 @@ pub fn startup_checks(
     if overlaps(&gw_dir, &br_dir) {
         return Err("socket directories of channels I and A are shared or nested".into());
     }
-    match &cfg.manifest_path {
-        Some(p) if p.exists() => {
-            let m: RawManifest = strict(&read_file(p)?, "manifest")?;
-            if m.format != "nodkey.deployment-manifest.v1" {
-                return Err("manifest: format".into());
+    match (&cfg.manifest_path, &cfg.manifest) {
+        (Some(p), Some(m)) => {
+            // AU-R-05: every registered workload must be described, and the control set covers
+            // every authority path, not only the socket directories.
+            let listed: BTreeSet<&str> = m.workload_mounts.iter().map(|w| w.wid.as_str()).collect();
+            if listed.len() != m.workload_mounts.len() {
+                return Err("manifest: duplicate wid".into());
+            }
+            if let Some(w) = cfg.workloads.wids().find(|w| !listed.contains(w)) {
+                return Err(format!("manifest: registered workload {w} is not described"));
+            }
+            let mut control = vec![gw_dir.clone(), br_dir.clone()];
+            for f in [
+                &cfg.signing_key_path,
+                &cfg.store_path,
+                &cfg.config_path,
+                &cfg.operations_path,
+                &cfg.workloads_path,
+                p,
+            ] {
+                if let Some(dir) = f.parent().and_then(normalize) {
+                    control.push(dir);
+                }
             }
             for mount in &m.workload_mounts {
                 for hp in &mount.host_paths {
                     let hp = normalize(hp).ok_or("manifest: host paths must be absolute")?;
-                    for ctl in [&gw_dir, &br_dir] {
+                    for ctl in &control {
                         if overlaps(&hp, ctl) {
                             return Err(format!(
                                 "manifest: control directory {} is mounted into workload {}",

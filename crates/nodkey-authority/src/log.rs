@@ -13,7 +13,11 @@ pub fn event(event: &str, fields: Value) {
     if let (Some(o), Value::Object(e)) = (obj.as_object_mut(), fields) {
         o.extend(e);
     }
-    println!("{obj}");
+    // AU-R-06: never panic on a closed or broken stdout (`println!` would); a lost log line
+    // must not abort a task between a durable insert and its delivery.
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{obj}");
 }
 
 /// An event that needs operator attention (§4.2 step 4 "raises an alarm", §4.3 match failures).

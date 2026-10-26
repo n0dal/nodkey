@@ -1,19 +1,22 @@
 //! Socket I (gateway → authority): `approve` and `read_grant` (effect-protocol-v2 §4.2), the
 //! delivery loop and start-up recovery.
 
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-use nodkey_grant::{Binding, GrantBuilder, OpKind, Operations, SigningKey, encode_transport};
+use nodkey_grant::{
+    Binding, GrantBuilder, OpKind, Operations, ParamType, ParamValue, SigningKey, encode_transport,
+};
 use serde_json::{Map, Value, json};
 use tokio::io::BufReader;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, Semaphore, watch};
 
 use crate::broker_client::{BrokerClient, CallError, DeliverResult};
 use crate::config::{ApproverSource, Workloads};
-use crate::digest::{PendingId, hex, is_id, parse_hex_digest};
+use crate::digest::{DisplayValue, PendingId, hex, is_id, parse_hex_digest};
 use crate::log;
 use crate::store::{Issuance, Status, Store, StoreError};
 use crate::wire::{
@@ -49,7 +52,28 @@ pub struct Settings {
     pub approve_reply_timeout: Duration,
     /// Pause between delivery retries.
     pub retry_interval: Duration,
+    /// The ledger's currency (ISO 4217), for the display facts of operations without a
+    /// `currency` parameter (AU-R-01). The authority never takes key 11 from the broker's word.
+    pub ledger_currency: String,
 }
+
+/// Earliest plausible clock value (2024-01-01). A clock below it is treated as a clock error.
+pub const MIN_SANE_TIME: u64 = 1_704_067_200;
+/// Longest pending lifetime the authority accepts (§2.5: 60–900 s).
+pub const MAX_PENDING_LIFETIME: u64 = 900;
+
+/// Decimal exponents from ISO 4217 for the currencies this prototype may display (§3.2 key 11).
+/// Same table as the broker's (`broker/src/v2/decls.rs`); the authority holds its own copy.
+pub fn iso4217_exponent(code: &str) -> Option<u64> {
+    Some(match code {
+        "EUR" | "USD" | "GBP" | "CHF" | "SEK" | "NOK" | "DKK" | "CAD" | "AUD" => 2,
+        "JPY" | "KRW" | "ISK" => 0,
+        "BHD" | "KWD" | "JOD" | "OMR" | "TND" => 3,
+        _ => return None,
+    })
+}
+
+type DeliveryRx = watch::Receiver<Option<Option<DeliverResult>>>;
 
 pub struct Authority {
     settings: Settings,
@@ -61,6 +85,10 @@ pub struct Authority {
     clock: Clock,
     counter: AtomicU64,
     cid_prefix: String,
+    /// Clock high-water mark: the latest `iat` this authority has used (AU-R-04).
+    clock_mark: AtomicU64,
+    /// At most one delivery loop per `jti` (AU-R-09).
+    inflight: StdMutex<HashMap<PendingId, DeliveryRx>>,
 }
 
 impl std::fmt::Debug for Authority {
@@ -97,6 +125,7 @@ impl Authority {
     ) -> Arc<Authority> {
         let mut seed = [0u8; 6];
         let _ = getrandom::fill(&mut seed);
+        let mark = store.max_signed_at();
         Arc::new(Authority {
             settings,
             ops,
@@ -107,7 +136,63 @@ impl Authority {
             clock,
             counter: AtomicU64::new(0),
             cid_prefix: hex(&seed),
+            clock_mark: AtomicU64::new(mark),
+            inflight: StdMutex::new(HashMap::new()),
         })
+    }
+
+    /// `now` for signing (AU-R-04): refuses a clock error (implausibly small value) and a clock
+    /// more than `skew` behind the persisted high-water mark (the latest write-grant `iat` in the
+    /// store, and any `iat` used since start), then advances the mark.
+    fn signing_now(&self) -> Result<u64, Refusal> {
+        let now = (self.clock)();
+        if now < MIN_SANE_TIME {
+            log::alarm("clock_error", json!({"now": now}));
+            return Err(Refusal("clock error"));
+        }
+        let mark = self.clock_mark.load(Ordering::SeqCst);
+        if now + self.settings.skew_secs < mark {
+            log::alarm(
+                "clock_behind_high_water_mark",
+                json!({"now": now, "mark": mark}),
+            );
+            return Err(Refusal("clock behind high-water mark"));
+        }
+        self.clock_mark.fetch_max(now, Ordering::SeqCst);
+        Ok(now)
+    }
+
+    /// Key 11 as the authority itself derives it (AU-R-01): for an operation with a `currency`
+    /// parameter, `{amount_exponent: ISO 4217 exponent of that value, currency: that value}`;
+    /// for one with an `amount_minor` parameter and no currency parameter, the same for the
+    /// configured ledger currency; otherwise `{}`.
+    fn expected_display(
+        &self,
+        decl: &nodkey_grant::OperationDecl,
+        rec: &crate::digest::PendingRecord,
+    ) -> Result<BTreeMap<String, DisplayValue>, Refusal> {
+        let currency_params: Vec<&str> = decl
+            .params
+            .iter()
+            .filter(|p| p.ty == ParamType::Currency)
+            .map(|p| p.name.as_str())
+            .collect();
+        let currency = match currency_params.as_slice() {
+            [] if decl.params.iter().any(|p| p.name == "amount_minor") => {
+                self.settings.ledger_currency.clone()
+            }
+            [] => return Ok(BTreeMap::new()),
+            [name] => match rec.params.get(*name) {
+                Some(ParamValue::Text(c)) => c.clone(),
+                _ => return Err(Refusal("currency parameter missing")),
+            },
+            _ => return Err(Refusal("more than one currency parameter")),
+        };
+        let exp = iso4217_exponent(&currency).ok_or(Refusal("currency not in ISO 4217 table"))?;
+        Ok(BTreeMap::from([
+            ("amount_exponent".to_owned(), DisplayValue::Uint(exp)),
+            ("currency".to_owned(), DisplayValue::Text(currency)),
+        ]))
     }
 
     fn cid(&self) -> String {
@@ -187,6 +272,19 @@ impl Authority {
         if now >= rec.expires_at {
             return Err(Refusal("record expired"));
         }
+        // AU-R-11: bound the broker's word on the pending lifetime (§2.5).
+        if rec.created_at > now + self.settings.skew_secs
+            || rec.expires_at <= rec.created_at
+            || rec.expires_at - rec.created_at > MAX_PENDING_LIFETIME
+        {
+            log::alarm(
+                "broker_record_lifetime_invalid",
+                json!({"correlation_id": cid, "jti": pid.to_text()}),
+            );
+            return Err(Refusal(
+                "pending lifetime outside 0..=900 s or created in the future",
+            ));
+        }
         let digest = rec.digest();
         if digest != fetched.broker_digest {
             log::alarm(
@@ -241,6 +339,15 @@ impl Authority {
                 }
             }
         }
+        // AU-R-01: what the gateway displayed is interpreted with key 11, so the authority
+        // requires key 11 to equal its own derivation instead of trusting the broker.
+        if rec.display != self.expected_display(decl, rec)? {
+            log::alarm(
+                "broker_display_mismatch",
+                json!({"correlation_id": cid, "jti": pid.to_text(), "op": rec.op}),
+            );
+            return Err(Refusal("display facts differ from the authority's own"));
+        }
 
         // Steps 4–5: exactly once, then sign and store before any delivery.
         let row = {
@@ -263,7 +370,7 @@ impl Authority {
                     ));
                 }
                 None => {
-                    let iat = (self.clock)();
+                    let iat = self.signing_now()?;
                     let exp = iat + self.settings.grant_ttl_secs;
                     let mut b = GrantBuilder::write(&rec.op, rec.opv)
                         .issuer(&self.settings.issuer)
@@ -323,18 +430,53 @@ impl Authority {
 
         // Steps 6–7.
         match row.status {
-            Status::Accepted => return Ok(ApproveOutcome::Ok),
+            Status::Accepted => {
+                // The broker shows PENDING although it accepted this grant: a restore or broker
+                // inconsistency (ADR-0006 §9). Safe (nothing is re-signed), but alarm (AU-R-12).
+                log::alarm(
+                    "accepted_issuance_but_broker_pending",
+                    json!({"correlation_id": cid, "jti": pid.to_text()}),
+                );
+                return Ok(ApproveOutcome::Ok);
+            }
             Status::Rejected | Status::Expired => return Err(Refusal("issuance already final")),
             Status::Signed => {}
         }
-        let this = self.clone();
-        let task = tokio::spawn(async move { this.deliver_until_deadline(row).await });
-        match tokio::time::timeout(self.settings.approve_reply_timeout, task).await {
-            Ok(Ok(Some(DeliverResult::Accepted))) => Ok(ApproveOutcome::Ok),
+        let mut rx = self.deliver_shared(row);
+        let wait = async move {
+            rx.wait_for(Option::is_some)
+                .await
+                .ok()
+                .and_then(|v| (*v).flatten())
+        };
+        match tokio::time::timeout(self.settings.approve_reply_timeout, wait).await {
+            Ok(Some(DeliverResult::Accepted)) => Ok(ApproveOutcome::Ok),
             Ok(_) => Err(Refusal("delivery not accepted")),
             // Delivery continues in the background; the gateway shows a neutral page.
             Err(_) => Err(Refusal("delivery still in progress at reply deadline")),
         }
+    }
+
+    /// Starts the delivery loop for `row` unless one is already running for its `jti`, and
+    /// returns a receiver for its final result (AU-R-09).
+    fn deliver_shared(self: &Arc<Self>, row: Issuance) -> DeliveryRx {
+        let mut map = self.inflight.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(rx) = map.get(&row.jti) {
+            return rx.clone();
+        }
+        let (tx, rx) = watch::channel(None);
+        map.insert(row.jti, rx.clone());
+        let this = self.clone();
+        tokio::spawn(async move {
+            let jti = row.jti;
+            let result = this.clone().deliver_until_deadline(row).await;
+            this.inflight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&jti);
+            let _ = tx.send(Some(result));
+        });
+        rx
     }
 
     /// §4.2 step 6: deliver the stored bytes; retry while `now < exp`; mark `expired` if not
@@ -407,8 +549,13 @@ impl Authority {
         log::event("recovery_start", json!({"unfinished": rows.len()}));
         rows.into_iter()
             .map(|row| {
-                let this = self.clone();
-                tokio::spawn(async move { this.deliver_until_deadline(row).await })
+                let mut rx = self.deliver_shared(row);
+                tokio::spawn(async move {
+                    rx.wait_for(Option::is_some)
+                        .await
+                        .ok()
+                        .and_then(|v| (*v).flatten())
+                })
             })
             .collect()
     }
@@ -438,6 +585,14 @@ impl Authority {
         if !wl.tenants.contains(&ten) {
             return Err(Refusal("subject tenant not registered for workload"));
         }
+        // AU-R-03: a single-principal (enrolled) workload reads only its principal's data.
+        if let ApproverSource::Enrolled { ten: et, sub: es } = &wl.approver_source
+            && (*et != ten || *es != sub)
+        {
+            return Err(Refusal(
+                "enrolled workload: subject is not the enrolled principal",
+            ));
+        }
         let mut b = GrantBuilder::read();
         let mut seen = std::collections::BTreeSet::new();
         for op in rop {
@@ -456,7 +611,7 @@ impl Authority {
         }
         let mut jti = [0u8; 16];
         getrandom::fill(&mut jti).map_err(|_| Refusal("CSPRNG"))?;
-        let iat = (self.clock)();
+        let iat = self.signing_now()?;
         let exp = iat + self.settings.grant_ttl_secs;
         let grant = b
             .issuer(&self.settings.issuer)

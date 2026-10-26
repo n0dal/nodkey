@@ -69,6 +69,7 @@ async fn enrolled_transfer_and_free_param_ops_are_signed() {
     let pid2 = random_pid();
     let mut rec2 = refund_record(&pid2, "user:u-17", 1, now() + 600);
     rec2.insert("op".into(), json!("test.note"));
+    rec2.insert("display".into(), json!({}));
     rec2.insert(
         "params".into(),
         json!({"order_id": 9821, "note": "hello \"world\""}),
@@ -477,4 +478,138 @@ async fn t19_concurrent_approves_sign_once() {
     let d = broker.deliveries();
     assert!(d.iter().all(|(_, g)| *g == d[0].1), "one grant per jti");
     assert_eq!(broker.record_state(&pid), "APPROVED");
+}
+
+#[tokio::test]
+async fn demo2_f02_reconnects_after_broker_closes_idle_connection() {
+    let (_d, broker, run) = setup("idle").await;
+    broker.state.lock().unwrap().idle_close = Some(Duration::from_millis(200));
+    // Establish the pooled connection, then let the broker close it as idle.
+    run.authority.broker().check().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let pid = random_pid();
+    let rec = refund_record(&pid, "user:u-17", 1250, now() + 600);
+    let digest = digest_of(&rec);
+    broker.add(rec, "PENDING");
+    let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+    assert!(is_ok(&r), "first approval after idleness must succeed: {r}");
+    // Idle again before a second approval (stale connection on pending.get *and* deliver path).
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let pid2 = random_pid();
+    let rec2 = refund_record(&pid2, "user:u-17", 99, now() + 600);
+    let d2 = digest_of(&rec2);
+    broker.add(rec2, "PENDING");
+    let r = approve(&run.gateway_path, &pid2, &d2, "acme", "user:u-17").await;
+    assert!(is_ok(&r), "{r}");
+    // One signature and one delivery per pending id; reconnects happened.
+    let d = broker.deliveries();
+    assert_eq!(d.iter().filter(|(p, _)| *p == pid).count(), 1);
+    assert_eq!(d.iter().filter(|(p, _)| *p == pid2).count(), 1);
+    assert!(broker.state.lock().unwrap().connections >= 3);
+}
+
+#[tokio::test]
+async fn demo2_f02_reconnect_retry_is_bounded_to_once() {
+    // The broker drops every pending.get without answering: one retry on a fresh connection,
+    // then fail closed (no grant, no endless loop).
+    let (_d, broker, run) = setup("idle-drop").await;
+    run.authority.broker().check().await.unwrap();
+    broker.state.lock().unwrap().drop_pending_get = true;
+    let pid = random_pid();
+    let rec = refund_record(&pid, "user:u-17", 1250, now() + 600);
+    let digest = digest_of(&rec);
+    broker.add(rec, "PENDING");
+    let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+    assert_eq!(err_code(&r), Some("not_available"));
+    assert_eq!(broker.state.lock().unwrap().pending_gets, 2);
+    // A fresh connection that fails is not retried.
+    let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+    assert_eq!(err_code(&r), Some("not_available"));
+    assert_eq!(broker.state.lock().unwrap().pending_gets, 3);
+    assert!(broker.deliveries().is_empty());
+}
+
+#[tokio::test]
+async fn au_r_01_lying_display_facts_give_no_grant() {
+    let (_d, broker, run) = setup("display").await;
+    let lies = [
+        json!({"amount_exponent": 6, "currency": "EUR"}),
+        json!({"amount_exponent": 2, "currency": "USD"}),
+        json!({}),
+        json!({"amount_exponent": 2, "currency": "EUR", "note": "x"}),
+    ];
+    for lie in lies {
+        let pid = random_pid();
+        let mut rec = refund_record(&pid, "user:u-17", 1_000_000, now() + 600);
+        rec.insert("display".into(), lie.clone());
+        // The digest covers the lie, and the gateway showed exactly that digest.
+        let digest = digest_of(&rec);
+        broker.add(rec, "PENDING");
+        let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+        assert_eq!(err_code(&r), Some("not_available"), "{lie}");
+    }
+    // Ledger transfer: display must be the configured ledger currency.
+    let pid = random_pid();
+    let mut rec = transfer_record(&pid, "user:u-17", now() + 600);
+    rec.insert(
+        "display".into(),
+        json!({"amount_exponent": 0, "currency": "JPY"}),
+    );
+    let digest = digest_of(&rec);
+    broker.add(rec, "PENDING");
+    let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+    assert_eq!(err_code(&r), Some("not_available"));
+    assert!(broker.deliveries().is_empty());
+}
+
+#[tokio::test]
+async fn au_r_11_implausible_pending_lifetime_gives_no_grant() {
+    let (_d, broker, run) = setup("lifetime").await;
+    let t = now();
+    for (created, expires) in [(t - 10, t + 5000), (t + 120, t + 600), (t + 600, t + 600)] {
+        let pid = random_pid();
+        let mut rec = refund_record(&pid, "user:u-17", 1250, expires);
+        rec.insert("created_at".into(), json!(created));
+        let digest = digest_of(&rec);
+        broker.add(rec, "PENDING");
+        let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+        assert_eq!(err_code(&r), Some("not_available"), "{created} {expires}");
+    }
+    assert!(broker.deliveries().is_empty());
+}
+
+#[tokio::test]
+async fn au_r_04_clock_error_and_rollback_refuse_to_sign() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let t = Arc::new(AtomicU64::new(now()));
+    let t2 = t.clone();
+    let (_d, broker, run) = setup_with("clock", |o| {
+        o.clock = Arc::new(move || t2.load(Ordering::SeqCst));
+    })
+    .await;
+    let pid = random_pid();
+    let rec = refund_record(&pid, "user:u-17", 1250, now() + 600);
+    let digest = digest_of(&rec);
+    broker.add(rec, "PENDING");
+    assert!(is_ok(
+        &approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await
+    ));
+    // Rollback by more than skew below the high-water mark: refuse.
+    let base = t.load(Ordering::SeqCst);
+    t.store(base - 100, Ordering::SeqCst);
+    let pid = random_pid();
+    let rec = refund_record(&pid, "user:u-17", 1250, now() + 600);
+    let digest = digest_of(&rec);
+    broker.add(rec, "PENDING");
+    let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+    assert_eq!(err_code(&r), Some("not_available"));
+    // Clock error (the system clock maps errors to 0): refuse.
+    t.store(0, Ordering::SeqCst);
+    let req = json!({"v":2,"id":"g-r","op":"read_grant","args":{
+        "subject": {"ten": "acme", "sub": "user:u-1"}, "wid": SHOP, "rop": ["payments.get_order"]}});
+    let r = gateway_raw(&run.gateway_path, &req.to_string())
+        .await
+        .unwrap();
+    assert_eq!(err_code(&r), Some("not_available"));
+    assert_eq!(broker.deliveries().len(), 1);
 }

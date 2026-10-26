@@ -142,6 +142,12 @@ pub struct FakeBrokerState {
     pub registry_json: String,
     /// Fail the first N deliveries with `unavailable` before applying `mode`.
     pub fail_first: usize,
+    /// Close a connection idle for this long (the real broker's `READ_TIMEOUT`, DEMO2-F02).
+    pub idle_close: Option<Duration>,
+    /// Connections accepted.
+    pub connections: usize,
+    /// Close the connection on every `pending.get` without answering.
+    pub drop_pending_get: bool,
 }
 
 pub type Shared = Arc<StdMutex<FakeBrokerState>>;
@@ -166,6 +172,9 @@ impl FakeBroker {
             pending_gets: 0,
             registry_json: registry_json.to_owned(),
             fail_first: 0,
+            idle_close: None,
+            connections: 0,
+            drop_pending_get: false,
         }));
         let st = state.clone();
         tokio::spawn(async move {
@@ -174,6 +183,7 @@ impl FakeBroker {
                     return;
                 };
                 let st = st.clone();
+                st.lock().unwrap().connections += 1;
                 tokio::spawn(async move { serve_broker_conn(s, st).await });
             }
         });
@@ -269,6 +279,9 @@ fn handle_broker(st: &mut FakeBrokerState, req: &Map<String, Value>) -> Option<(
             let Some(r) = st.records.get(pid) else {
                 return Some((reply(&id, Err("not_found")), false));
             };
+            if st.drop_pending_get {
+                return Some((reply(&id, Err("unavailable")), true));
+            }
             let mut res = r.json.clone();
             let digest = r
                 .digest_override
@@ -325,7 +338,18 @@ fn handle_broker(st: &mut FakeBrokerState, req: &Map<String, Value>) -> Option<(
 async fn serve_broker_conn(s: UnixStream, st: Shared) {
     let (r, mut w) = s.into_split();
     let mut lines = BufReader::new(r).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
+    loop {
+        let idle = st.lock().unwrap().idle_close;
+        let next = match idle {
+            Some(d) => match tokio::time::timeout(d, lines.next_line()).await {
+                Ok(n) => n,
+                Err(_) => return, // idle: close, like the real broker
+            },
+            None => lines.next_line().await,
+        };
+        let Ok(Some(line)) = next else {
+            return;
+        };
         let req: Map<String, Value> = serde_json::from_str(&line).unwrap();
         let out = handle_broker(&mut st.lock().unwrap(), &req);
         match out {
@@ -395,7 +419,7 @@ pub async fn start_authority(dir: &Path, keys: &Keys, broker_path: &Path, o: Opt
     let ops = Operations::load(OPERATIONS).unwrap();
     let wl = Workloads::load(WORKLOADS.as_bytes(), &ops).unwrap();
     let key = load_signing_key(&keys.key_path, uid).unwrap();
-    let store = Store::open(&dir.join("issuance.log")).unwrap();
+    let store = Store::open(&dir.join("issuance.log"), uid).unwrap();
     let broker = BrokerClient::new(
         broker_path.to_owned(),
         o.broker_uid,
@@ -410,6 +434,7 @@ pub async fn start_authority(dir: &Path, keys: &Keys, broker_path: &Path, o: Opt
         skew_secs: o.skew,
         approve_reply_timeout: o.reply_timeout,
         retry_interval: Duration::from_millis(50),
+        ledger_currency: "EUR".into(),
     };
     let authority = Authority::new(settings, ops, wl, key, store, broker, o.clock);
     let gwdir = dir.join("gw-authority");

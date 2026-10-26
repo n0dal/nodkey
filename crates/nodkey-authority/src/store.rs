@@ -11,8 +11,9 @@
 //!   that was signed but whose record did not become durable never left the process (delivery
 //!   happens only after `insert` returns), so at most one grant per `jti` is ever observable.
 //! - A `status` record moves a row from `signed` to a final status.
-//! - Start-up: a final line without a newline is a torn write of an append that never
-//!   returned; it is truncated (and logged). Any complete line with a bad checksum, unknown
+//! - Start-up: a final line without a newline whose checksum verifies is kept (newline
+//!   appended); any other newline-less tail is a torn write of an append that never returned
+//!   and is truncated (alarm). Any complete line with a bad checksum, unknown
 //!   kind, duplicate `jti`, status for an unknown `jti`, or a transition out of a final status
 //!   is corruption: the store refuses to open (fail closed, SI-15).
 //! - After any failed write the store is poisoned: every later call fails until restart, because
@@ -22,7 +23,7 @@
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use nodkey_grant::{decode_transport, encode_transport};
@@ -34,6 +35,8 @@ use crate::log;
 
 /// Largest store file accepted at start-up (bounded memory; compaction is future work).
 pub const MAX_STORE_BYTES: u64 = 1 << 30;
+/// Appends are refused (with an alarm) beyond this size, leaving headroom below the open limit.
+pub const INSERT_LIMIT_BYTES: u64 = 3 << 28;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -101,6 +104,8 @@ pub struct Store {
     file: File,
     index: HashMap<PendingId, Issuance>,
     poisoned: bool,
+    /// Current file size in bytes.
+    size: u64,
 }
 
 fn checksum(json: &str) -> String {
@@ -140,16 +145,51 @@ fn parse_issue(v: &Value) -> Result<Issuance, String> {
 }
 
 impl Store {
-    /// Opens (creating if absent, mode 0600) and replays the log.
-    pub fn open(path: &Path) -> Result<Store, StoreError> {
-        let created = !path.exists();
-        let mut file = OpenOptions::new()
-            .read(true)
-            .append(true)
-            .create(true)
-            .mode(0o600)
+    /// Opens (creating if absent, mode 0600) and replays the log. `owner_uid` is the authority's
+    /// uid: an existing store must be a regular file (not a symlink) owned by it with no group or
+    /// other permission bits (AU-R-02), and must not change between the check and the open.
+    pub fn open(path: &Path, owner_uid: u32) -> Result<Store, StoreError> {
+        let before = match std::fs::symlink_metadata(path) {
+            Ok(m) => {
+                if !m.file_type().is_file() {
+                    return Err(StoreError::Corrupt("store: not a regular file".into()));
+                }
+                Some(m)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(StoreError::Corrupt(format!("store: {e}"))),
+        };
+        let created = before.is_none();
+        let mut opts = OpenOptions::new();
+        opts.read(true).append(true).mode(0o600);
+        if created {
+            // O_EXCL: also refuses a symlink planted after the check.
+            opts.create_new(true);
+        }
+        let mut file = opts
             .open(path)
             .map_err(|e| StoreError::Corrupt(format!("open: {e}")))?;
+        let meta = file
+            .metadata()
+            .map_err(|e| StoreError::Corrupt(format!("store: {e}")))?;
+        if let Some(b) = &before
+            && (b.dev() != meta.dev() || b.ino() != meta.ino())
+        {
+            return Err(StoreError::Corrupt(
+                "store: file changed while opening".into(),
+            ));
+        }
+        if meta.uid() != owner_uid {
+            return Err(StoreError::Corrupt(
+                "store: not owned by the authority uid".into(),
+            ));
+        }
+        if meta.mode() & 0o077 != 0 {
+            return Err(StoreError::Corrupt(format!(
+                "store: mode {:o} grants group/other access; require 0600",
+                meta.mode() & 0o777
+            )));
+        }
         match file.try_lock() {
             Ok(()) => {}
             Err(_) => {
@@ -183,14 +223,35 @@ impl Store {
             Some(p) => p + 1,
             None => 0,
         };
+        let mut complete = complete;
         if complete < data.len() {
-            log::event(
-                "store_torn_tail_truncated",
-                json!({"bytes": data.len() - complete}),
-            );
-            file.set_len(complete as u64)
-                .and_then(|_| file.sync_all())
-                .map_err(|e| StoreError::Corrupt(format!("truncate: {e}")))?;
+            // AU-R-08: a tail that is a complete, checksummed record missing only its newline is
+            // kept (newline appended and fsync'd); only a genuinely partial tail is truncated.
+            let tail_ok = std::str::from_utf8(&data[complete..])
+                .ok()
+                .and_then(|t| t.split_once(' '))
+                .is_some_and(|(sum, body)| {
+                    checksum(body) == sum && serde_json::from_str::<Value>(body).is_ok()
+                });
+            if tail_ok {
+                log::alarm(
+                    "store_tail_missing_newline_repaired",
+                    json!({"bytes": data.len() - complete}),
+                );
+                file.write_all(b"\n")
+                    .and_then(|_| file.sync_all())
+                    .map_err(|e| StoreError::Corrupt(format!("repair: {e}")))?;
+                data.push(b'\n');
+                complete = data.len();
+            } else {
+                log::alarm(
+                    "store_torn_tail_truncated",
+                    json!({"bytes": data.len() - complete}),
+                );
+                file.set_len(complete as u64)
+                    .and_then(|_| file.sync_all())
+                    .map_err(|e| StoreError::Corrupt(format!("truncate: {e}")))?;
+            }
         }
 
         let mut index: HashMap<PendingId, Issuance> = HashMap::new();
@@ -238,6 +299,7 @@ impl Store {
             file,
             index,
             poisoned: false,
+            size: complete as u64,
         })
     }
 
@@ -247,6 +309,11 @@ impl Store {
 
     pub fn get(&self, jti: &PendingId) -> Option<&Issuance> {
         self.index.get(jti)
+    }
+
+    /// Latest `signed_at` in the store: the persisted clock high-water mark (AU-R-04).
+    pub fn max_signed_at(&self) -> u64 {
+        self.index.values().map(|r| r.signed_at).max().unwrap_or(0)
     }
 
     pub fn len(&self) -> usize {
@@ -277,6 +344,13 @@ impl Store {
         }
         let body = body.to_string();
         let line = format!("{} {}\n", checksum(&body), body);
+        // AU-R-07: stop accepting writes well below the open limit, so the next start still opens.
+        if self.size + line.len() as u64 > INSERT_LIMIT_BYTES {
+            log::alarm("store_full", json!({"size": self.size}));
+            return Err(StoreError::Io(
+                "store size limit reached; compaction required".into(),
+            ));
+        }
         let r = self
             .file
             .write_all(line.as_bytes())
@@ -286,6 +360,7 @@ impl Store {
             log::alarm("store_write_failed", json!({"detail": e.to_string()}));
             return Err(StoreError::Io(e.to_string()));
         }
+        self.size += line.len() as u64;
         Ok(())
     }
 

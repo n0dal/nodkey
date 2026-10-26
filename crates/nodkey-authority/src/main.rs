@@ -136,8 +136,9 @@ fn prepare_socket_path(path: &Path) -> Result<(), String> {
 }
 
 async fn run(config: &Path, mounts_verified: bool) -> Result<(), String> {
-    let cfg = Config::load(config)?;
     let uid = own_uid().map_err(|e| format!("own uid: {e}"))?;
+    let config = std::path::absolute(config).map_err(|e| format!("config path: {e}"))?;
+    let cfg = Config::load(&config, uid)?;
     if mounts_verified {
         log::event("mounts_verified_externally", json!({"flag": true}));
     }
@@ -148,7 +149,7 @@ async fn run(config: &Path, mounts_verified: bool) -> Result<(), String> {
     if kid != cfg.signing_kid {
         return Err("signing key kid differs from configured signing_kid".into());
     }
-    let store = Store::open(&cfg.store_path).map_err(|e| format!("store: {e:?}"))?;
+    let store = Store::open(&cfg.store_path, uid).map_err(|e| format!("store: {e:?}"))?;
 
     let broker = BrokerClient::new(
         cfg.broker_socket.clone(),
@@ -176,6 +177,7 @@ async fn run(config: &Path, mounts_verified: bool) -> Result<(), String> {
         skew_secs: cfg.skew_secs,
         approve_reply_timeout: Duration::from_millis(cfg.approve_reply_timeout_ms),
         retry_interval: Duration::from_millis(500),
+        ledger_currency: cfg.ledger_currency.clone(),
     };
     let authority = Authority::new(
         settings,

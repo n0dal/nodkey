@@ -129,3 +129,16 @@ async fn read_grant_refusals() {
     let r = read_grant(p, "acme", "bad sub", SHOP, json!(["payments.get_order"])).await;
     assert_eq!(err_code(&r), Some("not_available"));
 }
+
+#[tokio::test]
+async fn au_r_03_enrolled_workload_reads_only_for_its_principal() {
+    let dir = tmpdir("readenr");
+    let keys = make_key(&dir);
+    let broker = FakeBroker::start(&dir, &keys.registry_json).await;
+    let run = start_authority(&dir, &keys, &broker.path, Opts::new()).await;
+    let p = &run.gateway_path;
+    let ok = read_grant(p, "acme", "user:u-17", AGENT, json!(["ledger.get_balance"])).await;
+    assert!(is_ok(&ok), "{ok}");
+    let other = read_grant(p, "acme", "user:u-18", AGENT, json!(["ledger.get_balance"])).await;
+    assert_eq!(err_code(&other), Some("not_available"));
+}
