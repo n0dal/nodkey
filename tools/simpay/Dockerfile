@@ -2,7 +2,14 @@
 # simpay: SIMULATED payment provider for Nodkey Demo P tests. Not a real payment API.
 # Build:  docker build -t nodkey/simpay:dev tools/simpay/
 # Tests:  docker build --target test --progress=plain tools/simpay/
-# Base image digests from `docker buildx imagetools inspect` (2026-10-25).
+# TLS:    simpay gen-test-ca --out certs --dns-name simpay.internal   (TEST-ONLY CA)
+#         docker run -v $PWD/certs:/etc/simpay/tls:ro nodkey/simpay:dev \
+#           --config /etc/simpay/container-config.json --container-bind \
+#           --tls-cert /etc/simpay/tls/simpay-TEST-ONLY-server.crt \
+#           --tls-key /etc/simpay/tls/simpay-TEST-ONLY-server.key
+#         (the key file is 0600: make it readable by uid 10003, e.g. chown, before mounting)
+# Base image digests from `docker buildx imagetools inspect` (re-checked 2026-10-25).
+# The build stage's gcc compiles ring's C/assembly; no OpenSSL is used anywhere.
 FROM rust:1.99-slim-trixie@sha256:1a939748a7cbab172de91a014e3804a97af1394a8c844faa67fce9401c4e40fb AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./

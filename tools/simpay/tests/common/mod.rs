@@ -488,3 +488,154 @@ pub async fn now(server: &Server) -> u64 {
         .as_u64()
         .unwrap()
 }
+
+// ---------------------------------------------------------------- TLS client helpers
+
+use rustls_pki_types::ServerName;
+use rustls_pki_types::pem::PemObject;
+use std::path::Path;
+use tokio_rustls::TlsConnector;
+
+#[derive(Clone)]
+pub struct TlsClient {
+    pub connector: TlsConnector,
+    pub name: ServerName<'static>,
+}
+
+/// A client that trusts only `ca_pem` and verifies `name`, with the given protocol versions.
+pub fn tls_client_versions(
+    ca_pem: &Path,
+    name: &str,
+    versions: &[&'static rustls::SupportedProtocolVersion],
+) -> TlsClient {
+    let mut roots = rustls::RootCertStore::empty();
+    for c in rustls_pki_types::CertificateDer::pem_file_iter(ca_pem).unwrap() {
+        roots.add(c.unwrap()).unwrap();
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let cfg = rustls::ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(versions)
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    TlsClient {
+        connector: TlsConnector::from(Arc::new(cfg)),
+        name: ServerName::try_from(name.to_string()).unwrap(),
+    }
+}
+
+pub fn tls_client(ca_pem: &Path, name: &str) -> TlsClient {
+    tls_client_versions(ca_pem, name, &[&rustls::version::TLS13])
+}
+
+/// Like [`raw`], over TLS. A handshake failure is `Io("tls: …")`. An EOF without
+/// `close_notify` before any byte arrived is `Closed`.
+pub async fn raw_tls(
+    addr: SocketAddr,
+    tls: &TlsClient,
+    bytes: &[u8],
+    limit: Duration,
+) -> Result<Vec<u8>, ClientError> {
+    let fut = async {
+        let tcp = TcpStream::connect(addr)
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?;
+        let mut s = tls
+            .connector
+            .connect(tls.name.clone(), tcp)
+            .await
+            .map_err(|e| ClientError::Io(format!("tls: {e}")))?;
+        s.write_all(bytes)
+            .await
+            .map_err(|e| ClientError::Io(e.to_string()))?;
+        let mut out = Vec::new();
+        match s.read_to_end(&mut out).await {
+            Ok(_) => {}
+            Err(e) if out.is_empty() && e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                return Err(ClientError::Closed);
+            }
+            Err(e) if out.is_empty() => return Err(ClientError::Io(e.to_string())),
+            Err(_) => {}
+        }
+        if out.is_empty() {
+            return Err(ClientError::Closed);
+        }
+        Ok(out)
+    };
+    match tokio::time::timeout(limit, fut).await {
+        Ok(r) => r,
+        Err(_) => Err(ClientError::Timeout),
+    }
+}
+
+pub fn build_request(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> Vec<u8> {
+    let mut r = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\n");
+    for (n, v) in headers {
+        r.push_str(&format!("{n}: {v}\r\n"));
+    }
+    if !body.is_empty() || method == "POST" || method == "PUT" {
+        r.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    r.push_str("\r\n");
+    let mut bytes = r.into_bytes();
+    bytes.extend_from_slice(body);
+    bytes
+}
+
+pub async fn refund_tls_t(
+    server: &Server,
+    tls: &TlsClient,
+    key: &str,
+    idem: &str,
+    params: &str,
+    limit: Duration,
+) -> Result<Resp, ClientError> {
+    let auth = format!("Bearer {key}");
+    let bytes = build_request(
+        server.api_addr,
+        "POST",
+        "/v1/refunds",
+        &[
+            ("Authorization", &auth),
+            ("Idempotency-Key", idem),
+            ("Content-Type", "application/x-www-form-urlencoded"),
+        ],
+        params.as_bytes(),
+    );
+    raw_tls(server.api_addr, tls, &bytes, limit)
+        .await
+        .map(parse)
+}
+
+pub async fn refund_tls(
+    server: &Server,
+    tls: &TlsClient,
+    key: &str,
+    idem: &str,
+    params: &str,
+) -> Resp {
+    refund_tls_t(server, tls, key, idem, params, Duration::from_secs(10))
+        .await
+        .expect("tls refund")
+}
+
+pub async fn get_tls(server: &Server, tls: &TlsClient, key: &str, path: &str) -> Resp {
+    let auth = format!("Bearer {key}");
+    let bytes = build_request(
+        server.api_addr,
+        "GET",
+        path,
+        &[("Authorization", &auth)],
+        b"",
+    );
+    raw_tls(server.api_addr, tls, &bytes, Duration::from_secs(10))
+        .await
+        .map(parse)
+        .expect("tls get")
+}

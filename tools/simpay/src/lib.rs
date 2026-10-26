@@ -11,6 +11,7 @@ pub mod config;
 pub mod faults;
 pub mod http;
 pub mod state;
+pub mod tls;
 pub mod webhook;
 
 use std::net::SocketAddr;
@@ -20,6 +21,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
 use tokio::task::JoinHandle;
+use tokio_rustls::TlsAcceptor;
 
 pub use config::Config;
 use state::Store;
@@ -49,8 +51,11 @@ impl Shared {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct StartOptions {
+    /// Serve the API listener over TLS 1.3 with this certificate and key. The admin
+    /// listener always stays plain HTTP.
+    pub tls: Option<tls::TlsFiles>,
     /// Allow binding the unspecified address (container use only).
     pub container_bind: bool,
     /// Load `snapshot_path` instead of the fixture when the file exists.
@@ -106,6 +111,10 @@ pub async fn start(cfg: Config, opts: StartOptions) -> Result<Server, String> {
         _ => Store::from_config(&cfg),
     };
     store.malicious_mode = cfg.malicious_mode;
+    let acceptor = match &opts.tls {
+        Some(files) => Some(TlsAcceptor::from(tls::server_config(files)?)),
+        None => None,
+    };
     let api = TcpListener::bind(cfg.api_listen)
         .await
         .map_err(|e| format!("bind api {}: {e}", cfg.api_listen))?;
@@ -120,14 +129,20 @@ pub async fn start(cfg: Config, opts: StartOptions) -> Result<Server, String> {
     });
     let (tx, rx) = watch::channel(false);
     log("SIMULATED payment provider - NOT a real payment API. Never use real keys or card data.");
-    log(&format!("api listening on {api_addr}"));
+    if acceptor.is_some() {
+        log(&format!(
+            "api listening on {api_addr} (TLS 1.3, TEST certificate)"
+        ));
+    } else {
+        log(&format!("api listening on {api_addr}"));
+    }
     log(&format!("admin (fault control) listening on {admin_addr}"));
     if shared.cfg.malicious_mode {
         log("MALICIOUS-PROVIDER MODE ENABLED at start");
     }
     let tasks = vec![
-        tokio::spawn(serve(api, shared.clone(), Kind::Api, rx.clone())),
-        tokio::spawn(serve(admin, shared.clone(), Kind::Admin, rx.clone())),
+        tokio::spawn(serve(api, shared.clone(), Kind::Api, acceptor, rx.clone())),
+        tokio::spawn(serve(admin, shared.clone(), Kind::Admin, None, rx.clone())),
         tokio::spawn(ticker(shared.clone(), rx)),
     ];
     Ok(Server {
@@ -159,6 +174,7 @@ async fn serve(
     listener: TcpListener,
     shared: Arc<Shared>,
     kind: Kind,
+    tls: Option<TlsAcceptor>,
     mut stop: watch::Receiver<bool>,
 ) {
     let limit = Arc::new(Semaphore::new(MAX_CONNECTIONS));
@@ -167,7 +183,7 @@ async fn serve(
             _ = stop.changed() => return,
             a = listener.accept() => a,
         };
-        let Ok((mut stream, peer)) = accepted else {
+        let Ok((stream, peer)) = accepted else {
             continue;
         };
         let Ok(permit) = limit.clone().try_acquire_owned() else {
@@ -176,39 +192,56 @@ async fn serve(
             continue;
         };
         let shared = shared.clone();
+        let tls = tls.clone();
         tokio::spawn(async move {
             let _permit = permit;
-            let resp = match http::read_request(&mut stream, peer).await {
-                Ok(req) => {
-                    let r = match kind {
-                        Kind::Api => api::handle(&shared, &req).await,
-                        Kind::Admin => admin::handle(&shared, &req).await,
-                    };
-                    log(&format!(
-                        "{} {} {} from {} -> {}{}",
-                        match kind {
-                            Kind::Api => "api",
-                            Kind::Admin => "admin",
-                        },
-                        req.method,
-                        req.path,
-                        peer,
-                        r.status,
-                        if matches!(r.wire, http::Wire::Drop) {
-                            " (connection dropped by fault)"
-                        } else {
-                            ""
-                        }
-                    ));
-                    r
+            match tls {
+                None => handle_conn(stream, peer, &shared, kind).await,
+                Some(acc) => {
+                    match tokio::time::timeout(http::READ_TIMEOUT, acc.accept(stream)).await {
+                        Ok(Ok(s)) => handle_conn(s, peer, &shared, kind).await,
+                        Ok(Err(e)) => log(&format!("tls handshake from {peer} failed: {e}")),
+                        Err(_) => log(&format!("tls handshake from {peer} timed out")),
+                    }
                 }
-                Err(e) if e.silent => return,
-                Err(e) => api::error_response(&state::ApiError::invalid(e.message, e.message))
-                    .with_status(e.status),
-            };
-            http::write_response(&mut stream, &resp).await;
+            }
         });
     }
+}
+
+async fn handle_conn<S>(mut stream: S, peer: SocketAddr, shared: &Arc<Shared>, kind: Kind)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let resp = match http::read_request(&mut stream, peer).await {
+        Ok(req) => {
+            let r = match kind {
+                Kind::Api => api::handle(shared, &req).await,
+                Kind::Admin => admin::handle(shared, &req).await,
+            };
+            log(&format!(
+                "{} {} {} from {} -> {}{}",
+                match kind {
+                    Kind::Api => "api",
+                    Kind::Admin => "admin",
+                },
+                req.method,
+                req.path,
+                peer,
+                r.status,
+                if matches!(r.wire, http::Wire::Drop) {
+                    " (connection dropped by fault)"
+                } else {
+                    ""
+                }
+            ));
+            r
+        }
+        Err(e) if e.silent => return,
+        Err(e) => api::error_response(&state::ApiError::invalid(e.message, e.message))
+            .with_status(e.status),
+    };
+    http::write_response(&mut stream, &resp).await;
 }
 
 impl http::Response {

@@ -26,7 +26,8 @@ docker build -t nodkey/simpay:dev tools/simpay/
 docker run --rm -p 127.0.0.1:12111:8080 -p 127.0.0.1:12112:8081 nodkey/simpay:dev
 ```
 
-Flags: `--config <file>` (required), `--container-bind`, `--restore`.
+Flags: `--config <file>` (required), `--container-bind`, `--restore`, and `--tls-cert <pem>`
+with `--tls-key <pem>` (both or neither; see [TLS](#tls)).
 
 **Bind policy.** simpay refuses to start (exit code 2) when it would listen on a public address:
 
@@ -38,6 +39,56 @@ Flags: `--config <file>` (required), `--container-bind`, `--restore`.
 
 The bind check covers the address simpay binds to. It cannot see Docker port publishing. Publish
 container ports only to `127.0.0.1`, and publish the admin port only to the test harness.
+
+## TLS
+
+The API listener can serve TLS so that the payments adapter can connect with a **pinned TEST
+CA** (research 06 §2.2). The implementation is rustls with the ring provider and does not use
+OpenSSL. The admin listener always stays plain HTTP, under the same bind policy (loopback or
+container-internal only).
+
+```sh
+simpay gen-test-ca --out certs --dns-name simpay.internal [--malicious-certs]
+simpay --config cfg.json \
+  --tls-cert certs/simpay-TEST-ONLY-server.crt --tls-key certs/simpay-TEST-ONLY-server.key
+```
+
+**What `gen-test-ca` writes:**
+
+- **CA:** `simpay-TEST-ONLY-ca.crt` and `.key`.
+  - CN: `simpay TEST-ONLY CA - DO NOT TRUST OUTSIDE TESTS`.
+  - Path length 0; key usages `keyCertSign` and `cRLSign` only.
+- **Server certificate:** `simpay-TEST-ONLY-server.crt` and `.key`.
+  - SAN: `--dns-name`, which defaults to `simpay.internal`.
+  - EKU: `serverAuth`.
+- **Notice:** a `TEST-ONLY-README.txt`.
+- **All certificates:** ECDSA P-256, valid 2025-01-01 to 2035-01-01. Keys are written with mode
+  0600, and existing files are never overwritten.
+
+**Protocol: TLS 1.3 only. Client authentication: none.**
+
+- The only intended client is Nodkey's adapter, and it supports TLS 1.3.
+- Supporting 1.2 would only add negotiation surface (cipher-suite and renegotiation choices)
+  without adding fidelity that the fault tests need.
+- Callers are identified by API key and source address, as with a real provider.
+- rustls' `tls12` feature is compiled in **only** so that the tests can show a TLS 1.2 client is
+  refused. The server configuration enables only TLS 1.3.
+
+**Faults over TLS:**
+
+- Every fault and every malicious kind works unchanged, because they act on the HTTP bytes inside
+  the TLS stream.
+- `commit_then_drop` and `drop_before_commit` close the socket **without `close_notify`**, so the
+  client sees an abrupt EOF, as with a crashed peer.
+- `slow_drip` produces one TLS record per chunk.
+
+**Malicious TLS certificates (opt-in).** `--malicious-certs` adds two certificates, both signed by
+the same test CA. Starting simpay with either one must make any correct client fail the handshake.
+
+| File | Defect |
+|---|---|
+| `simpay-TEST-ONLY-MALICIOUS-wrong-host.crt` / `.key` | SAN is `wrong-host.simpay.invalid` |
+| `simpay-TEST-ONLY-MALICIOUS-expired.crt` / `.key` | Expired: valid 2000-01-01 to 2001-01-01 |
 
 ## Configuration
 
@@ -249,9 +300,8 @@ Most change only what goes over the wire; the ledger stays truthful, so tests ca
 
 ## Limitations and deviations
 
-- **No TLS.** Research 06 §2.2 has the adapter pin a simpay test CA. That needs a TLS front, such
-  as a reverse proxy with a test CA, or a later rustls listener. Plain HTTP is enough for the fault
-  semantics.
+- **TLS** covers the API listener only, with TLS 1.3 and no client authentication. Webhook delivery
+  is outbound plain `http://` only.
 - One request per connection, with no keep-alive and no chunked request bodies (`501`).
 - Rate limiting uses a simple fixed window per key. There are no global or concurrency limits.
 - Through the admin API, the webhook URL can point at any `http://host:port`. The admin listener
@@ -262,7 +312,8 @@ Most change only what goes over the wire; the ledger stays truthful, so tests ca
 
 ## Dependencies
 
-Licenses were checked with the crates.io API (`/api/v1/crates/<name>/<version>`) on 2026-10-25.
+Licenses were checked with the crates.io API (`/api/v1/crates/<name>/<version>`) on 2026-10-25,
+using a generic User-Agent that carries no personal identifier.
 
 | Crate | Locked version | License | Why |
 |---|---|---|---|
@@ -273,13 +324,22 @@ Licenses were checked with the crates.io API (`/api/v1/crates/<name>/<version>`)
 | `form_urlencoded` | 1.2.2 | MIT OR Apache-2.0 | Form and query decoding, and the canonical re-encoding for fingerprints |
 | `hmac` | 0.13.0 | MIT OR Apache-2.0 | HMAC-SHA256 webhook signatures (no custom crypto) |
 | `sha2` | 0.11.0 | MIT OR Apache-2.0 | SHA-256 for webhook HMACs, idempotency fingerprints, and deterministic ids |
+| `rustls` | 0.23.46 | Apache-2.0 OR ISC OR MIT | The TLS 1.3 server (and the tests' client). Features: `ring, std, tls12`. `tls12` is used only by a test client |
+| `tokio-rustls` | 0.26.6 | MIT OR Apache-2.0 | Async TLS acceptor and connector over tokio streams |
+| `rustls-pki-types` | 1.15.1 | MIT OR Apache-2.0 | PEM parsing of certificates and keys |
+| `rcgen` | 0.14.7 | MIT OR Apache-2.0 | Generating the TEST-ONLY CA and certificates (`gen-test-ca`). Features: `pem, ring, crypto` |
 
 Transitive crates (`cargo tree -e normal`) were also checked on crates.io:
 
 - MIT OR Apache-2.0: block-buffer, cfg-if, cmov, const-oid, cpufeatures, crypto-common, ctutils,
   digest, errno, hybrid-array, itoa, libc, percent-encoding, pin-project-lite, proc-macro2, quote,
   serde_core, serde_derive, signal-hook-registry, socket2, syn, typenum.
-- MIT: bytes, mio, tokio-macros, zmij.
+- MIT OR Apache-2.0 (added with TLS): base64, deranged, getrandom, num-conv, once_cell, powerfmt,
+  time, time-core, yasna, zeroize (Apache-2.0 OR MIT).
+- MIT: bytes, mio, tokio-macros, zmij, pem.
+- Apache-2.0 AND ISC: ring 0.17.14.
+- ISC: rustls-webpki 0.103.16, untrusted 0.9.0.
+- BSD-3-Clause: subtle 2.6.1.
 - Unlicense OR MIT: memchr.
 - (MIT OR Apache-2.0) AND Unicode-3.0: unicode-ident.
 
@@ -289,7 +349,7 @@ observe dropped connections and malformed responses.
 ## Tests
 
 ```sh
-cargo test                                  # 12 unit + 52 integration tests
+cargo test                                  # 13 unit + 61 integration tests
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 docker build --target test --progress=plain tools/simpay/
@@ -301,4 +361,5 @@ docker build --target test --progress=plain tools/simpay/
 | `tests/api.rs` | Simulator labelling, authentication, restricted keys (none/read/write, write ⇒ read), source-CIDR policy, partial and full refunds, remaining-amount checks, currency rule, parameter strictness, pending/failed transitions, lookup/list/pagination, idempotency (replay, mismatch, per-account scope, shared across keys, what is and is not cached, retention expiry, key-length rules), configured rate limit, HTTP strictness (404/405/413/431/501, duplicate `Content-Length`), listener separation, deterministic ids, admin token |
 | `tests/faults.rs` | Every fault in the catalogue against the ledger. `nth`, `times`, and the match filters. Webhook signing, independent verification (wrong secret, tampering, staleness), retries, duplicates, replay with old signature, manual resend, suppression, late `refund.failed`, system-clock ticker |
 | `tests/malicious.rs` | Mode gating, every malicious kind, plus ledger proof of what really happened |
+| `tests/tls.rs` | `gen-test-ca` (labels, 0600 keys, no overwrite, CLI). Handshake policy: pinned CA and right name succeed; wrong name, foreign CA, TLS 1.2-only client, and plaintext to the TLS port all fail; admin listener plain only. Wrong-host and expired certificates rejected. Over TLS: API semantics; commit faults (`fail_before_commit`, `commit_then_500`, `commit_then_drop` as abrupt EOF, `drop_before_commit`, `rate_limit`); timing faults (`commit_after_delay`, `slow_response`, `inflight_409`); webhook and settlement faults; and every malicious class |
 | `tests/process.rs` | The binary refuses `0.0.0.0`/`::` without `--container-bind`, refuses public addresses always, refuses bad configs (`sk_live_` keys, unknown fields, …). Log prefix. Shipped configs validate. Relative `fixture_path`. Snapshot round trip (0600 mode, replay after restore). Reset. SIGTERM writes a snapshot |

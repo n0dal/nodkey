@@ -9,7 +9,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
@@ -171,15 +171,18 @@ fn rerr(status: u16, message: &'static str) -> ReadError {
 }
 
 /// Reads exactly one request from `stream` with the limits above.
-pub async fn read_request(stream: &mut TcpStream, peer: SocketAddr) -> Result<Request, ReadError> {
+pub async fn read_request<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    peer: SocketAddr,
+) -> Result<Request, ReadError> {
     match timeout(READ_TIMEOUT, read_request_inner(stream, peer)).await {
         Ok(r) => r,
         Err(_) => Err(rerr(408, "request_timeout")),
     }
 }
 
-async fn read_request_inner(
-    stream: &mut TcpStream,
+async fn read_request_inner<S: AsyncRead + Unpin>(
+    stream: &mut S,
     peer: SocketAddr,
 ) -> Result<Request, ReadError> {
     let mut buf = Vec::with_capacity(2048);
@@ -300,12 +303,12 @@ fn find(h: &[u8], n: &[u8]) -> Option<usize> {
 }
 
 /// Writes `resp` according to its wire mode, then closes the connection.
-pub async fn write_response(stream: &mut TcpStream, resp: &Response) {
+/// Over TLS, `Wire::Drop` closes without `close_notify`: the client sees an abrupt EOF.
+pub async fn write_response<S: AsyncWrite + Unpin>(stream: &mut S, resp: &Response) {
     match &resp.wire {
-        Wire::Drop => {
-            let _ = stream.shutdown().await;
-            return;
-        }
+        // Drop the connection without any response bytes (and, over TLS, without
+        // close_notify): the caller drops the stream, which closes the socket.
+        Wire::Drop => return,
         Wire::Delay(d) => tokio::time::sleep(*d).await,
         _ => {}
     }
