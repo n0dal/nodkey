@@ -101,3 +101,35 @@ commits.
 Decision 3 is unchanged except that "in the effect transaction" now means "as its first statement".
 Verification needs an integration test that injects a failure into the DENIED update and the commit, and
 asserts that no ACCEPT ever follows a returned denial for the same grant.
+
+## Amendment 2 (2026-10-25): reconciler resend of an external effect (resolves OQ-10)
+
+Source: [ADR-0012](0012-payments-adapter.md) rev. 1 and review PA-02/PA-05
+([`docs/reviews/2026-10-25-payments-adapter-review.md`](../reviews/2026-10-25-payments-adapter-review.md));
+specified in [`docs/specs/payments-adapter-v1.md`](../specs/payments-adapter-v1.md) Draft 2 §3, §7.3.
+Status of this ADR unchanged (Accepted).
+
+Decision 7 is extended:
+
+> **7a. Reconciler resend.** For an external effect in `UNKNOWN` whose grant was consumed with outcome
+> `ACCEPT`, the broker MAY have the adapter resend the request decided in that grant's effect transaction
+> if and only if: (1) the provider profile documents deduplication by idempotency key; (2) a lookup of
+> the effect at the provider has been made first in that round and found nothing; (3) every request
+> field, the key and the destination derive from the stored grant (and the frozen effect row), so the
+> fingerprint is identical; (4) the broker clock is before `iat + R_max − 60 s`; (5) fewer than
+> `max_resends` resends have been made; (6) where the provider exposes key state, it does not report the
+> key unknown after the first round.
+>
+> **7b. Adapter-side window.** Independently of the broker, the adapter verifies the grant's signature
+> and claims and refuses any request when `now − iat > R_max` on its own clock, where `R_max <` the
+> provider's documented retention − margin (start-up check). Resends after the provider may have pruned
+> the key are therefore refused even if the broker clock or configuration is wrong.
+>
+> A resend is a retransmission of an already-decided effect: it creates no effect row, consumes no
+> grant and takes no value from the workload. Its authority is the consumed grant recorded on a
+> broker-owned row and re-verified by the adapter, so it is **not a grantless effect under SI-19**.
+> After the window the broker only looks the effect up; "not found" is never proof of no effect.
+> `UNKNOWN → FAILED` requires the positive evidence defined by the adapter specification.
+
+SI-19 needs no text change if "effect" is read as "one decided effect row"; a clarifying note is proposed
+for SECURITY_INVARIANTS v0.5 (not made here).

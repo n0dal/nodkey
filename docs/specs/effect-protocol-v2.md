@@ -1,6 +1,8 @@
 # Nodkey effect protocol v2 — propose → confirm → execute
 
-- **Status:** **Draft 3** (2026-10-25). Not yet re-reviewed. Supersedes Draft 2 (changes in §10; Draft
+- **Status:** **Draft 3.1** (2026-10-25): Draft 3 plus one amendment for `payments.refund` (`charge_id` is a
+  broker-resolved, signed parameter; §2.3, §5, §11), required by
+  [payments-adapter-v1](payments-adapter-v1.md) Draft 2. Draft 3 (2026-10-25). Not yet re-reviewed. Supersedes Draft 2 (changes in §10; Draft
   1 → 2 in §9). Draft 3 makes no design change: it records what the reviewed implementation does
   (`broker/` v2, `crates/nodkey-authority`, `crates/nodkey-gateway`, `examples/confirmed-transfer`)
   and settles the gaps those implementers listed (AU-1..AU-7, GW-1..GW-7, BR-04, BR-05, BR-09).
@@ -209,6 +211,13 @@ A message whose `v` differs from the socket's version gets `unsupported_version`
 - `approver` follows §2.4.
 - The broker checks **syntax, types and registration only**, never trusted state (PC-10). Any failure
   gives `invalid_argument`.
+- **Broker-resolved parameters (Draft 3.1).** A parameter marked `resolved_by_broker` in §5 MUST be
+  absent from `params` (present → `invalid_argument`). The broker sets it at creation, before the digest
+  is computed, from its trusted tables, looking up by `(ten, <resource parameter>)` only (no ownership
+  check, so the response stays identical, PC-10/T12). If no row exists the broker sets the reserved
+  value `unresolved`, which matches no trusted row; render and execution then fail as for a foreign
+  resource. The value is part of key 7 like any parameter, so the digest, the confirmation page and the
+  signed grant cover it.
 - On success it creates an immutable record (§3) and returns:
   - `pending_id`: 16 bytes from the broker CSPRNG, as canonical unpadded base64url (22 chars);
   - `confirm_url`: `https://<auth origin>/confirm/<pending_id>`, with nothing else in it;
@@ -570,7 +579,7 @@ the effects configuration. Every write has `requires_confirmation: true` and `op
 | Operation | Parameters | Approval checks | Facts shown |
 |---|---|---|---|
 | `ledger.transfer` (write; `enrolled` workloads only) | `from` res0 exact `account_id`; `to` con0 exact `account_id`, `destination: true`; `amount_minor` con1 exact `uint` ≥ 1 | `from` exists in `ten` and is owned by the approver | "from: your account"; balance of `from`; `to`: "one of your accounts" or "not owned by you" (existence is not revealed); amount with the ledger currency's exponent (display key 11) |
-| `payments.refund` (write) | `order_id` res0 exact `uint`; `amount_minor` con0 exact `uint` ≥ 1; `currency` con1 exact `currency` | order exists in `ten`; `owner = approver`; `currency = order.currency`; **`order.status ∈ {captured, partially_refunded}`** (allow-list; any other or unknown status fails) | order id; captured amount; refunded and encumbered amounts (`RESERVED`, `DISPATCHED`, `UNKNOWN`, `SUCCEEDED`); `remaining_refundable`; `other_open_on_resource` = count and amounts of other `PENDING`/`APPROVED`/`EXECUTING` records on the order; warning on any `DISPATCHED`/`UNKNOWN`; amount with the broker's ISO 4217 exponent (key 11); "refunded to the original payment method" |
+| `payments.refund` (write) | `order_id` res0 exact `uint`; `amount_minor` con0 exact `uint` ≥ 1; `currency` con1 exact `currency`; **`charge_id` con2 exact `text64`, `resolved_by_broker` from `orders.charge_id` (Draft 3.1)** | order exists in `ten`; `owner = approver`; `currency = order.currency`; **`order.status ∈ {captured, partially_refunded}`** (allow-list; any other or unknown status fails) | order id; captured amount; refunded and encumbered amounts (`RESERVED`, `DISPATCHED`, `UNKNOWN`, `SUCCEEDED`); `remaining_refundable`; `other_open_on_resource` = count and amounts of other `PENDING`/`APPROVED`/`EXECUTING` records on the order; warning on any `DISPATCHED`/`UNKNOWN`; amount with the broker's ISO 4217 exponent (key 11); "refunded to the original payment method" |
 | `ledger.get_balance` (read) | `account` `owner_scoped` `account_id` | owner = grant `sub` (in query) | — |
 | `payments.get_order` (read) | `order_id` `owner_scoped` `uint` | owner = grant `sub` (in query) | — |
 
@@ -579,7 +588,7 @@ the effects configuration. Every write has `requires_confirmation: true` and `op
 - no `DISPATCHED`/`UNKNOWN` effect on the order (AR-10);
 - every approval check.
 
-`charge_id` comes only from the broker's `orders` row.
+`charge_id` comes only from the broker's `orders` row: resolved at propose into the immutable record, signed in the grant (con2), shown on the page as "Charge being refunded", and re-checked at execution and by the payments adapter (payments-adapter-v1 Draft 2 §3.2, §7.2). Execution-time refund rules (in-flight set, per-charge remaining, budget, reasons) are those of payments-adapter-v1 §7–§8.
 
 An amount encumbered by a failed or unknown refund is released **only by the reconciler**, after the
 provider confirms a final failure (research 06 §2.2).
@@ -812,3 +821,10 @@ Draft 3 records the verified implementation; none of the security properties cha
 | §6 residuals: UI redress, authority clock jumping forward, no app identity header, logout not revoking broker-side | GW-R-01, AU-R-04, GW-6, GW-7 |
 | Tests T13 and T39 revised; T47–T54 added | above |
 
+## 11. Draft 3.1 amendment
+
+| Change | Source |
+|---|---|
+| `payments.refund` gains `charge_id` (con2, exact, `text64`, broker-resolved from `orders` at propose; reserved value `unresolved`). It is absent from the workload's `params`, covered by the digest (key 7), displayed, and signed. Operation files (grant-v1 §6.1) and authority copies MUST add the parameter; `config.digest` changes accordingly. No other operation changes | payments-adapter review PA-01, orchestrator ruling |
+| New digest vector for a `payments.refund` record with `charge_id`, and one with `unresolved`, to be added to `tests/vectors/effect-v2/` (DG-11, DG-12; not yet generated) | PA-01 |
+| §5 refund execution rules are now specified in payments-adapter-v1 Draft 2 (per-charge accounting, `RESERVED` also blocks, budget, workload-facing reasons) | payments-adapter-v1 §7–§8 |

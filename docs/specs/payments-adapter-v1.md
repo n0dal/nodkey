@@ -1,75 +1,164 @@
 # Nodkey payments adapter v1 — refunds against simpay (Demo P)
 
-- **Status:** **Draft 1** (2026-10-25). Not reviewed. Nothing here is implemented or tested.
-- **Implements:** [ADR-0012](../decisions/0012-payments-adapter.md) (Proposed), including its proposed
-  ADR-0006 Amendment 2 (reconciler resend; OQ-10).
-- **Builds on:** [effect-protocol-v2](effect-protocol-v2.md) Draft 3 (`payments.refund`,
-  `payments.get_order`, §3.3, §4.4, §5); [grant-v1](grant-v1.md) Draft 3; ADR-0006 (incl. Amendment 1);
-  ADR-0002 §5 (per-adapter process before the first external adapter).
-- **Invariants:** SI-01, SI-02, SI-03, SI-09, SI-10, SI-11, SI-15, SI-16, SI-19.
-- **Provider:** `tools/simpay` (SIMULATED; untrusted; attacker G in malicious mode). Facts about real
-  providers are from research note 06 Part 1 and are cited there.
+- **Status:** **Draft 2** (2026-10-25). Supersedes Draft 1 (changes in §12). Not re-reviewed. Nothing
+  here is implemented or tested.
+- **Implements:** [ADR-0012](../decisions/0012-payments-adapter.md) (rev. 1) and
+  [ADR-0006](../decisions/0006-replay-and-effect-state.md) Amendment 2 (reconciler resend; OQ-10).
+- **Builds on:** [effect-protocol-v2](effect-protocol-v2.md) **Draft 3.1** (`payments.refund` now binds
+  `charge_id`); [grant-v1](grant-v1.md) Draft 3; ADR-0002 §5; ADR-0006 (incl. Amendment 1).
+- **Review:** [`2026-10-25-payments-adapter-review.md`](../reviews/2026-10-25-payments-adapter-review.md)
+  (PA-xx; resolution table at its end).
+- **Invariants:** SI-01, SI-02, SI-03, SI-05, SI-06, SI-09, SI-10, SI-11, SI-15, SI-16, SI-19.
+- **Provider:** `tools/simpay` (SIMULATED; untrusted; attacker G in malicious mode).
 
 MUST, MUST NOT, SHOULD and MAY are used as in RFC 2119 and RFC 8174.
 
-**Scenario.** A customer of a self-service web shop (workload `shop`, `approver_source: named`) asks to
-refund part of their own order. The shop proposes `payments.refund{order_id, amount_minor, currency}`
-(effect-protocol-v2 §2.3). The customer approves on the auth origin. The broker decides in one
-transaction and the payments adapter, a separate process that alone holds the simpay key and alone can
-reach simpay, performs the provider call. The shop sees only a closed-enum outcome.
+**Scenario.** A customer of a self-service shop (workload `shop`, `approver_source: named`) asks to
+refund part of their own order. The shop proposes `payments.refund{order_id, amount_minor, currency}`;
+the broker adds the order's `charge_id` from its trusted `orders` table into the immutable record; the
+customer approves exactly that (including the charge) on the auth origin; the authority signs it. The
+broker decides in one transaction. The **payments adapter** — a separate process that alone holds the
+simpay key and alone can reach simpay — **verifies the signed grant itself**, re-checks the order →
+charge → owner mapping in its own read-only view, and builds the provider request **only from the
+grant**. The shop sees only a closed-enum outcome.
 
-## 1. Components and channels
+**What the adapter adds (with §2 inputs intact, an honest provider and a correct host clock):** a
+compromised broker can cause at most **one refund per signed grant**, of exactly the signed amount and
+currency, to exactly the signed charge, and only while the grant is younger than `R_max`.
 
-| Process | uid (example) | Holds | Network | Sockets |
+## 1. Components, networks and channels
+
+| Process | uid | Holds | Networks (exact) | Sockets |
 |---|---|---|---|---|
 | Workload `shop` | 10001 | nothing reusable | none | W (client) |
-| Broker | 10002 | DB credential, `K_idem` | `data` only | W, G, A (listener); **P (client)** |
-| Payments adapter | 10006 | simpay API key, pinned CA | `pay-egress` only | **P (listener)** |
-| simpay | — | its own state | `pay-egress` (API, TLS), `harness` (admin) | none |
+| Broker | 10002 | DB credential (`nodkey_broker`) | `data` 172.30.20.10 | W, G, A (listener); P (client) |
+| Payments adapter | 10006 | simpay key, `K_idem`, DB credential (`nodkey_payments_adapter`, read-only) | `data` **172.30.20.30** and `pay-egress` **172.30.30.10** | P (listener) |
+| PostgreSQL | — | — | `data` 172.30.20.20 | — |
+| simpay | — | its own state | `pay-egress` 172.30.30.20 (API, TLS); `harness` (admin) | — |
 
-**Socket P** `/run/nodkey/br-pay/adapter.sock`. It follows the effect-protocol-v2 §1.2 socket model
-with the roles reversed: the directory is owned by the **adapter** (listener), group = the broker's
-group, setgid, mode `2750`; the socket is `0660`. The adapter checks `SO_PEERCRED` uid = `broker_uid` on
-every connection; the broker checks uid = `adapter_uid`. Mismatch: close without response, alarm. The
-directory is mounted into the broker and the adapter only, and is part of the control set (§1.2 manifest
-rules). Start-up refusals of effect-protocol-v2 §1.2 extend to: adapter uid equal to any other role's
-uid; P directory shared with or nested in another channel's directory.
+- `data` and `pay-egress` are Docker networks with `internal: true`. `pay-egress` has exactly the adapter
+  and the simpay API. The adapter has no other network. Neither the broker, the authority, the gateway
+  nor the workload is attached to `pay-egress`.
+- On `data` the only listener is PostgreSQL. The adapter and the broker expose **no** TCP listener.
+  `pg_hba.conf` admits `nodkey_payments_adapter` only from 172.30.20.30 and `nodkey_broker` only
+  from 172.30.20.10 (SCRAM).
+- The adapter container has no `CAP_NET_ADMIN` and IP forwarding is off in its namespace, so it does not
+  route between `data` and `pay-egress`.
+- simpay's key is restricted (`refunds: write`, `charges: read`) with `allowed_cidrs:
+  ["172.30.30.10/32"]` (SI-03 analogue).
 
-**Framing and envelope:** exactly effect-protocol-v2 §1.2–§1.3 (strict JSON line ≤ 8 KiB, duplicate /
-unknown / mistyped members rejected, `{"v":2,"id","op","args"}` and the response envelope). One request
-per connection. The adapter serves at most `max_concurrent` (default 8) connections and closes idle
-connections after 2 s.
+**Socket P** `/run/nodkey/br-pay/adapter.sock`: the effect-protocol-v2 §1.2 socket model with the
+adapter as listener (directory owned by the adapter, group = broker's group, setgid, `2750`; socket
+`0660`). Both sides check the peer uid with `SO_PEERCRED` (adapter: `broker_uid`; broker: `adapter_uid`);
+a mismatch closes without response and raises an alarm. The directory is part of the control set and is
+mounted into the broker and the adapter only. Start-up refusals of §1.2 extend to the adapter uid
+colliding with any other role, and to P's directory being shared or nested.
 
-**Meaning of errors on P (normative).** An `ok:false` response from the adapter MUST mean "no byte of a
-provider request was written for this call". The broker MUST treat a lost response, a timeout
-(`total_ms + 2 s`), a closed connection or an unparseable response on P as **ambiguous** (the adapter may
-have sent).
+**Framing:** effect-protocol-v2 §1.2–§1.3 (strict JSON line ≤ 8 KiB; the grant travels as grant-v1 §2
+transport text, ≤ 2 KiB of the line). One request per connection; at most `max_concurrent` (8)
+connections; 2 s idle timeout.
 
-### 1.1 Adapter operations
+**Meaning of errors on P (normative).** `ok:false` from the adapter MUST mean "no byte of a provider
+request was written for this call". A lost response, a timeout (`total_ms + 2 s`), a closed connection
+or an unparseable response is **ambiguous** to the broker.
+
+## 2. Adapter inputs the broker cannot write (PA-03)
+
+The adapter refuses to start unless every check in this table holds, and re-reads nothing at runtime
+(rotation = restart).
+
+| Input | Content | Enforcement |
+|---|---|---|
+| Key registry `/etc/nodkey-adapter/keys.json` | the authority's grant keys (grant-v1 §8 format) | operator-provisioned file, owner root, mode `0444`, parent directories root-owned and not group/other-writable; mounted read-only into the adapter only; start check: regular file, not a symlink, owner ∉ {broker uid, adapter uid}, no group/other write bit on file or parents |
+| Config `/etc/nodkey-adapter/config.json` | `broker_id` (= grant `aud`), `wid` of `shop`, `R_max_s`, provider settings, limits | same as the registry |
+| Operation declaration | `payments.refund` opv 1 placements (§3.1) | compiled into the adapter; not configurable |
+| Orders view | `SELECT order_id, ten, owner_sub, charge_id, currency FROM orders` | DB role `nodkey_payments_adapter`: `SELECT` on those `orders` columns only, nothing else. `orders` is owned by `postgres`; only `nodkey_shop_operator` may write it; `nodkey_broker` has `SELECT` only and no `CREATEROLE`, ownership or `GRANT` option, so it can neither write `orders` nor alter the adapter's role. Password file owner adapter, `0400` |
+| Clock | host `CLOCK_REALTIME` | no container has `CAP_SYS_TIME`; Linux time namespaces do not virtualize `CLOCK_REALTIME`; the adapter refuses to verify while the clock reads below 2024-01-01. Host clock rollback is attacker I (residual) |
+| simpay key, `K_idem` | secrets | files owner adapter uid, mode `0400`, not symlinks; never mounted into the broker |
+| Pinned CA | one certificate | owner root, `0444`, exactly one certificate |
+
+The deployment test (PT-31) asserts that none of these paths is present in, or writable from, the broker
+container.
+
+## 3. Grant check in the adapter (PA-01, PA-02)
+
+### 3.1 Checked claims
+
+The adapter verifies the grant bytes the broker stored at `APPROVED` with a **new `nodkey-grant` entry
+point**, `verify_retransmission(ctx, bytes, now, r_max) -> RetransmissionAuthorized`, typed differently
+from the broker's consuming `verify(..).decide(..)`, so the broker's path can never skip `exp`. It
+performs grant-v1 §7.2 steps 1–9 (structure, `typ`, algorithm, registry lookup by `kid`, key validity at
+`iat`, signature, `iss`) and then requires, in order (any failure → `ok:false grant_refused`, nothing
+sent):
+
+| Claim | Requirement |
+|---|---|
+| `aud` | = configured `broker_id` |
+| `wid` | = configured `wid` of `shop` |
+| `knd`, `cfm`, `use` | `1`, `1`, `1` (confirmed single-use write) |
+| `op`, `opv` | `payments.refund`, `1` |
+| `res` | exactly `{0: order_id}` (uint) |
+| `con` | exactly `{0: amount_minor (uint ≥ 1), 1: currency, 2: charge_id}`; nothing else |
+| `nbf`, `iat` | `≤ now + skew` (skew 5 s) |
+| **age** | `now − iat ≤ R_max_s` (default 43 200 s = 12 h) |
+| `exp` | **not** checked (deliberately: resends happen after `exp`; the age rule replaces it) |
+
+Not checked by the adapter: revocation (`revoked_before`) and consumption. Both are the broker's; their
+loss under broker compromise is a residual (§10).
+
+**`R_max` start-up rule.** `R_max_s < provider_retention_s − resend_margin_s`, and `resend_margin_s <
+provider_retention_s ≤` the profile's documented minimum retention (simpay: its configured
+`idempotency_retention_s`; Stripe: 86 400). Otherwise the adapter refuses to start. Defaults:
+retention 86 400, margin 7 200, `R_max` 43 200.
+
+### 3.2 Order check against the adapter's own view
+
+For `refund.create` (initial and resend alike) the adapter reads `orders` by `order_id` (§2) and requires
+a row with `ten` = grant `ten`, `owner_sub` = grant `sub`, `charge_id` = grant con2, `currency` = grant
+con1. Otherwise `grant_refused`; DB unavailable → `unavailable`. Nothing is sent in either case. This
+check does not cover status, remaining amount, budget or in-flight effects; those stay broker checks.
+
+### 3.3 Derived provider values (PA-09)
+
+```
+D         = "nodkey.pay.v1" || 0x00 || lp(provider_account) || lp(op) || u64be(opv) || lp(iss) || lp(jti)
+idem_key  = b64url( HMAC-SHA256(K_idem, "idem" || 0x00 || D) )
+reference = b64url( HMAC-SHA256(K_idem, "ref"  || 0x00 || D) )
+lp(x)     = u64be(len(x)) || x
+```
+
+`K_idem` is 32 bytes held only by the adapter. `provider_account` is the configured simpay account id.
+`iss`, `jti` (16 bytes, = `pending_id`), `op`, `opv` are from the verified grant. b64url is unpadded
+(43 chars). The broker never computes or supplies these values. Because they and every request field
+derive from the grant, any replay of one grant within the provider's retention is a same-key,
+same-fingerprint request (provider deduplicates), and a different grant cannot collide.
+
+`adapter.hello` returns `idem_kid` = first 8 bytes (hex) of `HMAC-SHA256(K_idem, "kid")`. The broker
+stores it on each `payment_effect` row and refuses to dispatch or resend a row whose `idem_kid` differs
+from the current one (lookup-only, then operator). The operator MUST rotate `K_idem` only when no row is
+non-final; the broker refuses to start payment processing (alarm) if non-final rows carry another kid.
+
+## 4. Adapter operations
 
 | `op` | `args` (exact) | `result` |
 |---|---|---|
-| `adapter.hello` | `{}` | `{"format":"nodkey.payments-adapter.v1","profile":"simpay","caps":[cap…]}`; `cap ∈ {idem_status, send_currency}` |
-| `refund.create` | `{charge_id, amount_minor, currency, idem_key, reference}` | `Attempt` (§3.2) |
-| `refund.get` | `{refund_id}` | `Lookup` |
-| `refund.find` | `{charge_id, reference}` | `Lookup` |
-| `idem.status` | `{idem_key}` (only if cap `idem_status`) | `{"state": "none"\|"in_progress"\|"done"}` or `{"state":"ambiguous","cause"}` |
+| `adapter.hello` | `{}` | `{"format":"nodkey.payments-adapter.v1","profile":"simpay","caps":[…],"idem_kid","r_max_s"}`; caps ⊆ `{idem_status, send_currency}` |
+| `refund.create` | `{grant}` | `Attempt` |
+| `refund.find` | `{grant}` | `Lookup` (by grant's charge and derived reference) |
+| `refund.get` | `{grant, refund_id}` | `Lookup` (a found refund must match the grant's charge) |
+| `idem.status` | `{grant}` (cap `idem_status`) | `{"state":"none"\|"in_progress"\|"done"}` or `{"state":"ambiguous","cause"}` |
 
-Argument rules (else `invalid_argument`, nothing sent): `charge_id` `^ch_[A-Za-z0-9]{8,64}$`;
-`refund_id` `^re_[A-Za-z0-9]{8,64}$`; `amount_minor` JSON integer `1 ..= max_amount_minor` (default
-999 999 999 999, simpay's maximum); `currency` `^[A-Z]{3}$`; `idem_key`, `reference` exactly 43 chars of
-base64url. The adapter holds no state about effects; every decision about state is the broker's.
+Every op runs §3.1 first; `refund.create` also runs §3.2. Errors (`ok:false`, nothing sent):
+`grant_refused`, `unavailable`, `invalid_argument`, plus the envelope errors.
 
 ```
-Refund  = {"id": refund_id, "charge": charge_id, "amount_minor": uint, "currency": "[A-Z]{3}",
-           "reference": text|null, "status": "pending"|"succeeded"|"failed"}
-Attempt = {"class":"created","refund":Refund}
-        | {"class":"refused","code":RefusalCode,"http":uint}
-        | {"class":"busy","cause":"in_progress"|"rate_limited"}
-        | {"class":"not_sent","cause":"connect"|"tls"|"local_limit"}
-        | {"class":"ambiguous","cause":AmbCause}
-Lookup  = {"class":"found","refunds":[Refund…] /* 1..2 */} | {"class":"not_found"}
-        | {"class":"ambiguous","cause":AmbCause}
+Refund  = {"id","charge","amount_minor","currency":"[A-Z]{3}","reference","status":"pending"|"succeeded"|"failed"}
+Attempt = {"class":"created","refund":Refund,"reference"}
+        | {"class":"refused","code":RefusalCode,"http":uint,"reference"}
+        | {"class":"busy","cause":"in_progress"|"rate_limited","reference"}
+        | {"class":"not_sent","cause":"connect"|"tls"}
+        | {"class":"ambiguous","cause":AmbCause,"reference"}
+Lookup  = {"class":"found","refunds":[Refund]} | {"class":"not_found"} | {"class":"ambiguous","cause":AmbCause}
 RefusalCode = amount_too_large | charge_already_refunded | charge_not_refundable | currency_mismatch
             | resource_missing | parameter_invalid | idempotency_params_mismatch | idempotency_key_invalid
             | auth_failed | permission_denied | other_4xx
@@ -77,390 +166,322 @@ AmbCause = timeout | reset_after_send | http_5xx | redirect | bad_status | bad_h
          | bad_json | bad_content_type | echo_mismatch | schema | too_many_matches
 ```
 
-Every result carries `"anomalies":[AnomalyCode…]` (possibly empty; closed enum equal to `AmbCause`
-plus `contradicts_request`). Provider text (messages, `param`, headers, unknown fields) is never placed in
-any result, log value, or alarm: only closed-enum codes and validated ids.
+Every result carries `"anomalies":[…]` (closed enum: `AmbCause` values plus `contradicts_request`).
+Provider text (messages, `param`, headers, unknown members) never appears in any result, log or alarm.
 
-## 2. Egress, TLS and request construction
+## 5. Egress, TLS and HTTP
 
-### 2.1 Network
+**TLS front: rustls listener in simpay.** simpay gains `api_tls: {cert_path, key_path}`; with it the API
+listener is TLS-only (`tokio-rustls`, TLS 1.3, ALPN `http/1.1`). The TLS layer wraps the same byte
+stream, so every fault (drop after commit, malformed heads, slow drip) reaches the client unchanged.
+`tests/demop/pki.sh` generates into `var/demop/pki/` (Git-ignored) a test CA and a 7-day server
+certificate (SAN DNS `simpay.test`, IP 172.30.30.20), then deletes the CA private key.
 
-- `pay-egress` is a Docker network with `internal: true`, subnet `172.30.30.0/24`, members **adapter**
-  (`172.30.30.10`) and **simpay API** (`172.30.30.20`) only. The adapter is attached to no other network.
-  The broker and the workload are not attached.
-- simpay's admin listener binds only on `harness` (internal; members simpay and the test harness).
-- The simpay key is restricted (`refunds: write`, `charges: read`) with `allowed_cidrs:
-  ["172.30.30.10/32"]` (SI-03 analogue).
-- The adapter connects to the IP literal and port in its configuration. It performs **no DNS**
-  resolution, honours **no proxy** environment variables, and has no configurable destination other
-  than this one.
+**Adapter TLS client:** root store = the pinned CA only; TLS 1.3 only; SNI and name check `simpay.test`;
+early data off; no resumption; no client certificate. Destination = IP literal and port from config; no
+DNS; no proxy environment variables.
 
-### 2.2 TLS front: rustls listener in simpay
+**HTTP (pinned `hyper` 1.x client options, PA-10):** HTTP/1.1, one request per connection; maximum 64
+response headers; read buffer = `max_head` (16 KiB); obsolete multiline headers in responses
+**rejected** (set explicitly); header values must be visible ASCII or tab, else `bad_headers`; body read
+with a hard 64 KiB cap; connect + handshake 2 s; whole exchange `total_ms` 10 s. Redirects are never
+followed. `1xx` responses are skipped by hyper; any final status outside §6.1's list is `bad_status`.
 
-simpay gains an optional `api_tls: {cert_path, key_path}` configuration. When it is set, the API
-listener speaks TLS only (rustls via `tokio-rustls`, TLS 1.3 only, ALPN `http/1.1`); the plain listener is
-kept for simpay's own tests. The TLS layer wraps the same byte stream, so every fault (connection drop
-after commit, malformed headers, slow drip) reaches the client unchanged. A reverse proxy is not used,
-because it would normalize or replace exactly those responses (ADR-0012).
+**Sent / not sent (socket layer).** No request byte is written until the TLS handshake has completed
+and the certificate verified; a failure up to there is `not_sent`. Any failure after the first request
+byte is handed to the stream is `ambiguous`. Error strings are never inspected.
 
-PKI for Demo P: `tests/demop/pki.sh` generates, into `var/demop/pki/` (Git-ignored), a test CA, a server
-certificate for `simpay.test` (SAN DNS `simpay.test`, IP `172.30.30.20`, 7-day validity), and then
-**deletes the CA private key**. No key material is committed.
+**Request.** `POST /v1/refunds` with fixed headers only: `Host: simpay.test`, `Authorization: Bearer
+<key>`, `Idempotency-Key: <idem_key>`, `Content-Type: application/x-www-form-urlencoded`, `User-Agent:
+nodkey-payments-adapter/1`, `Content-Length`. Body (`form_urlencoded`, from the grant only):
+`charge=<con2>&amount=<con0>&reference=<reference>`, plus `&currency=<lowercase con1>` with cap
+`send_currency`. Lookups: `GET /v1/refunds/{refund_id}` (id `^re_[A-Za-z0-9]{8,64}$`),
+`GET /v1/refunds?charge=<con2>&reference=<reference>&limit=3`, `GET /v1/idempotency_keys?key=<idem_key>`
+(simpay **[sim]**).
 
-Adapter TLS client (rustls): root store = the single pinned CA file (no system or webpki roots); TLS
-1.3 only; SNI and name check = `server_name` (`simpay.test`); **early data disabled**; no session
-resumption across requests; no client certificate.
+**Custody (SI-02).** Secrets are read once from the §2 files; never in environment, command line, logs,
+alarms or responses; held in zeroizing buffers; redacted in every debug path.
 
-### 2.3 HTTP
+## 6. Response handling (attacker G)
 
-- HTTP/1.1, one request per connection (`Connection: close`), via `hyper` 1.x client connection over the
-  TLS stream. Redirects are never followed (hyper does not follow them; any `3xx` is `ambiguous/redirect`).
-- Limits (configuration, defaults): connect + TLS handshake 2 s; whole exchange `total_ms` 10 s; response
-  head 16 KiB; body 64 KiB, read with a hard cap. Exceeding any limit after the request was written is
-  `ambiguous` (`timeout` or `oversized`).
-- **Sent / not sent (socket layer).** The adapter writes no request byte until the TLS handshake future
-  has completed and the server certificate has verified. A failure up to that point is `not_sent`
-  (`connect` or `tls`). Any failure after the first request byte is handed to the stream is `ambiguous`.
-  Error strings are never inspected.
-- Request (`POST /v1/refunds`), fixed headers only: `Host: simpay.test`, `Authorization: Bearer <key>`,
-  `Idempotency-Key: <idem_key>`, `Content-Type: application/x-www-form-urlencoded`,
-  `User-Agent: nodkey-payments-adapter/1`, `Content-Length`. Body built by `form_urlencoded` from typed
-  values only: `charge=<charge_id>&amount=<amount_minor>&reference=<reference>` plus
-  `&currency=<lowercase currency>` when cap `send_currency` is configured. No `reason`, no `metadata`, no
-  other field.
-- Lookups: `GET /v1/refunds/{refund_id}`; `GET /v1/refunds?charge=<charge_id>&reference=<reference>&limit=2`;
-  `GET /v1/idempotency_keys?key=<idem_key>` (simpay **[sim]** extension). Paths are filled only from
-  validated ids.
+### 6.1 Parsing
 
-### 2.4 Secret custody (SI-02)
+Bodies are decoded only for status `200`, `400`, `401`, `403`, `404`, `409`, `429`; **`5xx` bodies are not
+decoded** (`ambiguous/http_5xx`). Decoding requires `Content-Type` exactly `application/json`, valid
+UTF-8, strict JSON without duplicate keys (broker `strict_json` rules), depth ≤ 8, integers only as `u64`,
+≤ 64 KiB. Unknown members are ignored and never forwarded. A `Refund` is valid only if `id` matches the
+refund-id pattern, `charge` = the grant's charge, `amount` in `1 ..= 999 999 999 999`, `currency` three
+ASCII letters (upper-cased), `status` one of three, `reference` 1..128 of `[A-Za-z0-9_.:-]`.
 
-The API key is read once at start from `key_file` (owner adapter uid, mode `0400`; the adapter refuses
-to start if the file is group- or world-readable, a symlink, or the key does not match `^rk_sim_` in the
-`simpay` profile). The key is never in an environment variable, a command line, a log, an alarm or a
-response. The `Authorization` value is held in a zeroizing buffer and redacted in every debug path.
-
-## 3. Response handling (attacker G)
-
-### 3.1 Parsing
-
-A response body is decoded only if: status is `200`, `400`, `401`, `403`, `404`, `409`, `429` or `5xx`;
-`Content-Type` is exactly `application/json` (parameters ignored); the body is valid UTF-8; strict JSON
-with no duplicate keys (the broker's `strict_json` rules), nesting depth ≤ 8, integers only as `u64`
-(no fraction, exponent or sign), total ≤ 64 KiB. hyper rejects malformed heads (CR/LF/NUL injection,
-obs-fold, duplicate `Content-Length`, `Transfer-Encoding` with `Content-Length`); such a response is
-`ambiguous/bad_headers`. Unknown JSON members are ignored, never forwarded.
-
-A `Refund` is accepted only if `id` matches the refund-id pattern, `charge` the charge pattern, `amount`
-is `1 ..= max_amount_minor`, `currency` is three ASCII letters (upper-cased for comparison), `status` is
-one of the three values, `reference` is null or 1..128 of `[A-Za-z0-9_.:-]`. Otherwise `ambiguous/schema`.
-
-### 3.2 Classification of `refund.create`
+### 6.2 Classification of `refund.create`
 
 | Provider response | `Attempt` |
 |---|---|
-| `200`, valid `Refund`, `charge`, `amount_minor`, `currency` and `reference` equal to the request | `created` |
-| `200` otherwise (mismatch or schema failure) | `ambiguous/echo_mismatch` or `/schema`, anomaly `contradicts_request` |
-| `400` `invalid_request_error` with a code in `RefusalCode`; `401`; `403`; `404 resource_missing` | `refused` with that code |
-| `400 idempotency_error / idempotency_params_mismatch` | `refused/idempotency_params_mismatch` + anomaly (cannot happen for a derived key; §4.2) |
+| `200`, valid `Refund`, `charge`/`amount`/`currency`/`reference` = grant-derived values | `created` |
+| `200` otherwise | `ambiguous/echo_mismatch` or `/schema`, anomaly `contradicts_request` |
+| `400` with a `RefusalCode`; `401`; `403`; `404 resource_missing` | `refused` |
 | `409 idempotency_key_in_progress`; `429` | `busy` |
-| any `5xx`; timeout or reset after send; `3xx`; other status; bad headers/JSON/size | `ambiguous` with the cause |
+| `5xx`; timeout or reset after send; `3xx`; other status; bad heads/JSON/size | `ambiguous` |
 
-`refused` is **evidence, not a decision**: §4 decides what it means. `Lookup`: `200` list with 0 items →
-`not_found`; 1–2 valid items → `found` (2 is an anomaly: `too_many_matches`); more → `ambiguous`;
-`refund.get` `404 resource_missing` → `not_found`.
+`refused` is evidence, not a decision (§7.3). Lookups: list with 0 items → `not_found`; exactly 1 valid
+item → `found`; 2 or more, or `has_more: true` → `ambiguous/too_many_matches`; `refund.get` `404` →
+`not_found`.
 
-### 3.3 What Nodkey cannot detect
+### 6.3 What Nodkey cannot detect
 
-A provider that **lies consistently** — reports success for a refund it did not make, makes a refund it
-reports as refused and hides it from lookups, ignores idempotency keys, or invents settlement — cannot be
-detected from inside Nodkey. The adapter rejects only *inconsistent* answers (echo mismatch, create
-vs. GET, refusal contradicting broker facts, malformed protocol). A malicious provider holds the
-merchant's money anyway; duplicates it causes are not a capability Nodkey adds. Bounded by: the broker
-asks for at most `remaining_refundable` per order and at most the daily budget per customer; the
-reconciler resends at most `max_resends` times.
+A provider that **lies consistently** (fake success, a refund reported as refused and hidden from
+lookups, ignored idempotency, invented settlement) cannot be detected. The adapter rejects only
+*inconsistent* answers. A malicious provider holds the merchant's money anyway.
 
-## 4. Effect state
+## 7. Effect state (broker)
 
-### 4.1 Tables (broker DB, same database as `pending_effect` and `consumed_grant`)
+### 7.1 Tables (broker DB)
 
-**`orders`** — trusted facts, written only by the shop operator's DB role `nodkey_shop_operator`
-(never by the broker, never by the workload, which has no DB route):
+**`orders`** — trusted facts. Columns: `order_id` bigint PK (`1 ..= 2^53 − 1`); `ten`, `owner_sub` (ID
+rules); `charge_id` **UNIQUE**, `^ch_[A-Za-z0-9]{8,64}$`, immutable; `currency` `^[A-Z]{3}$` in the ISO
+4217 table, immutable; `captured_minor` ≥ 1, immutable; `external_refunded_minor` ≥ 0; `status ∈
+{captured, partially_refunded, refunded, disputed, canceled}`. A trigger rejects updates of immutable
+columns. Because `charge_id` is UNIQUE, one order row **is** the charge row: every per-charge sum and
+lock below is taken on it.
 
-| Column | Type | Rule |
+**Writer (PA-04).** Only the role `nodkey_shop_operator` may `INSERT`/`UPDATE` `orders`. Its credential
+is held by the operator's payment-capture integration, which MUST run outside the workload's trust
+domain and take no input from the workload; before inserting, it MUST verify the charge with
+`GET /v1/charges/{id}` (same account, `succeeded`, amount = `captured_minor`, currency) using its own
+`charges: read` key. **The SI-10 claim for refunds rests on that path.** If the shop application itself
+writes `orders`, the claim is not made. In Demo P the writer is the harness seeding from a fixture and
+asserting each row against simpay's admin ledger; the shop container has no DB route (PT-13). The
+operator SHOULD run a periodic, alarm-only comparison of `captured_minor − external_refunded_minor` with
+`GET /v1/charges/{id}.amount_refunded` (PA-11); it never raises a remaining amount automatically.
+
+**`payment_effect`** — one row per decided refund: `pending_id` PK (FK `pending_effect`); `order_id`,
+`charge_id`, `ten`, `sub`, `amount_minor`, `currency` frozen from the grant at T1; `idem_kid`;
+`reference` (set from the first adapter result, audit only); `state ∈ {RESERVED, DISPATCHED, SUCCEEDED,
+FAILED, UNKNOWN}`; internal `reason`; `released`; `provider_refund_id`, `settlement` (only on
+`SUCCEEDED`); `lease_owner`, `lease_until`; `reserved_at`, `dispatched_at`, `resend_deadline`, `resends`,
+`reconcile_rounds`, `next_check_at`, `anomaly`. Index on `charge_id`. A trigger enforces §7.4 and the
+immutability of frozen columns.
+
+### 7.2 Transactions
+
+**Lock order:** own `pending_effect` row → `refund_budget` row → `orders` (charge) row → that charge's
+`payment_effect` rows. No transaction locks two `pending_effect` rows.
+
+**T1 — execution transaction** (effect-protocol-v2 §4.4): lock record; window; verify; W10; savepoint;
+W11–W13; then W14 **in this order**, stopping at the first failure (PA-07):
+
+1. lock `orders` by `order_id`; require it exists, `ten` = grant `ten`, `owner_sub` = grant `sub` —
+   else reason `not_owner_or_unknown`;
+2. `charge_id` = grant con2 (always true for an existing row; a mismatch is an alarm) and `currency` =
+   grant con1 — else `currency`;
+3. `status ∈ {captured, partially_refunded}` — else `order_status`;
+4. no `payment_effect` row of this `charge_id` in `RESERVED`, `DISPATCHED` or `UNKNOWN` — else
+   `order_busy`;
+5. `remaining = captured_minor − external_refunded_minor − Σ amount_minor(rows of this charge_id
+   NOT released)`; `1 ≤ amount_minor ≤ remaining` — else `insufficient_refundable`;
+6. budget (§7.5) — else `budget`.
+
+On failure: roll back to the savepoint, `consumed_grant = DENIED`, record `FAILED` (`denied`), commit; no
+`payment_effect` row, no adapter call. On success: `consumed_grant = ACCEPT`; insert `payment_effect`
+`RESERVED` with frozen values, `idem_kid`, `resend_deadline = grant.iat + R_max_s − 60`; record
+`APPROVED → EXECUTING`; deadline-at-commit check (grant-v1 D2-4); commit synchronously.
+
+**Leases (PA-06).** Every adapter call on a row is made by the holder of its lease. A lease is taken or
+extended by `UPDATE … SET lease_owner = $me, lease_until = now + L WHERE pending_id = ? AND state = $s
+AND (lease_owner = $me OR lease_until < now)` changing exactly one row, committed **before** the call.
+`$me` is random per process start. `L_dispatch = 3 × (total_ms + 2 s) + 3 s + 10 s` (49 s by default);
+`L_reconcile = total_ms + 2 s + 10 s` per call.
+
+**T2 — dispatch.** In one statement: `RESERVED → DISPATCHED`, `dispatched_at = now`, lease
+`L_dispatch`. Only if exactly one row changed is `refund.create` called. At most 3 calls, only while the
+previous result is `busy` (waits 1 s, 2 s); before each retry the dispatcher re-asserts its lease (the
+CAS above); if it fails, the dispatcher stops without writing.
+
+**T3** (CAS from `DISPATCHED` under the dispatcher's lease; a lost lease discards the result):
+
+| Result | `payment_effect` | record |
 |---|---|---|
-| `order_id` | bigint PK | `1 ..= 2^53 − 1` |
-| `ten`, `owner_sub` | text | ID rules (grant-v1 §5.1) |
-| `charge_id` | text | charge pattern; **immutable** |
-| `currency` | text | `^[A-Z]{3}$`, in the broker's ISO 4217 table; **immutable** |
-| `captured_minor` | bigint | ≥ 1; **immutable** |
-| `external_refunded_minor` | bigint | refunds made outside Nodkey before seeding; ≥ 0; operator-updatable |
-| `status` | text | `captured`, `partially_refunded`, `refunded`, `disputed`, `canceled`; operator-updatable |
+| `created`, then `refund.get` = `found`, identical | `SUCCEEDED` | `SUCCEEDED` |
+| `not_sent` on the first call | `FAILED/not_sent`, `released` | `FAILED` |
+| anything else (incl. `refused`, `busy` after 3 calls, `not_sent` after an earlier call, `grant_refused`, P failure) | `UNKNOWN` (+ alarm for `refused`/`grant_refused`) | `UNKNOWN` |
 
-A trigger rejects updates of immutable columns. Seeding happens at payment time (in Demo P: from a
-fixture consistent with simpay's fixture; the harness asserts each `charge_id`, amount and currency
-against simpay's admin ledger). The broker role has `SELECT` only. Operator updates take the row lock
-and therefore serialize with T1 (SI-11).
+`refused` is not `FAILED`: the broker proved the refund valid under lock, so a refusal contradicts
+trusted facts (or is a lie such as `deny_but_commit`).
 
-**`payment_effect`** — one row per decided refund:
+**Recovery** (start-up, every 5 s): `RESERVED` with `reserved_at + 30 s < now` → CAS
+`FAILED/not_dispatched`, `released` (a dispatcher losing this race sends nothing). `DISPATCHED` whose
+lease has expired → CAS `UNKNOWN/lost_response`.
 
-| Column | Notes |
-|---|---|
-| `pending_id` bytea(16) PK, FK `pending_effect` | one effect per grant (`jti = pending_id`) |
-| `order_id`, `ten`, `sub`, `charge_id`, `amount_minor`, `currency` | **frozen at T1** from the record and the locked `orders` row |
-| `idem_key`, `reference` | text(43), each UNIQUE; derived (§4.2); frozen |
-| `state` | `RESERVED`, `DISPATCHED`, `SUCCEEDED`, `FAILED`, `UNKNOWN` |
-| `reason` | closed enum (§4.6) |
-| `released` | boolean; true only in `FAILED`; set in the transition that proves no effect |
-| `provider_refund_id`, `settlement` | set only on `SUCCEEDED`; settlement `pending\|succeeded\|failed` |
-| `reserved_at`, `dispatched_at`, `resend_deadline`, `resends`, `next_check_at`, `anomaly` | timing and bookkeeping |
+### 7.3 Reconciler (`UNKNOWN`) — lookup first (PA-05)
 
-The broker role may `INSERT` and update only `state`, `reason`, `released`, `provider_refund_id`,
-`settlement`, timing and bookkeeping columns; a trigger enforces the transitions of §4.4 and the
-immutability of frozen columns. **`refund_budget`** — §4.5.
+For each `UNKNOWN` row with `next_check_at ≤ now` and an expired lease, the reconciler takes the lease
+and runs one **round** (backoff 10 s, 1 min, 5 min, 30 min, then hourly):
 
-### 4.2 Derived provider values
+1. `refund.find`: `found` (one item, identical) → `refund.get` it → identical → `SUCCEEDED`. Stop.
+2. Resend gate — all must hold, else go to step 4: `now < resend_deadline`; `resends < max_resends` (5);
+   row `idem_kid` = current; provider profile documents deduplication; and with cap `idem_status`:
+   `idem.status` is `done` or `in_progress` — or `none` **only in the first round** (`none` later means
+   pruned or never received: stop resending, `operator_required`). `in_progress` → wait, no resend.
+3. Same-key resend `refund.create{grant}`; `resends += 1`. `created` + identical GET → `SUCCEEDED`.
+   `refused` with a business code (`amount_too_large`, `charge_already_refunded`,
+   `charge_not_refundable`, `currency_mismatch`, `resource_missing`) **and** a following
+   `refund.find` = `not_found` **and** (cap `idem_status`) state `done` → `FAILED/provider_declined`,
+   `released`, alarm `provider_contradicts_facts`. Anything else → stay `UNKNOWN`.
+4. Past the gate: lookups only (daily, 7 days); "not found" never concludes anything; then
+   `operator_required`, alarm; the charge stays blocked.
 
-```
-K_idem    = 32 bytes from broker_idem_key_file (broker uid, mode 0400; never leaves the broker)
-idem_key  = b64url( HMAC-SHA256(K_idem, "nodkey.idem.v1" || 0x00 || u64be(len(iss)) || iss || u64be(16) || jti) )
-reference = b64url( HMAC-SHA256(K_idem, "nodkey.ref.v1"  || 0x00 || u64be(len(iss)) || iss || u64be(16) || jti) )
-```
+The adapter enforces `R_max` independently (§3.1), so a broker clock rollback or a misconfigured
+retention cannot produce a resend after the provider could have pruned the key.
 
-`b64url` is unpadded (43 chars). `iss` and `jti` (= `pending_id`, 16 bytes) are those of the consumed
-grant. This fixes the encoding of ADR-0006 §7's `HMAC(broker_key, "nodkey.idem.v1" ‖ iss ‖ jti)`
-(length-prefixed, so unambiguous). Both values are unguessable to the workload, reveal nothing about the
-user, and are computed once, in T1, and persisted before any send. Rotating `K_idem` is allowed only when
-no row is in `RESERVED`, `DISPATCHED` or `UNKNOWN` (frozen values are never recomputed).
+**Settlement:** for `SUCCEEDED` with `settlement = pending`, `refund.get` on the same backoff for up to
+30 days; `failed` → alarm, amount stays encumbered.
 
-### 4.3 Transactions
+**Authority (ADR-0006 Amendment 2).** A resend retransmits the effect decided in T1: the same stored
+grant, no new row, no value from the workload; the adapter re-verifies the grant and its age. It is not
+a grantless effect under SI-19. The workload cannot trigger, delay or shape it.
 
-**Lock order (refines ADR-0006 §1):** the transaction's own `pending_effect` row → `refund_budget` row →
-`orders` row → `payment_effect` rows of that order. No transaction locks two `pending_effect` rows, so
-taking the record first (effect-protocol-v2 §4.4 step 1) cannot deadlock.
+### 7.4 Transitions
 
-**T1 — the execution transaction** (effect-protocol-v2 §4.4 steps 1–4 and 6; one transaction):
-
-1. lock the record (`APPROVED`); window check; verify grant; W10 `consumed_grant` insert; savepoint;
-   W11–W13;
-2. W14 (execution checks, all under lock, all from trusted rows; §5 of effect-protocol-v2 as amended in
-   §6 below):
-   - lock and read `orders` row by `order_id`; require `ten` equal, `owner_sub = sub`,
-     `currency = params.currency`, `status ∈ {captured, partially_refunded}`;
-   - lock the order's `payment_effect` rows; require **none** in `RESERVED`, `DISPATCHED` or `UNKNOWN`;
-   - `remaining = captured_minor − external_refunded_minor − Σ amount_minor(rows where NOT released)`;
-     require `1 ≤ amount_minor ≤ remaining`;
-   - budget (§4.5): locked conditional update succeeds;
-3. on any failure: roll back to the savepoint (this also undoes the budget update), set `consumed_grant
-   = DENIED`, record `FAILED` with `outcome_class = denied` and the reason, commit. **No `payment_effect`
-   row, no adapter call.**
-4. on success: `consumed_grant = ACCEPT`; insert `payment_effect` (`RESERVED`, frozen values, derived
-   keys); record `APPROVED → EXECUTING`; deadline-at-commit check (grant-v1 D2-4: `now ≥ grant.exp +
-   skew` ⇒ roll back everything); commit synchronously.
-
-So the grant's single decision, the trusted-fact checks, the budget spend, the encumbrance of the
-amount and the frozen request are one atomic commit. Facts that change **after** T1 commits do not affect
-the decided effect; `charge_id`, `currency` and `captured_minor` cannot change at all.
-
-**T2 — dispatch mark.** `UPDATE payment_effect SET state = DISPATCHED, dispatched_at = now,
-resend_deadline = now + provider_retention_s − resend_margin_s WHERE pending_id = ? AND state =
-RESERVED`; commit synchronously. Only if exactly one row changed does the dispatcher call
-`refund.create`. Defaults: `provider_retention_s` 86 400 (simpay's and Stripe's minimum), margin 7 200.
-
-**Dispatch.** At most 3 calls of `refund.create` with identical arguments, only while the previous result
-is `busy` (waits 1 s, 2 s). Then **T3**, a compare-and-set from `DISPATCHED`:
-
-| Last result (any earlier `ambiguous` makes the result `ambiguous`) | `payment_effect` | record |
-|---|---|---|
-| `created`, then `refund.get(id)` = `found` with an identical `Refund` | `SUCCEEDED`, `provider_refund_id`, `settlement` | `SUCCEEDED` |
-| `not_sent` (first call; nothing was ever sent) | `FAILED/not_sent`, `released` | `FAILED` (`failed`) |
-| `created` but the confirming GET is not identical; `refused`; `busy` after 3 calls; `not_sent` after an earlier call; `ambiguous`; P-channel failure | `UNKNOWN` with reason and anomaly | `UNKNOWN` |
-
-A `refused` answer becomes `UNKNOWN`, not `FAILED`: the broker had already established under lock that
-the refund is valid, so a refusal contradicts trusted facts (or reveals a provider lie such as simpay's
-`deny_but_commit`); only the reconciler may conclude `FAILED`. `refused` with `auth_failed`,
-`permission_denied` or `idempotency_params_mismatch` also raises an operator alarm.
-
-**Recovery** (start-up, then every 5 s):
-- `RESERVED` with `reserved_at + 30 s < now` → CAS to `FAILED/not_dispatched`, `released`; record `FAILED`.
-  A dispatcher that loses this CAS race does not send (its T2 changes no row).
-- `DISPATCHED` with `dispatched_at + total_ms + 30 s < now` → CAS to `UNKNOWN/lost_response`.
-
-### 4.4 Transitions
-
-| `payment_effect` | `pending_effect` (effect-protocol-v2 §3.3) |
+| `payment_effect` | `pending_effect` |
 |---|---|
 | (insert) `RESERVED` → `DISPATCHED` | `EXECUTING` |
 | `RESERVED` → `FAILED/not_dispatched`; `DISPATCHED` → `FAILED/not_sent` | `EXECUTING → FAILED` |
 | `DISPATCHED` → `SUCCEEDED` / `UNKNOWN` | `EXECUTING → SUCCEEDED` / `UNKNOWN` |
 | `UNKNOWN` → `SUCCEEDED` / `FAILED` (reconciler only) | `UNKNOWN → SUCCEEDED` / `FAILED` |
-| `SUCCEEDED`: only `settlement` changes | unchanged |
+| `SUCCEEDED`: only `settlement` | unchanged |
 
-Both rows change in the same transaction, which also takes the `orders` row lock whenever `released`
-or the in-flight set changes (so T1's encumbrance read is current). There are no other transitions.
+Both rows change in one transaction, which takes the charge row lock whenever `released` or the in-flight
+set changes. **Encumbrance:** every row encumbers its amount unless `released`; `released` is set only for
+`not_dispatched`, `not_sent` and the reconciler's `FAILED`.
 
-**Encumbrance.** Every `payment_effect` row encumbers its amount unless `released`. `released` is set
-only where no provider effect is proven: `not_dispatched`, `not_sent`, and the reconciler's `FAILED`
-(§4.7). A `SUCCEEDED` refund whose settlement later fails stays encumbered (alarm; operator action
-outside v1). The order is blocked for new refunds while any of its rows is `RESERVED`, `DISPATCHED` or
-`UNKNOWN` (AR-10).
+### 7.5 Budget: per customer, per currency, per UTC day (AR-05)
 
-### 4.5 Budget: per customer, per currency, per UTC day (AR-05)
+`refund_budget(ten, sub, currency, day) → spent_minor, count`. Configuration in minor units, documented
+with the ISO 4217 exponent (PA-13). Demo P: `USD 20000` (= 200.00 USD), `EUR 20000` (= 200.00 EUR),
+`JPY 20000` (= ¥20,000; exponent 0), at most 3 refunds per day. In T1 step 6: `INSERT … ON CONFLICT DO
+NOTHING`; `SELECT … FOR UPDATE`; `UPDATE … WHERE spent_minor + $amt <= $limit AND count + 1 <= $n` must
+change one row. Unconfigured currency → denied. Never released. Fixed windows allow 2× across one
+midnight (published). Not enforced by the adapter (residual under broker compromise).
 
-`refund_budget(ten, sub, currency, day) → spent_minor, count`, primary key all four; `day` = UTC date of
-the broker clock at T1. Limits come from broker configuration `payments.budget = {"per_customer_per_day":
-{"<CUR>": limit_minor, …}, "max_refunds_per_customer_per_day": n}` (Demo P: USD 10000, EUR 10000,
-JPY 10000, n = 3). In T1, after the savepoint: `INSERT … ON CONFLICT DO NOTHING`; `SELECT … FOR UPDATE`;
-`UPDATE … SET spent_minor = spent_minor + $amt, count = count + 1 WHERE … AND spent_minor + $amt <= $limit
-AND count + 1 <= $n`, which must change exactly one row. A currency without a configured limit is denied
-(fail closed). Budget is spent at decision time and **never released** (also not for `released` effects):
-liveness cost, never a double spend. Fixed windows allow up to 2× the limit across one midnight
-(published). The budget limits what a compromised app can extract through users who approve unread
-links (`named` residual, effect-protocol-v2 §6); it is not a mandate (OQ-12 stays open).
+## 8. What the workload sees (PA-07)
 
-### 4.6 Reasons (closed enum; stored, and shown to the workload as `outcome.reason`)
+`effect.status` `outcome = {class, receipt_id, reason}` with the **workload-facing** reason enum:
 
-T1 denials: `not_owner_or_unknown` (one code for missing, foreign tenant or not owner), `currency`,
-`order_status`, `order_busy`, `insufficient_refundable`, `budget`. Effect outcomes: `not_dispatched`,
-`not_sent`, `provider_declined`, `succeeded`, `pending_reconciliation`, `operator_required`.
+| Internal reason | `reason` |
+|---|---|
+| `not_owner_or_unknown` | `not_permitted` |
+| `currency`, `order_status`, `order_busy`, `insufficient_refundable` | `not_refundable` |
+| `budget` | `limit` |
+| `not_dispatched`, `not_sent`, `provider_declined` | `not_executed` |
+| `SUCCEEDED`; `UNKNOWN` (any) | `null` (class `succeeded` / `unknown` = "do not retry") |
 
-### 4.7 Reconciler (`UNKNOWN`)
+Because ownership is checked first and short-circuits, the shop learns nothing about an order the
+approver does not own. `payments.get_order` returns `amount_minor = captured_minor`, `refunded_minor =
+external_refunded_minor + Σ amount(SUCCEEDED)` (excludes `UNKNOWN`, in-flight and failed-settlement
+nuances), `currency`, `status`. Never shown: provider ids, references, keys, provider text, settlement,
+anomalies.
 
-Runs in the broker for every `UNKNOWN` row whose `next_check_at ≤ now` (backoff 10 s, 1 min, 5 min,
-30 min, then hourly). Each step uses the row's frozen values only.
+**Confirmation page facts** (in addition to effect-protocol-v2 §5): "Charge being refunded: `<charge_id>`"
+(a signed parameter); "Remaining refund allowance today"; "A refund on this order is being processed"
+when any row is in flight.
 
-**While `now < resend_deadline` and `resends < max_resends` (default 5):**
-1. If cap `idem_status`: `idem.status`; `in_progress` → wait (no resend).
-2. Same-key resend: `refund.create` with the frozen arguments (identical fingerprint); `resends += 1`.
-   - `created` + confirming GET identical → `SUCCEEDED` (a cached success, or the first execution if the
-     original never arrived — still at most once, by the provider's documented deduplication).
-   - `busy` or `ambiguous` (including a cached `5xx`) → step 3.
-   - `refused` → step 3; it may conclude `FAILED` only as below.
-3. Lookup `refund.find(charge_id, reference)`:
-   - `found`, one item, identical `charge`/`amount`/`currency`/`reference` → `refund.get` it → identical →
-     `SUCCEEDED` (anomaly kept if a refusal or 5xx preceded it);
-   - `not_found` **and** the step-2 result was `refused` with a business code (`amount_too_large`,
-     `charge_already_refunded`, `charge_not_refundable`, `currency_mismatch`, `resource_missing`)
-     **and** (cap `idem_status`: state `done`) → `FAILED/provider_declined`, `released`, alarm
-     `provider_contradicts_facts`;
-   - otherwise stay `UNKNOWN`.
+## 9. Configuration (strict JSON) and webhooks
 
-**After `resend_deadline` (or `resends = max_resends`):** never send `refund.create` again. Lookups only
-(daily, for 7 days): `found` + identical → `SUCCEEDED`. "Not found" never concludes anything. Then
-`reason = operator_required`, alarm; the order stays blocked. Without a provider idempotency guarantee
-(a profile lacking documented deduplication) resends are disabled and only this branch applies.
+Adapter: `{"format":"nodkey.payments-adapter.v1","socket_path","broker_uid","broker_id","wid",
+"R_max_s":43200,"registry_path","db":{"host":"172.30.20.20","port":5432,"dbname","user":
+"nodkey_payments_adapter","password_file"},"provider":{"profile":"simpay","account":
+"acct_demomerchant01","addr":"172.30.30.20:8443","server_name":"simpay.test","ca_file","key_file",
+"idem_key_file","retention_s":86400,"resend_margin_s":7200,"caps":[…]},"limits":{"connect_ms":2000,
+"total_ms":10000,"max_head":16384,"max_body":65536,"max_concurrent":8}}`. Refusals: §2 checks; §3.1
+`R_max` rule; `addr` not an IP literal; uid 0 or = `broker_uid`.
 
-**Settlement.** For `SUCCEEDED` rows with `settlement = pending`: `refund.get` with the same backoff for
-up to 30 days; `failed` → alarm, amount stays encumbered.
+Broker: `"payments":{"adapter_socket","adapter_uid","R_max_s","max_resends":5,"budget":{…}}`. At start
+the broker calls `adapter.hello`, requires the format and `r_max_s` = its own, and otherwise does not
+execute `payments.refund` (records stay `APPROVED` and expire). Test profile (PT-15): simpay retention
+300 s, margin 60 s, `R_max` 180 s, simpay `system` clock.
 
-**Authority (ADR-0006 Amendment 2, proposed in ADR-0012; resolves OQ-10).** A reconciler resend is a
-retransmission of the effect decided in T1, not a new effect: no new grant, no new `payment_effect` row,
-no new key, no field taken from anywhere but the frozen row, only before `resend_deadline`, only for an
-`UNKNOWN` row whose grant is consumed with `ACCEPT`. Its authority is that consumed grant recorded on a
-broker-owned row; it is therefore not a grantless effect under SI-19. The workload has no way to trigger,
-delay or shape it.
+**Webhooks: out of Phase 4.** No inbound listener on adapter or broker; outcomes come only from GETs.
+P-19 is NOT APPLICABLE in Phase 4 (negative test PT-19).
 
-## 5. What the workload sees
+## 10. Residuals (published)
 
-- `effect.status` (effect-protocol-v2 §2.3) with `outcome = {class, receipt_id, reason}`; `reason` from
-  §4.6, `null` while non-final except `pending_reconciliation` for `UNKNOWN` ("do not retry").
-- `payments.get_order` (read grant) returns only broker values: `amount_minor = captured_minor`,
-  `refunded_minor = external_refunded_minor + Σ amount(SUCCEEDED)`, `currency`, `status`.
-- Never: provider ids, references, idempotency keys, provider status text, error messages, headers,
-  settlement detail, anomaly codes.
+- **Approved-but-never-executed grant (ruling on PA-02).** A compromised broker can still execute an
+  approved grant once while it is younger than `R_max`, even if the honest broker let the record expire
+  (effect-protocol-v2 T34). The user approved exactly that refund. It cannot cause a second refund for
+  that grant within `R_max`, because every request derives from the grant and the provider deduplicates
+  on the jti-derived key; after `R_max` the adapter refuses.
+- **Broker compromise (J)** bypasses broker-only controls: revocation, budgets, remaining-refundable,
+  one-in-flight, order status; it can deny service and misreport outcomes. Bounded by user approvals, the
+  adapter's ownership/charge check, and the provider's per-charge remaining amount.
+- **Provider** lying consistently or ignoring idempotency; **host clock rollback** (attacker I) defeats
+  the age rule.
+- **Adapter compromise** (G via a parser bug) yields the restricted key (usable only from 172.30.30.10)
+  and a read-only orders view; no grant key, no broker DB write.
+- **Operator path** for `orders` (§7.1) is assumed outside workload control.
+- **Liveness:** `UNKNOWN`, failed settlement and unreleased amounts block a charge; budget never refunds.
+- **Restore:** after a DB restore, every non-final `payment_effect` row MUST be set to `UNKNOWN`, and every
+  charge with activity since the backup compared with provider listings, before serving (plus ADR-0006 §9).
+- **Real providers** lack simpay's `idem_status`; there `FAILED/provider_declined` needs an operator.
 
-**Confirmation page facts** (effect-protocol-v2 §5 "facts shown", plus): "Remaining refund allowance
-today: <amount>" from `refund_budget` (read without lock; T1 decides), and "A refund on this order is
-being processed" when any row is in flight.
+## 11. Test plan
 
-## 6. Amendments to effect-protocol-v2 (to be folded into Draft 4)
-
-| # | Section | Change |
-|---|---|---|
-| E1 | §1.2 | New socket P (adapter listener ← broker); start-up refusals extended (§1 above) |
-| E2 | §2.3 | `outcome` gains `reason` (closed enum, §4.6); `reason` never carries provider text |
-| E3 | §5 refund execution | "no `DISPATCHED`/`UNKNOWN`" becomes "no `RESERVED`, `DISPATCHED` or `UNKNOWN`"; adds the budget check; `charge_id` and the frozen values come from `orders` at T1 |
-| E4 | §5 facts | remaining daily allowance; "being processed" notice |
-| E5 | §4.4 step 6 | "the T1 `RESERVED` insert" is this spec's T1 step 4, including the budget update and derived keys |
-| E6 | §3.3 | `UNKNOWN → FAILED` only by §4.7 rules, which set `released` |
-
-## 7. Configuration (strict JSON, unknown members rejected)
-
-Adapter: `{"format":"nodkey.payments-adapter.v1","socket_path","broker_uid","profile":"simpay",
-"provider":{"addr":"172.30.30.20:8443","server_name":"simpay.test","ca_file","key_file",
-"caps":["idem_status","send_currency"]},"limits":{"connect_ms":2000,"total_ms":10000,
-"max_head":16384,"max_body":65536,"max_amount_minor":999999999999,"max_concurrent":8}}`. Refuses to
-start: `addr` not an IP literal; CA file containing more than one certificate; key file mode or prefix
-wrong; running as uid 0 or as `broker_uid`.
-
-Broker (`nodkey.broker.v2`, new member): `"payments":{"adapter_socket","adapter_uid",
-"idem_key_file","provider_retention_s":86400,"resend_margin_s":7200,"max_resends":5,"budget":{…}}`.
-At start the broker calls `adapter.hello` and refuses to execute `payments.refund` (records stay
-`APPROVED` and expire, BR-09 behaviour) while the adapter is unreachable or reports another format.
-
-Workload registration: `shop`, `approver_source: named`, `write_ops: ["payments.refund"]`, `read_ops:
-["payments.get_order"]`.
-
-## 8. Webhooks: out of scope for Phase 4
-
-The adapter and the broker expose **no inbound listener**. Outcomes and settlement come only from the
-broker's own GETs (§4.7), which research 06 §2.2 already reduced webhooks to ("a hint only"); simpay's
-`webhook_suppress` shows a receiver must not depend on them. An inbound listener would add an
-attacker-A-reachable parser for no correctness gain. simpay's Demo P fixture has no webhook endpoints.
-P-19 is therefore NOT APPLICABLE in Phase 4, with a negative test that no listener exists. A later spec
-MAY add a receiver as a pure trigger for an early GET (signature over the raw body, tolerance ≤ 300 s,
-`event.id` dedupe).
-
-## 9. Residuals (published)
-
-- **Consistent provider lies** (§3.3), including ignored idempotency on resend.
-- **Adapter compromise** (via a parser bug exploited by G) yields the restricted simpay key, usable only
-  from `172.30.30.10` (access policy) and only for refunds/charge reads; it yields no DB access, no grant,
-  no other credential.
-- **Broker compromise** (J) can call the adapter for any charge the key can refund; the adapter does not
-  verify grants in v1 (ADR-0012, deferred).
-- **Liveness:** `UNKNOWN`, failed settlement and unreleased amounts block an order until the reconciler
-  or an operator resolves; the budget is never refunded; one in-flight refund per order.
-- **Restore:** after a DB restore, every non-final `payment_effect` row MUST be set to `UNKNOWN` (never
-  `FAILED/not_dispatched`), and every order with activity since the backup MUST be compared with
-  `refund.find`/simpay listings before serving, in addition to ADR-0006 §9; a refund made after the
-  backup is otherwise unknown to the broker (the provider's own remaining-amount check is the backstop).
-- **Real providers:** the `idem_status` capability is a simpay **[sim]** extension; against Stripe the
-  `FAILED/provider_declined` conclusion needs an operator.
-
-## 10. Test plan
-
-Every case needs an automated test reported PASS, FAIL or NOT TESTED. "Ledger" means simpay
-`GET /admin/ledger` (count and sum of non-failed refunds per charge), read by the harness. Attack cases
-need a **baseline positive control**: the baseline profile, where the shop holds `rk_sim_…` and reaches
-simpay directly, MUST show the attack succeeding.
+PASS / FAIL / NOT TESTED per case. "Ledger" = simpay `GET /admin/ledger`. Attack cases need a **baseline
+positive control** (shop holds `rk_sim_…`, reaches simpay directly; the attack succeeds).
 
 | # | Case | Expected | Maps to |
 |---|---|---|---|
-| PT-01 | Shop proposes a refund of another customer's order; that customer or the proposer approves | uniform error at render; if forced to execution (test fixture changes ownership after approval): `FAILED/denied`, `not_owner_or_unknown`; ledger unchanged | P-01, SI-10 |
-| PT-02 | Approve 5.00; workload then tries to obtain or use a grant for 50.00 (new proposal, socket W grant, edited digest) | no grant on W (`grant_channel_invalid`); new proposal needs a new approval; digest mismatch → no grant; ledger: one 5.00 refund | P-02, SI-06 |
-| PT-03 | `JPY 1000` proposed on a USD order; currency ≠ confirmed | `FAILED/denied` `currency` (or uniform error at render); nothing sent | P-03, SI-10 |
-| PT-04 | Authority re-delivers one grant 50× concurrently while the recovery loop runs | one `payment_effect` row, one ledger refund | P-04, SI-09 |
-| PT-05 | Two approved refunds race for the last 10.00 | one `SUCCEEDED`; other `FAILED/denied` (`order_busy` or `insufficient_refundable`); ledger sum ≤ captured | P-05, SI-11 |
-| PT-06 | `commit_then_drop`; user approves a second refund on the same order | first `UNKNOWN`; second `FAILED/denied order_busy`; reconciler resend → cached 200 → `SUCCEEDED`; ledger 1 | P-06, SI-15 |
-| PT-07 | `commit_after_delay` > `total_ms` | `UNKNOWN`; `idem.status in_progress` ⇒ no resend; then resolves `SUCCEEDED`; never `FAILED`; ledger 1 | P-07, SI-15 |
-| PT-08 | `commit_then_500` | `UNKNOWN`; resend returns cached 500; `refund.find` resolves `SUCCEEDED`; ledger 1 | P-08 |
-| PT-09 | `fail_before_commit`, `rate_limit`, `inflight_409`, `drop_before_commit` | busy: same-key retries; 5xx/drop: `UNKNOWN` then resend executes once → `SUCCEEDED`; ledger 1 | P-09, SI-09 |
-| PT-10 | Proposals with `amount_minor` 0, −1, 2^63, 1.5, "5", 1e3, duplicate key | `invalid_argument` at propose | P-10, SI-08 |
-| PT-11 | Refund > remaining: fresh, after a partial refund, while another is `UNKNOWN` | `FAILED/denied` before dispatch; adapter call count 0 | P-11, SI-11 |
-| PT-12 | Propose with extra `charge_id`, `reason`, `metadata`, `url`; adapter `refund.create` with extra member | `invalid_argument`; adapter `malformed_request`, nothing sent | P-12, SI-16 |
-| PT-13 | From the shop: connect to simpay IP/name, adapter socket, simpay admin; use the key from another `pay-egress` address | no route / path absent; simpay `401 source_address_not_allowed` | P-13, SI-01, SI-03 |
-| PT-14 | Search for the simpay key in the shop (env, files, `/proc`, broker responses, error texts) and in the broker container | not found in either; baseline control finds it in the shop | P-14, SI-02 |
-| PT-15 | `UNKNOWN` held past `resend_deadline` (test profile: retention 120 s, simpay `system` clock); then any workload action | no `refund.create` after the deadline (adapter call log); lookup only; `operator_required` | P-15, SI-15, SI-19 |
-| PT-16 | Malicious: `lie_amount`, `lie_charge`, `lie_currency`, `lie_status`, `phantom_success`, `deny_but_commit` | never `SUCCEEDED` on a lie; `phantom_success` → resend executes → one real refund; `deny_but_commit` → lookup → `SUCCEEDED` + alarm; ledger ≤ 1 | P-16, SI-15 |
-| PT-17 | `redirect` to a harness listener | `UNKNOWN/redirect`; harness listener sees 0 connections; no `Authorization` elsewhere | P-17, SI-02, SI-16 |
-| PT-18 | `oversized_*`, `slow_drip`, every `malformed_json` and `header_injection` variant, `hostile_error_text` | bounded memory and time; `ambiguous` cause; `effect.status` and logs contain no provider text (byte search for the markers) | P-18, SI-16 |
-| PT-19 | No inbound listener on adapter or broker (`ss -ltn` in both namespaces) | none | P-19 (N/A) |
-| PT-20 | Ownership, status or (blocked) charge change between approval and execution | status/owner: `FAILED/denied`, no adapter call; immutable column update rejected by trigger | SI-10, SI-11 |
-| PT-21 | Crash broker after T1 commit; after T2; after send before T3; crash adapter mid-request; stall DB at T3 | `FAILED/not_dispatched` (no ledger refund); `UNKNOWN` → resolved; never a duplicate; ledger matches final state | SI-09, SI-15 |
-| PT-22 | Budget: 4th refund in a day; amount over limit; 32 concurrent T1s near the limit; currency without a limit | `FAILED/denied budget`; spent never exceeds limit | AR-05, SI-11 |
-| PT-23 | `late_refund_failed` | settlement `failed`, alarm, amount stays encumbered | §4.7 |
-| PT-24 | Wrong-uid peer on P (both directions); adapter config with DNS name, two CAs, readable key file | connection closed + alarm; adapter refuses to start | §1, SI-02 |
-| PT-25 | TLS: wrong CA, wrong SAN, TLS 1.2-only server, plain HTTP server | `not_sent/tls`; `FAILED/not_sent`, `released`; ledger 0 | §2.2 |
-| PT-26 | Reconciler resend inputs equal T1's frozen values byte for byte (simpay fingerprint never mismatches); `K_idem` derivation vectors | identical; vectors match | §4.2, OQ-10 |
-| PT-27 | Proposal and `effect.status` traffic cannot trigger a resend or a dispatch (fuzz W while rows are `UNKNOWN`) | adapter call log unchanged | SI-19 |
-| PT-28 | Restore drill (§9) | non-final rows → `UNKNOWN`; no refund duplicated | SI-09 |
+| PT-01 | Refund of another customer's order (render; ownership changed after approval) | uniform error; `FAILED/denied`, `not_permitted`; ledger unchanged | P-01, SI-10 |
+| PT-02 | Approve 5.00; workload tries 50.00 via new proposal, W-socket grant, edited digest | no grant on W; new approval needed; digest mismatch → no grant; ledger one 5.00 | P-02, SI-06 |
+| PT-03 | `JPY 1000` on a USD order | `not_refundable`; nothing sent | P-03, SI-10 |
+| PT-04 | Grant re-delivered 50× concurrently with recovery loop | one row; ledger 1 | P-04, SI-09 |
+| PT-05 | Two approvals race for the last 10.00 | one `SUCCEEDED`; other `not_refundable`; ledger sum ≤ captured | P-05, SI-11 |
+| PT-06 | `commit_then_drop`; second approval on the order | `UNKNOWN`; second denied; reconciler `find` → `SUCCEEDED` without resend; ledger 1 | P-06, SI-15 |
+| PT-07 | `commit_after_delay` > `total_ms` | `in_progress` → no resend; resolves `SUCCEEDED`; ledger 1 | P-07 |
+| PT-08 | `commit_then_500` | `find` resolves `SUCCEEDED`; ledger 1 | P-08 |
+| PT-09 | `fail_before_commit`, `rate_limit`, `inflight_409`, `drop_before_commit` | `find` not_found → same-key resend → one refund | P-09, SI-09 |
+| PT-10 | Bad `amount_minor` forms; duplicate key; `charge_id` supplied in propose | `invalid_argument` | P-10, P-12, SI-08 |
+| PT-11 | Refund > remaining (fresh, after partial, while another `UNKNOWN`) | denied before dispatch; adapter call count 0 | P-11, SI-11 |
+| PT-12 | Extra members in propose and in P requests | `invalid_argument` / `malformed_request`; nothing sent | P-12, SI-16 |
+| PT-13 | From shop, **broker, authority, gateway**: route to 172.30.30.20, `pay-egress` membership, adapter socket, simpay admin; shop to DB; stolen key from another address | no route / not member / absent; simpay `401 source_address_not_allowed` | P-13, SI-01, SI-03 |
+| PT-14 | Search for simpay key and `K_idem` in shop and broker | absent; baseline finds it in shop | P-14, SI-02 |
+| PT-15 | `UNKNOWN` beyond `resend_deadline` / `R_max` (test profile) | no create sent (adapter log); `operator_required` | P-15, SI-15 |
+| PT-16 | `lie_*`, `phantom_success`, `deny_but_commit` | never `SUCCEEDED` on a lie; `phantom_success` (not cached by simpay, `api.rs`) → `find` not_found → resend executes once; `deny_but_commit` → `find` → `SUCCEEDED` + alarm; ledger ≤ 1 | P-16, SI-15 |
+| PT-17 | `redirect` to a harness listener | `UNKNOWN`; listener sees 0 connections | P-17, SI-02 |
+| PT-18 | Oversized, slow drip, `malformed_json`, `header_injection`, `hostile_error_text` | bounded; `ambiguous`; no provider text anywhere (byte search) | P-18, SI-16 |
+| PT-19 | Listening sockets in adapter and broker namespaces | none | P-19 (N/A) |
+| PT-20 | Owner/status change after approval; update of an immutable `orders` column | denied, no adapter call; trigger rejects | SI-10, SI-11 |
+| PT-21 | Crash broker after T1, after T2, after send; crash adapter mid-request; stall DB at T3 | no duplicate; ledger matches final state | SI-09, SI-15 |
+| PT-22 | Budget: 4th refund; over limit; 32 concurrent T1s; unconfigured currency; **two refunds across UTC midnight** | spent ≤ limit per day; 2× across midnight only | AR-05 |
+| PT-23 | `late_refund_failed` | settlement `failed`, alarm, encumbered | §7.3 |
+| PT-24 | Wrong-uid peer on P both ways; adapter config with DNS name, two CAs, readable key file | closed + alarm; refuses start | §1, §2 |
+| PT-25 | Wrong CA, wrong SAN, TLS 1.2-only, plain HTTP | `FAILED/not_sent`; ledger 0 | §5 |
+| PT-26 | Derivation vectors for `idem_key`, `reference`, `idem_kid`; resend fingerprint equal to first | vectors match; no `params_mismatch` | §3.3, OQ-10 |
+| PT-27 | Fuzz socket W while rows are `UNKNOWN` | adapter call log unchanged | SI-19 |
+| PT-28 | Restore drill (§10) | non-final rows → `UNKNOWN`; no duplicate | SI-09 |
+| PT-29 | **Broker-compromise suite** on P (test client with broker uid): no grant; grant for another op; read grant; other `wid`/`aud`; `cfm = 0`; foreign key; valid grant whose order now has another owner; same grant 20× (sequential and concurrent); grant older than `R_max`; expired never-executed grant younger than `R_max` | all refused, nothing sent — except: same grant 20× → ledger 1; expired-but-young grant → one refund (published residual) | PA-01..03, SI-05, SI-06 |
+| PT-30 | `orders`: second row with an existing `charge_id`; cross-tenant charge; operator-role insert attempted from shop, broker and adapter | unique violation; rejected; no path (connection refused / permission denied) | PA-04, SI-10 |
+| PT-31 | §2 inputs: registry, config, CA, key, `K_idem` writable by or present in the broker; broker attempts `UPDATE orders`, `ALTER ROLE`, `GRANT` | adapter refuses start; DB permission denied | PA-03 |
+| PT-32 | Broker clock set back past a row's deadline; retention configured above simpay's; `margin ≥ retention`; `R_max` violating §3.1 | no resend after the real window (adapter refuses); refusals at start | PA-05, PA-13 |
+| PT-33 | Dispatcher vs reconciler under an injected 60 s T3 delay | at most one adapter call in flight per row; late T3 discarded; ledger 1 | PA-06 |
+| PT-34 | Reason oracle: proposals on a foreign order in each status, currency, busy and budget state | always `not_permitted` | PA-07 |
+| PT-35 | HTTP edge: `1xx` then 200; 65 headers; non-ASCII header byte; short `Content-Length`; chunked trailers; list of 3 or `has_more` | classified `ambiguous`/as specified; never `created` from malformed input | PA-10 |
+| PT-36 | `K_idem` rotated while a row is non-final | broker refuses payment processing; alarm | PA-09 |
+| PT-37 | `get_order.refunded_minor` with `UNKNOWN`, in-flight and failed-settlement rows | equals external + Σ `SUCCEEDED` | §8 |
+
+## 12. Changes from Draft 1
+
+| Change | Source |
+|---|---|
+| The adapter verifies the grant itself (`verify_retransmission`, exact claims, age rule replacing `exp`); `refund.*` take only `{grant}`; all request fields derive from the grant | ruling, PA-01..03 |
+| `charge_id` is a signed parameter (con2), resolved by the broker at propose (effect-protocol-v2 Draft 3.1); the adapter re-checks order → charge → owner in its own read-only view; adapter joins `data` | ruling, PA-01 |
+| `R_max` (default 12 h) with start-up rule against retention and margin; residual for approved-but-unexecuted grants | ruling, PA-02, PA-13 |
+| §2: broker-unwritable adapter inputs and their enforcement | PA-03 |
+| `K_idem` moves to the adapter; derivation adds provider account, `op`, `opv`; `idem_kid` | PA-03, PA-09 |
+| `UNIQUE(charge_id)`; per-charge sums and lock; operator-only writer and SI-10 dependency; alarm-only charge comparison | PA-04, PA-11 |
+| Reconciler looks up first; `none` after round 1 stops resends; `resend_deadline` from `iat + R_max` | PA-05 |
+| Row leases for dispatcher and reconciler; recovery waits for lease expiry | PA-06 |
+| Normative T1 check order; workload-facing reason enum | PA-07 |
+| No `5xx` body decoding; pinned hyper options; list `limit=3` | PA-10 |
+| `phantom_success` expectation confirmed from simpay source | PA-12 |
+| Budget values with exponents; test-profile values consistent | PA-13 |
+| Tests PT-29..PT-37; PT-13, PT-22 extended | PA-08 |

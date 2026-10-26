@@ -388,3 +388,27 @@ the cheap fixes PA-05 and PA-13. If the ruling is adopted (recommended), PA-01, 
 specified in Draft 2 before the adapter is written; otherwise the ruling's claim is false for the
 charge and for grant age. PA-06..PA-12 can be fixed alongside implementation, but the tests in PA-08
 must exist before the corresponding STATUS claims.
+
+## Resolution (2026-10-25, ADR-0012 rev. 1 / payments-adapter-v1 Draft 2)
+
+Appended by the spec author; not a re-review. "Spec" = payments-adapter-v1 Draft 2.
+
+| ID | Disposition | Where |
+|---|---|---|
+| PA-01 | **Fixed (option b).** `charge_id` is a signed `payments.refund` parameter (con2), resolved by the broker from `orders` at propose into the immutable record, covered by the digest and the page; the adapter re-checks order → charge → owner → currency in its own `SELECT`-only view (adapter joins `data`) | effect-protocol-v2 Draft 3.1 §2.3, §5, §11; spec §1, §3.2 |
+| PA-02 | **Fixed.** Adapter enforces `now − iat ≤ R_max` (default 12 h, start-up rule `R_max < retention − margin`) instead of `exp`, via a separately typed `nodkey-grant` entry point; ADR-0006 Amendment 2 clause 7b. Case (i) published as a residual (orchestrator ruling); the stricter gate was rejected for liveness | spec §3.1, §10; ADR-0006 Am. 2 |
+| PA-03 | **Fixed.** Table of broker-unwritable inputs (registry, config, compiled declaration, orders view, host clock, secrets, CA) with enforcement; exact claim list; revocation/consumption not checked by the adapter (residual); `refund.*` take only `{grant}`; `K_idem` in the adapter | spec §2, §3.1, §4 |
+| PA-04 | **Fixed.** `UNIQUE(charge_id)`; per-charge sums and lock; operator-only writer outside the workload, with provider verification before insert; SI-10 claim conditioned on that path | spec §7.1, §7.2 |
+| PA-05 | **Fixed.** Lookup before every resend; `none` after round 1 stops resends; deadline from `iat + R_max`; adapter window independent of broker clock; start-up validation | spec §3.1, §7.3 |
+| PA-06 | **Fixed.** Row leases (`lease_owner`, `lease_until`) for dispatcher and reconciler; lease re-asserted before each retry; recovery only after lease expiry | spec §7.2 |
+| PA-07 | **Fixed.** Normative W14 order with ownership first; workload-facing reason enum (`not_permitted`, `not_refundable`, `limit`, `not_executed`) | spec §7.2, §8 |
+| PA-08 | **Fixed in the plan.** PT-29..PT-37 added; PT-13 (all control containers), PT-22 (midnight) extended | spec §11 |
+| PA-09 | **Fixed.** Derivation includes provider account, `op`, `opv`; key held by the adapter; `idem_kid` and rotation rule | spec §3.3 |
+| PA-10 | **Fixed.** `5xx` bodies not decoded; hyper options pinned; list `limit=3` | spec §5, §6 |
+| PA-11 | **Fixed (SHOULD).** Alarm-only periodic charge comparison | spec §7.1 |
+| PA-12 | **Verified.** simpay `src/api.rs`: `phantom_success` returns without `finalize` and without an idempotency record, so a same-key resend executes; PT-16 expectation kept, now after a `find` | spec §11 PT-16 |
+| PA-13 | **Fixed.** Start-up refusal for `margin ≥ retention` and the `R_max` rule; budgets documented with exponents; consistent test profile | spec §3.1, §7.5, §9 |
+| PA-14 | **Fixed.** ADR-0012 rev. 1 (option B' chosen, criteria, security consequences); ADR-0006 Amendment 2 appended. ADR-0002 §5 needs no change (it requires a per-adapter process, which B' satisfies) | ADR-0012, ADR-0006 |
+
+Blocking items PA-01..PA-04 are addressed; ADR-0012 set to Accepted (rev. 1) per the orchestrator's
+instruction. Draft 2 has not been re-reviewed; the implementation review must cover it.
