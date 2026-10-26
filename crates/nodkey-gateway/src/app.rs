@@ -55,6 +55,17 @@ const FORWARD_RESPONSE: &[&str] = &[
     "retry-after",
 ];
 
+/// Allowlisted response headers that must appear at most once.
+const SINGLE_VALUED_RESPONSE: &[&str] = &[
+    "content-type",
+    "content-language",
+    "content-disposition",
+    "content-encoding",
+    "location",
+    "referrer-policy",
+    "retry-after",
+];
+
 /// The header that carries a read grant to the app (grant-v1 §2 transport text).
 pub const GRANT_HEADER: &str = "nodkey-grant";
 
@@ -228,7 +239,7 @@ async fn proxy(gw: &Gateway, req: Req) -> Resp {
         let session = session_cookie(&req).and_then(|sid| {
             gw.store()
                 .and_then(|mut s: std::sync::MutexGuard<'_, Store>| {
-                    s.session(sid, SessionOrigin::App, now_secs())
+                    s.session(sid, SessionOrigin::App, now_secs(), true)
                 })
         });
         if let Some(s) = session {
@@ -280,6 +291,13 @@ async fn proxy(gw: &Gateway, req: Req) -> Resp {
     }
     let mut r = http::resp(parts.status, "application/octet-stream", Bytes::new());
     r.headers_mut().remove("content-type");
+    // Single-valued headers: a duplicate from the app is a bad response (GW-R-06).
+    if SINGLE_VALUED_RESPONSE
+        .iter()
+        .any(|n| parts.headers.get_all(*n).iter().count() > 1)
+    {
+        return text(StatusCode::BAD_GATEWAY, "Bad gateway.");
+    }
     for name in FORWARD_RESPONSE {
         for v in parts.headers.get_all(*name) {
             r.headers_mut()

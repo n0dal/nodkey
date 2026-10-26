@@ -3,13 +3,17 @@
 
 use hyper::{Method, StatusCode};
 
-use crate::config::{PREAUTH_COOKIE, SESSION_COOKIE};
+#[cfg(feature = "test-login")]
+use crate::config::PREAUTH_COOKIE;
+use crate::config::{RETURN_COOKIE, SESSION_COOKIE};
 use crate::digest::{self, CheckedRecord};
 use crate::html;
 use crate::http::{self, Resp};
 use crate::ipc::{self, Render, Subject};
 use crate::server::{Gateway, Req};
-use crate::store::{Return, Session, SessionOrigin};
+#[cfg(feature = "test-login")]
+use crate::store::Return;
+use crate::store::{Session, SessionOrigin};
 use crate::util::{ct_eq, decode_pending_id, hex_lower, now_secs, parse_digest_hex};
 
 /// The §7.4 headers, set on every auth-origin response.
@@ -45,12 +49,54 @@ fn html_page(gw: &Gateway, status: StatusCode, title: &str, body: &str) -> Resp 
     ))
 }
 
+/// Whether this request is a top-level navigation from this origin or by the user (address bar,
+/// bookmark): only these restart the idle timer, so app-origin subresource requests cannot keep an
+/// auth session alive (GW-R-05).
+fn user_navigation(req: &Req) -> bool {
+    matches!(
+        (
+            http::single(&req.headers, "sec-fetch-site"),
+            http::single(&req.headers, "sec-fetch-mode"),
+        ),
+        (Ok(Some("same-origin" | "none")), Ok(Some("navigate")))
+    )
+}
+
+/// `Sec-Fetch-Mode` is absent or `navigate` (pages are rendered only for navigations).
+fn navigation_or_unknown(req: &Req) -> bool {
+    matches!(
+        http::single(&req.headers, "sec-fetch-mode"),
+        Ok(None | Some("navigate"))
+    )
+}
+
 fn session(gw: &Gateway, req: &Req) -> Option<(String, Session)> {
     let sid = http::gateway_cookie(&req.cookies, SESSION_COOKIE)
         .ok()
         .flatten()?;
-    let s = gw.store()?.session(sid, SessionOrigin::Auth, now_secs())?;
+    let s = gw
+        .store()?
+        .session(sid, SessionOrigin::Auth, now_secs(), user_navigation(req))?;
     Some((sid.to_owned(), s))
+}
+
+/// Return target held in a cookie instead of server-side state (GW-R-02): `c.<pending id>` or
+/// `a.<sha256 hex>`; re-validated when used, so only canonical targets are ever followed (EP-13).
+#[cfg(feature = "test-login")]
+fn parse_return(v: &str) -> Option<Return> {
+    if let Some(pid) = v.strip_prefix("c.") {
+        decode_pending_id(pid)?;
+        return Some(Return::Confirm(pid.to_owned()));
+    }
+    v.strip_prefix("a.")
+        .and_then(parse_digest_hex)
+        .map(Return::AppHandoff)
+}
+
+fn redirect_to_login(ret: &str) -> Resp {
+    let mut r = http::redirect("/login");
+    http::gateway_set_cookie(&mut r, RETURN_COOKIE, ret, crate::store::PREAUTH_TTL);
+    harden(r)
 }
 
 pub async fn handle(gw: &Gateway, req: Req) -> Resp {
@@ -105,15 +151,8 @@ fn login_app(gw: &Gateway, req: &Req) -> Resp {
     else {
         return uniform_error();
     };
-    let Some(Ok((pid, _))) = gw
-        .store()
-        .map(|mut s| s.create_preauth(Return::AppHandoff(h), now_secs()))
-    else {
-        return uniform_error();
-    };
-    let mut r = http::redirect("/login");
-    http::gateway_set_cookie(&mut r, PREAUTH_COOKIE, &pid, crate::store::PREAUTH_TTL);
-    harden(r)
+    let _ = gw;
+    redirect_to_login(&format!("a.{}", hex_lower(&h)))
 }
 
 #[cfg(not(feature = "test-login"))]
@@ -148,16 +187,15 @@ fn login_page(gw: &Gateway, req: &Req) -> Resp {
     let Some(mut store) = gw.store() else {
         return uniform_error();
     };
-    let existing = http::gateway_cookie(&req.cookies, PREAUTH_COOKIE)
+    // The login state is created only here, when the form is rendered; it is bounded per client
+    // and globally with oldest-first eviction (GW-R-02).
+    let ret = http::gateway_cookie(&req.cookies, RETURN_COOKIE)
         .ok()
         .flatten()
-        .and_then(|id| store.preauth(id, now).map(|p| (id.to_owned(), p.csrf)));
-    let (pid, csrf, fresh) = match existing {
-        Some((id, csrf)) => (id, csrf, false),
-        None => match store.create_preauth(Return::Home, now) {
-            Ok((id, csrf)) => (id, csrf, true),
-            Err(_) => return uniform_error(),
-        },
+        .and_then(parse_return)
+        .unwrap_or(Return::Home);
+    let Ok((pid, csrf)) = store.create_preauth(ret, req.client, now) else {
+        return uniform_error();
     };
     drop(store);
     let users = gw
@@ -186,13 +224,30 @@ fn login_page(gw: &Gateway, req: &Req) -> Resp {
         esc(&csrf)
     ));
     let mut r = html_page(gw, StatusCode::OK, "Test login", &b);
-    if fresh {
-        http::gateway_set_cookie(&mut r, PREAUTH_COOKIE, &pid, crate::store::PREAUTH_TTL);
-    }
+    http::gateway_set_cookie(&mut r, PREAUTH_COOKIE, &pid, crate::store::PREAUTH_TTL);
     r
 }
 
+/// Strict `application/x-www-form-urlencoded` body: UTF-8, names `[a-z0-9_]{1,64}`, each at most
+/// once, at most `max` fields.
+fn form_map(req: &Req, max: usize) -> Option<std::collections::BTreeMap<String, String>> {
+    let ct = http::single(&req.headers, "content-type").ok()??;
+    if !ct.eq_ignore_ascii_case("application/x-www-form-urlencoded") {
+        return None;
+    }
+    std::str::from_utf8(&req.body).ok()?;
+    let mut out = std::collections::BTreeMap::new();
+    for (k, v) in form_urlencoded::parse(&req.body) {
+        if out.len() >= max || !crate::util::is_param_name(&k) || out.contains_key(k.as_ref()) {
+            return None;
+        }
+        out.insert(k.into_owned(), v.into_owned());
+    }
+    Some(out)
+}
+
 /// Strict `application/x-www-form-urlencoded` body with exactly the given field names, each once.
+#[cfg(feature = "test-login")]
 fn form_fields(req: &Req, names: &[&str]) -> Option<Vec<String>> {
     let ct = http::single(&req.headers, "content-type").ok()??;
     if !ct.eq_ignore_ascii_case("application/x-www-form-urlencoded") {
@@ -290,6 +345,7 @@ fn login_submit(gw: &Gateway, req: &Req) -> Resp {
     };
     let mut r = http::redirect(&target);
     http::gateway_clear_cookie(&mut r, PREAUTH_COOKIE);
+    http::gateway_clear_cookie(&mut r, RETURN_COOKIE);
     http::gateway_set_cookie(
         &mut r,
         SESSION_COOKIE,
@@ -373,36 +429,51 @@ async fn confirm(gw: &Gateway, req: &Req, pid_text: &str) -> Resp {
     if req.query.is_some() {
         return uniform_error();
     }
+    // Only navigations render (and mint tokens): a no-cors fetch from the app origin cannot reset
+    // the token in the user's open form (GW-R-05).
+    if !navigation_or_unknown(req) {
+        return uniform_error();
+    }
     let now = now_secs();
     let Some((sid, s)) = session(gw, req) else {
-        // Return path kept server-side, keyed by the login state (EP-13).
-        let Some(Ok((pre, _))) = gw
-            .store()
-            .map(|mut st| st.create_preauth(Return::Confirm(pid_text.to_owned()), now))
-        else {
-            return uniform_error();
-        };
-        let mut r = http::redirect("/login");
-        http::gateway_set_cookie(&mut r, PREAUTH_COOKIE, &pre, crate::store::PREAUTH_TTL);
-        return harden(r);
+        // No server-side state for an unauthenticated GET (GW-R-02): the canonical target goes in
+        // a cookie and is re-validated after login (EP-13).
+        return redirect_to_login(&format!("c.{pid_text}"));
     };
     let Some((rd, checked)) = render_checked(gw, pid_text, pid, &s).await else {
         return uniform_error();
     };
     let token = if rd.state == "PENDING" && now < checked.rec.expires_at {
-        let Some(Ok(t)) = gw
-            .store()
-            .map(|mut st| st.mint_token(&sid, pid, checked.digest, checked.rec.expires_at, now))
-        else {
+        let amounts = html::typed_amounts(&checked);
+        let Some(Ok(t)) = gw.store().map(|mut st| {
+            st.mint_token(
+                &sid,
+                pid,
+                checked.digest,
+                checked.rec.expires_at,
+                now,
+                amounts,
+            )
+        }) else {
             return uniform_error();
         };
         Some(t)
     } else {
         None
     };
-    let body = html::confirm_page(&rd, &checked, token.as_deref(), gw.cfg.test_login_active);
+    let body = html::confirm_page(
+        &rd,
+        &checked,
+        token.as_deref(),
+        None,
+        gw.cfg.test_login_active,
+    );
     harden(http::resp(StatusCode::OK, "text/html; charset=utf-8", body))
 }
+
+/// Minimum time between rendering the approval form and accepting an approval (GW-R-01). The page
+/// keeps the buttons hidden and inert for the same time with CSS.
+pub const APPROVE_DELAY: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// `POST /confirm/<pending_id>/decision` (§7.3). Checks run in order; any failure gives the uniform
 /// error and causes no state change (except consuming a presented token, §7.2).
@@ -414,10 +485,24 @@ async fn decision(gw: &Gateway, req: &Req, pid_text: &str) -> Resp {
     if req.query.is_some() {
         return uniform_error();
     }
-    let Some(f) = form_fields(req, &["token", "digest", "decision"]) else {
+    // Fields: `token`, `digest`, `decision`, plus one `confirm_<amount param>` per amount the user
+    // must type (GW-R-01 ruling; checked against the token below).
+    let Some(f) = form_map(req, 8) else {
         return uniform_error();
     };
-    let (token, digest_hex, decision) = (&f[0], &f[1], f[2].as_str());
+    let (Some(token), Some(digest_hex), Some(decision)) =
+        (f.get("token"), f.get("digest"), f.get("decision"))
+    else {
+        return uniform_error();
+    };
+    let typed: Vec<&String> = f
+        .keys()
+        .filter(|k| !matches!(k.as_str(), "token" | "digest" | "decision"))
+        .collect();
+    if !typed.iter().all(|k| k.starts_with("confirm_")) {
+        return uniform_error();
+    }
+    let decision = decision.as_str();
     let Some(digest) = parse_digest_hex(digest_hex) else {
         return uniform_error();
     };
@@ -432,16 +517,55 @@ async fn decision(gw: &Gateway, req: &Req, pid_text: &str) -> Resp {
     let Some((sid, s)) = session(gw, req) else {
         return uniform_error();
     };
-    // 4. Token: consumed at its first presentation, then checked against session, pid and digest.
+    // 4. Token: bound to session, pid, digest and expiry; its typed-amount field names must match.
+    // A token failing any of these, or an approval earlier than APPROVE_DELAY after the render,
+    // is consumed (§7.2) and gives the uniform error.
     let now = now_secs();
-    let Some(t) = gw.store().and_then(|mut st| st.take_token(token)) else {
+    let Some(t) = gw.store().and_then(|st| st.peek_token(token)) else {
         return uniform_error();
     };
-    if !(ct_eq(t.session_id.as_bytes(), sid.as_bytes())
+    let names_ok =
+        typed.len() == t.amounts.len() && t.amounts.iter().all(|(n, _)| f.contains_key(n));
+    let bound = ct_eq(t.session_id.as_bytes(), sid.as_bytes())
         && t.pending_id == pid
         && ct_eq(&t.digest, &digest)
-        && now < t.expires)
-    {
+        && now < t.expires
+        && names_ok;
+    let too_early = decision == "approve" && t.issued.elapsed() < APPROVE_DELAY;
+    if !bound || too_early {
+        if let Some(mut st) = gw.store() {
+            st.take_token(token);
+        }
+        return uniform_error();
+    }
+    // Typed amounts (approve only): a mismatch re-renders the page with a message and keeps the
+    // token, so the user can correct it.
+    if decision == "approve" {
+        let matches = t
+            .amounts
+            .iter()
+            .all(|(n, want)| f.get(n).is_some_and(|got| got.trim() == want));
+        if !matches {
+            let Some((rd, checked)) = render_checked(gw, pid_text, pid, &s).await else {
+                return uniform_error();
+            };
+            if checked.digest != t.digest || rd.state != "PENDING" {
+                return uniform_error();
+            }
+            let body = html::confirm_page(
+                &rd,
+                &checked,
+                Some(token),
+                Some(
+                    "The amount you typed does not match the amount shown. Check it and type it again.",
+                ),
+                gw.cfg.test_login_active,
+            );
+            return harden(http::resp(StatusCode::OK, "text/html; charset=utf-8", body));
+        }
+    }
+    // Consume; exactly one concurrent presentation wins.
+    if gw.store().and_then(|mut st| st.take_token(token)).is_none() {
         return uniform_error();
     }
     // 5. Approve via the authority (socket I) or deny via the broker (socket G).

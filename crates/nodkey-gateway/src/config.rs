@@ -11,7 +11,7 @@ use crate::util::{is_id, is_op_name};
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    /// Listening address. Dev TLS, plain HTTP and the test login require a loopback address.
+    /// Listening address. Dev-only modes require a loopback address.
     pub listen: SocketAddr,
     pub tls: TlsConfig,
     /// e.g. `https://app.localhost:8443`.
@@ -31,11 +31,19 @@ pub struct Config {
     pub broker_socket: PathBuf,
     /// Socket I (gateway → authority).
     pub authority_socket: PathBuf,
-    /// If set, the peer uid of each socket is checked with `SO_PEERCRED`/`getpeereid`.
+    /// Peer uid of each socket, checked with `SO_PEERCRED`/`getpeereid` before anything is sent
+    /// (required; GW-R-08).
+    pub expected_broker_uid: u32,
+    pub expected_authority_uid: u32,
+    /// Explicit acknowledgement required for every dev-only mode (test login, dev TLS modes). Such
+    /// modes additionally need their Cargo feature, a loopback listen address, `localhost` /
+    /// `*.localhost` host names for both origins, and no `trusted_proxies` (GW-R-04).
     #[serde(default)]
-    pub expected_broker_uid: Option<u32>,
+    pub dev_local_only: bool,
+    /// Reverse proxies in front of the gateway. Not supported in Phase 3: any entry is refused,
+    /// because a same-host proxy would defeat the loopback gating of the dev modes.
     #[serde(default)]
-    pub expected_authority_uid: Option<u32>,
+    pub trusted_proxies: Vec<String>,
     #[serde(default)]
     pub session: SessionConfig,
     #[serde(default)]
@@ -50,10 +58,11 @@ pub struct Config {
 pub enum TlsConfig {
     /// Certificate and key from PEM files.
     Files { cert_pem: PathBuf, key_pem: PathBuf },
-    /// DEV ONLY: a self-signed certificate for the two host names, generated at start-up. Its PEM is
+    /// DEV ONLY (feature `dev-tls` + `dev_local_only`): a self-signed certificate for the two host names, generated at start-up. Its PEM is
     /// written to `cert_out` so that a local browser or client can be told to trust it.
     DevSelfSigned { cert_out: PathBuf },
-    /// DEV/TEST ONLY: plain HTTP, loopback only. Browsers may refuse `Secure`/`__Host-` cookies.
+    /// DEV ONLY (feature `dev-tls` + `dev_local_only`): plain HTTP, loopback only. Browsers may
+    /// refuse `Secure`/`__Host-` cookies.
     PlainHttpLoopbackInsecure,
 }
 
@@ -102,6 +111,18 @@ pub struct Limits {
     pub approve_timeout_ms: u64,
     /// Cap on each in-memory store (sessions, tokens, login states, codes).
     pub max_store_entries: usize,
+    /// Login states (`__Host-nodkey_preauth`) kept per client address; the oldest is evicted.
+    pub preauth_per_client: usize,
+    /// Deadline for reading the request body after the headers (headers: 10 s, fixed).
+    pub request_body_timeout_ms: u64,
+    /// Deadline for writing the response to the client.
+    pub response_write_timeout_ms: u64,
+    /// Connections that have not yet been routed (TLS handshake, request headers).
+    pub unrouted_connections: usize,
+    /// Concurrent routed connections per origin. Separate budgets, so that app-origin traffic
+    /// cannot starve the auth origin (GW-R-03).
+    pub app_connections: usize,
+    pub auth_connections: usize,
 }
 
 impl Default for Limits {
@@ -113,6 +134,12 @@ impl Default for Limits {
             ipc_timeout_ms: 5_000,
             approve_timeout_ms: 31_000,
             max_store_entries: 10_000,
+            preauth_per_client: 8,
+            request_body_timeout_ms: 15_000,
+            response_write_timeout_ms: 10_000,
+            unrouted_connections: 512,
+            app_connections: 768,
+            auth_connections: 256,
         }
     }
 }
@@ -187,12 +214,26 @@ pub fn check(cfg: Config) -> Result<Checked, String> {
     if app.host() == auth.host() {
         return Err("app and auth origins must have different host names".into());
     }
-    let loopback = cfg.listen.ip().is_loopback();
-    match cfg.tls {
-        TlsConfig::DevSelfSigned { .. } | TlsConfig::PlainHttpLoopbackInsecure if !loopback => {
-            return Err("dev TLS modes require a loopback listen address".into());
+    if !cfg.trusted_proxies.is_empty() {
+        return Err(
+            "trusted_proxies is not supported in Phase 3 (a proxy in front of the gateway \
+                    would defeat the loopback gating of the dev modes)"
+                .into(),
+        );
+    }
+    let dev_tls = matches!(
+        cfg.tls,
+        TlsConfig::DevSelfSigned { .. } | TlsConfig::PlainHttpLoopbackInsecure
+    );
+    if dev_tls {
+        if !cfg!(feature = "dev-tls") {
+            return Err(
+                "tls.mode is a dev mode, but this binary was built without the \
+                        `dev-tls` feature"
+                    .into(),
+            );
         }
-        _ => {}
+        dev_gate(&cfg, &app, &auth)?;
     }
     if !is_id(&cfg.app_wid, 256) {
         return Err("app_wid is not an ID".into());
@@ -226,6 +267,15 @@ pub fn check(cfg: Config) -> Result<Checked, String> {
             "limits: ipc_timeout_ms > 0 and approve_timeout_ms 1000..=60000 required".into(),
         );
     }
+    if l.preauth_per_client == 0
+        || l.request_body_timeout_ms == 0
+        || l.response_write_timeout_ms == 0
+        || l.unrouted_connections == 0
+        || l.app_connections == 0
+        || l.auth_connections == 0
+    {
+        return Err("limits: connection, deadline and per-client limits must be > 0".into());
+    }
     let s = &cfg.session;
     if s.absolute_lifetime_s == 0 || s.absolute_lifetime_s > 24 * 3600 || s.idle_timeout_s == 0 {
         return Err("session lifetimes out of range (absolute 1..=86400 s)".into());
@@ -241,9 +291,7 @@ pub fn check(cfg: Config) -> Result<Checked, String> {
                         .into(),
                 );
             }
-            if !loopback {
-                return Err("the test login requires a loopback listen address".into());
-            }
+            dev_gate(&cfg, &app, &auth)?;
             if t.users.is_empty() || t.users.len() > 64 {
                 return Err("test_login.users must have 1-64 entries".into());
             }
@@ -263,10 +311,33 @@ pub fn check(cfg: Config) -> Result<Checked, String> {
     })
 }
 
+fn is_localhost_name(h: &str) -> bool {
+    h == "localhost" || h.ends_with(".localhost")
+}
+
+/// Every dev-only mode: explicit config flag, loopback listen address, `localhost` host names
+/// (browsers resolve them to loopback, so a remote browser cannot reach them by name). A same-host
+/// reverse proxy that rewrites `Host` still defeats this gating; that is a documented residual.
+fn dev_gate(cfg: &Config, app: &Origin, auth: &Origin) -> Result<(), String> {
+    if !cfg.dev_local_only {
+        return Err("a dev-only mode is configured but dev_local_only is not true".into());
+    }
+    if !cfg.listen.ip().is_loopback() {
+        return Err("dev-only modes require a loopback listen address".into());
+    }
+    if !is_localhost_name(app.host()) || !is_localhost_name(auth.host()) {
+        return Err("dev-only modes require localhost / *.localhost origins".into());
+    }
+    Ok(())
+}
+
 /// Gateway-owned cookie names, compared case-insensitively.
 pub const SESSION_COOKIE: &str = "__Host-nodkey_session";
 pub const LOGIN_COOKIE: &str = "__Host-nodkey_login";
 pub const PREAUTH_COOKIE: &str = "__Host-nodkey_preauth";
+/// Return target of a pending login (a canonical pending id or an app hand-off hash); holds no
+/// server-side state, re-validated when used (GW-R-02).
+pub const RETURN_COOKIE: &str = "__Host-nodkey_return";
 
 /// Any name that is, or could be confused with, a gateway cookie.
 pub fn is_gateway_cookie_name(name: &str) -> bool {

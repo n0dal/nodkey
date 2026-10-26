@@ -1,11 +1,14 @@
 //! In-memory server-side state: sessions, approval tokens, login states and app hand-off codes.
 //!
 //! **Phase 3 limitation:** everything here is lost on restart (every user is logged out and every
-//! rendered approval form becomes invalid, which fails closed). Each map is capped; when a map is
-//! full after purging expired entries, new entries are refused (`Full`) rather than evicting live
-//! ones.
+//! rendered approval form becomes invalid, which fails closed). Each map is capped. Sessions,
+//! tokens and codes are refused (`Full`) when their map is full after purging expired entries; login
+//! states instead evict the oldest entry (per client, then globally), because they are created by
+//! unauthenticated requests (GW-R-02).
 
 use std::collections::HashMap;
+use std::net::IpAddr;
+use std::time::Instant;
 
 use crate::util::{b64url, random_bytes};
 
@@ -32,6 +35,10 @@ pub struct Token {
     pub pending_id: [u8; 16],
     pub digest: [u8; 32],
     pub expires: u64,
+    /// When the page carrying this token was rendered (GW-R-01 activation delay).
+    pub issued: Instant,
+    /// Amounts the user must type to approve: `(form field, exact expected text)`.
+    pub amounts: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +55,8 @@ pub struct Preauth {
     pub csrf: String,
     pub ret: Return,
     pub expires: u64,
+    pub client: IpAddr,
+    seq: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +84,8 @@ pub struct Store {
     token_index: HashMap<(String, [u8; 16]), String>,
     preauth: HashMap<String, Preauth>,
     codes: HashMap<String, Code>,
+    preauth_per_client: usize,
+    seq: u64,
 }
 
 pub const TOKEN_TTL: u64 = 300;
@@ -86,6 +97,15 @@ fn new_id() -> Result<String, StoreError> {
 }
 
 impl Store {
+    pub fn with_preauth_per_client(mut self, n: usize) -> Store {
+        self.preauth_per_client = n.max(1);
+        self
+    }
+
+    pub fn preauth_len(&self) -> usize {
+        self.preauth.len()
+    }
+
     pub fn new(cap: usize, abs_lifetime: u64, idle: u64) -> Store {
         Store {
             cap,
@@ -96,6 +116,8 @@ impl Store {
             token_index: HashMap::new(),
             preauth: HashMap::new(),
             codes: HashMap::new(),
+            preauth_per_client: 8,
+            seq: 0,
         }
     }
 
@@ -154,7 +176,15 @@ impl Store {
     }
 
     /// Returns the live session of the given origin and refreshes its idle timer.
-    pub fn session(&mut self, id: &str, origin: SessionOrigin, now: u64) -> Option<Session> {
+    /// Returns the live session of the given origin. `refresh` restarts its idle timer; callers pass
+    /// it only for top-level same-origin (or user-initiated) navigations (GW-R-05).
+    pub fn session(
+        &mut self,
+        id: &str,
+        origin: SessionOrigin,
+        now: u64,
+        refresh: bool,
+    ) -> Option<Session> {
         let live = {
             let s = self.sessions.get(id)?;
             s.origin == origin && self.session_live(s, now)
@@ -171,7 +201,9 @@ impl Store {
             return None;
         }
         let s = self.sessions.get_mut(id)?;
-        s.last_seen = now;
+        if refresh {
+            s.last_seen = now;
+        }
         Some(s.clone())
     }
 
@@ -210,6 +242,7 @@ impl Store {
         digest: [u8; 32],
         record_expires: u64,
         now: u64,
+        amounts: Vec<(String, String)>,
     ) -> Result<String, StoreError> {
         let key = (session_id.to_owned(), pending_id);
         if let Some(old) = self.token_index.remove(&key) {
@@ -224,10 +257,17 @@ impl Store {
                 pending_id,
                 digest,
                 expires: (now + TOKEN_TTL).min(record_expires),
+                issued: Instant::now(),
+                amounts,
             },
         );
         self.token_index.insert(key, tok.clone());
         Ok(tok)
+    }
+
+    /// Reads a token without consuming it.
+    pub fn peek_token(&self, tok: &str) -> Option<Token> {
+        self.tokens.get(tok).cloned()
     }
 
     /// Removes the token at its first presentation and returns it (checks are the caller's).
@@ -238,20 +278,52 @@ impl Store {
         Some(t)
     }
 
+    /// Creates a login state for `client`. At most `preauth_per_client` per client address and
+    /// `cap` in total: the oldest entry (of that client, then globally) is evicted, so a flood can
+    /// only displace login states, never block new ones (GW-R-02).
     pub fn create_preauth(
         &mut self,
         ret: Return,
+        client: IpAddr,
         now: u64,
     ) -> Result<(String, String), StoreError> {
-        self.room(|s| s.preauth.len(), now)?;
+        self.preauth.retain(|_, p| now < p.expires);
+        let mine: Vec<(&String, u64)> = self
+            .preauth
+            .iter()
+            .filter(|(_, p)| p.client == client)
+            .map(|(k, p)| (k, p.seq))
+            .collect();
+        if mine.len() >= self.preauth_per_client {
+            if let Some(k) = mine
+                .iter()
+                .min_by_key(|(_, s)| *s)
+                .map(|(k, _)| (*k).clone())
+            {
+                self.preauth.remove(&k);
+            }
+        }
+        if self.preauth.len() >= self.cap {
+            if let Some(k) = self
+                .preauth
+                .iter()
+                .min_by_key(|(_, p)| p.seq)
+                .map(|(k, _)| k.clone())
+            {
+                self.preauth.remove(&k);
+            }
+        }
         let id = new_id()?;
         let csrf = new_id()?;
+        self.seq += 1;
         self.preauth.insert(
             id.clone(),
             Preauth {
                 csrf: csrf.clone(),
                 ret,
                 expires: now + PREAUTH_TTL,
+                client,
+                seq: self.seq,
             },
         );
         Ok((id, csrf))
@@ -292,8 +364,12 @@ mod tests {
         let sid = s
             .create_session(SessionOrigin::Auth, "t", "u", lid, 1000)
             .unwrap();
-        let t1 = s.mint_token(&sid, [2; 16], [3; 32], 5000, 1000).unwrap();
-        let t2 = s.mint_token(&sid, [2; 16], [3; 32], 5000, 1001).unwrap();
+        let t1 = s
+            .mint_token(&sid, [2; 16], [3; 32], 5000, 1000, vec![])
+            .unwrap();
+        let t2 = s
+            .mint_token(&sid, [2; 16], [3; 32], 5000, 1001, vec![])
+            .unwrap();
         assert!(
             s.take_token(&t1).is_none(),
             "re-render invalidates the previous token"
@@ -301,7 +377,9 @@ mod tests {
         let t = s.take_token(&t2).unwrap();
         assert_eq!(t.expires, 1301);
         assert!(s.take_token(&t2).is_none(), "single use");
-        let t3 = s.mint_token(&sid, [2; 16], [3; 32], 1100, 1000).unwrap();
+        let t3 = s
+            .mint_token(&sid, [2; 16], [3; 32], 1100, 1000, vec![])
+            .unwrap();
         assert_eq!(
             s.take_token(&t3).unwrap().expires,
             1100,
@@ -316,20 +394,20 @@ mod tests {
             .create_session(SessionOrigin::App, "t", "u", [0; 16], 0)
             .unwrap();
         assert!(
-            s.session(&sid, SessionOrigin::Auth, 1).is_none(),
+            s.session(&sid, SessionOrigin::Auth, 1, true).is_none(),
             "app session not valid on auth"
         );
-        assert!(s.session(&sid, SessionOrigin::App, 40).is_some());
-        assert!(s.session(&sid, SessionOrigin::App, 89).is_some());
+        assert!(s.session(&sid, SessionOrigin::App, 40, true).is_some());
+        assert!(s.session(&sid, SessionOrigin::App, 89, true).is_some());
         assert!(
-            s.session(&sid, SessionOrigin::App, 100).is_none(),
+            s.session(&sid, SessionOrigin::App, 100, true).is_none(),
             "absolute lifetime"
         );
         let sid2 = s
             .create_session(SessionOrigin::App, "t", "u", [0; 16], 0)
             .unwrap();
         assert!(
-            s.session(&sid2, SessionOrigin::App, 50).is_none(),
+            s.session(&sid2, SessionOrigin::App, 50, true).is_none(),
             "idle timeout"
         );
     }
@@ -346,12 +424,34 @@ mod tests {
         let c = s
             .create_session(SessionOrigin::App, "t", "v", [8; 16], 0)
             .unwrap();
-        let tok = s.mint_token(&a, [1; 16], [1; 32], 500, 0).unwrap();
+        let tok = s.mint_token(&a, [1; 16], [1; 32], 500, 0, vec![]).unwrap();
         s.revoke_login_of(&b);
-        assert!(s.session(&a, SessionOrigin::Auth, 1).is_none());
-        assert!(s.session(&b, SessionOrigin::App, 1).is_none());
-        assert!(s.session(&c, SessionOrigin::App, 1).is_some());
+        assert!(s.session(&a, SessionOrigin::Auth, 1, true).is_none());
+        assert!(s.session(&b, SessionOrigin::App, 1, true).is_none());
+        assert!(s.session(&c, SessionOrigin::App, 1, true).is_some());
         assert!(s.take_token(&tok).is_none());
+    }
+
+    #[test]
+    fn preauth_evicts_oldest_per_client_and_globally() {
+        let a: IpAddr = "10.0.0.1".parse().unwrap();
+        let b: IpAddr = "10.0.0.2".parse().unwrap();
+        let mut s = Store::new(5, 1000, 1000).with_preauth_per_client(2);
+        let (b1, _) = s.create_preauth(Return::Home, b, 0).unwrap();
+        let (a1, _) = s.create_preauth(Return::Home, a, 0).unwrap();
+        let (a2, _) = s.create_preauth(Return::Home, a, 0).unwrap();
+        let (a3, _) = s.create_preauth(Return::Home, a, 0).unwrap();
+        assert!(s.preauth(&a1, 1).is_none(), "oldest of client a evicted");
+        assert!(s.preauth(&a2, 1).is_some() && s.preauth(&a3, 1).is_some());
+        assert!(
+            s.preauth(&b1, 1).is_some(),
+            "other clients untouched by a's flood"
+        );
+        for i in 0..100u8 {
+            let c = IpAddr::from([10, 1, 0, i]);
+            s.create_preauth(Return::Home, c, 0).unwrap();
+        }
+        assert_eq!(s.preauth_len(), 5, "global cap holds; never refuses");
     }
 
     #[test]

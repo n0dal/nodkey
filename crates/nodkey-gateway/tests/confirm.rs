@@ -11,7 +11,13 @@ const BOB: usize = 1; // acme / user:u-18
 const OTHER_TENANT: usize = 2; // globex / user:u-17
 
 async fn start_tl() -> Harness {
+    start_tl_with(|_| {}).await
+}
+
+async fn start_tl_with(f: impl FnOnce(&mut nodkey_gateway::config::Config)) -> Harness {
     start_with(|c| {
+        f(c);
+        c.dev_local_only = true;
         c.test_login = Some(TestLoginConfig {
             enabled: true,
             users: vec![
@@ -58,8 +64,18 @@ async fn decide(h: &Harness, sid: &str, pid: &str, prov: &[&str], body: &str) ->
     .await
 }
 
+/// Decision body; `confirm_amount_minor` is the amount typed by the user (records here are 12.50 EUR).
 fn body(tok: &str, digest: &str, d: &str) -> String {
-    format!("token={tok}&digest={digest}&decision={d}")
+    body_typed(tok, digest, d, "12.50")
+}
+
+fn body_typed(tok: &str, digest: &str, d: &str, typed: &str) -> String {
+    format!("token={tok}&digest={digest}&decision={d}&confirm_amount_minor={typed}")
+}
+
+/// Waits out the server-side approval delay (GW-R-01).
+async fn wait_delay() {
+    tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
 }
 
 fn approvals(h: &Harness) -> usize {
@@ -294,7 +310,8 @@ async fn approve_once_token_single_use_and_bound() {
     );
     assert_eq!(approvals(&h), 0, "no approval reached the authority");
 
-    // Valid approval.
+    // Valid approval (after the activation delay).
+    wait_delay().await;
     let r = decide(
         &h,
         &alice,
@@ -346,13 +363,13 @@ async fn provenance_rules_t04_t06_t44() {
         &[
             "Sec-Fetch-Site: same-site",
             "Sec-Fetch-Mode: cors",
-            "Origin: http://app.localhost",
+            "Origin: https://app.localhost",
         ],
         // T05 app-origin form POST.
         &[
             "Sec-Fetch-Site: same-site",
             "Sec-Fetch-Mode: navigate",
-            "Origin: http://app.localhost",
+            "Origin: https://app.localhost",
         ],
         &["Sec-Fetch-Site: cross-site", "Sec-Fetch-Mode: navigate"],
         &["Sec-Fetch-Site: none", "Sec-Fetch-Mode: navigate"],
@@ -363,13 +380,13 @@ async fn provenance_rules_t04_t06_t44() {
         &[
             "Sec-Fetch-Site: same-site",
             "Sec-Fetch-Mode: navigate",
-            "Origin: http://auth.localhost",
+            "Origin: https://auth.localhost",
         ],
         // T06 no metadata: no Origin, Origin null, Origin = app origin.
         &[],
         &["Origin: null"],
-        &["Origin: http://app.localhost"],
-        &["Origin: http://auth.localhost.evil"],
+        &["Origin: https://app.localhost"],
+        &["Origin: https://auth.localhost.evil"],
     ];
     for prov in bad {
         let tok = form_value(&render(&h, &alice, &pid).await.text(), "token").unwrap();
@@ -378,11 +395,12 @@ async fn provenance_rules_t04_t06_t44() {
     assert_eq!(approvals(&h), 0);
     // Fallback: no Fetch Metadata, exact auth Origin.
     let tok = form_value(&render(&h, &alice, &pid).await.text(), "token").unwrap();
+    wait_delay().await;
     let r = decide(
         &h,
         &alice,
         &pid,
-        &["Origin: http://auth.localhost"],
+        &["Origin: https://auth.localhost"],
         &body(&tok, &digest, "approve"),
     )
     .await;
@@ -477,10 +495,7 @@ async fn login_returns_only_to_stored_confirm_path_and_logout_revokes() {
     let pid = new_pid();
     add_record(&h.world, refund_record(&pid, "user:u-17", 1250), "PENDING");
     let r = get(h.addr, AUTH, &format!("/confirm/{pid}"), &[]).await;
-    let pre = r.cookie("__Host-nodkey_preauth").unwrap();
-    let ck = format!("Cookie: __Host-nodkey_preauth={pre}");
-    let page = get(h.addr, AUTH, "/login", &[&ck]).await;
-    let csrf = form_value(&page.text(), "csrf").unwrap();
+    let (ck, csrf) = login_form_with_return(h.addr, &r).await;
     let r = post_form(
         h.addr,
         AUTH,
@@ -491,9 +506,7 @@ async fn login_returns_only_to_stored_confirm_path_and_logout_revokes() {
     .await;
     uniform(&r); // extra field: crafted return target is not accepted (T44)
     let r = get(h.addr, AUTH, &format!("/confirm/{pid}"), &[]).await;
-    let pre = r.cookie("__Host-nodkey_preauth").unwrap();
-    let ck = format!("Cookie: __Host-nodkey_preauth={pre}");
-    let csrf = form_value(&get(h.addr, AUTH, "/login", &[&ck]).await.text(), "csrf").unwrap();
+    let (ck, csrf) = login_form_with_return(h.addr, &r).await;
     let r = post_form(
         h.addr,
         AUTH,
@@ -533,6 +546,23 @@ async fn login_returns_only_to_stored_confirm_path_and_logout_revokes() {
     assert_eq!(render(&h, &sid, &pid).await.status, 303, "back to login");
 }
 
+/// Follows a redirect-to-login response: renders the login form with its return cookie and returns
+/// the preauth `Cookie:` header line and the CSRF token.
+async fn login_form_with_return(addr: std::net::SocketAddr, r: &Resp) -> (String, String) {
+    assert_eq!(r.header("location"), vec!["/login"]);
+    let rc = r.cookie("__Host-nodkey_return").expect("return cookie");
+    let page = get(
+        addr,
+        AUTH,
+        "/login",
+        &[&format!("Cookie: __Host-nodkey_return={rc}")],
+    )
+    .await;
+    let pre = page.cookie("__Host-nodkey_preauth").unwrap();
+    let csrf = form_value(&page.text(), "csrf").unwrap();
+    (format!("Cookie: __Host-nodkey_preauth={pre}"), csrf)
+}
+
 /// App-session hand-off and read-grant delivery.
 async fn app_login(h: &Harness, idx: usize) -> String {
     let r = get(h.addr, APP, "/.nodkey/login", &[]).await;
@@ -542,10 +572,7 @@ async fn app_login(h: &Harness, idx: usize) -> String {
     let path = loc.strip_prefix(AUTH_ORIGIN).unwrap();
     assert!(path.starts_with("/login/app?h="));
     let r = get(h.addr, AUTH, path, &[]).await;
-    let pre = r.cookie("__Host-nodkey_preauth").unwrap();
-    let ck = format!("Cookie: __Host-nodkey_preauth={pre}");
-    let page = get(h.addr, AUTH, "/login", &[&ck]).await;
-    let csrf = form_value(&page.text(), "csrf").unwrap();
+    let (ck, csrf) = login_form_with_return(h.addr, &r).await;
     let r = post_form(
         h.addr,
         AUTH,
@@ -568,12 +595,8 @@ async fn app_login(h: &Harness, idx: usize) -> String {
         .strip_prefix(AUTH_ORIGIN)
         .unwrap()
         .to_owned();
-    let pre = get(h.addr, AUTH, &path, &[])
-        .await
-        .cookie("__Host-nodkey_preauth")
-        .unwrap();
-    let ck = format!("Cookie: __Host-nodkey_preauth={pre}");
-    let csrf = form_value(&get(h.addr, AUTH, "/login", &[&ck]).await.text(), "csrf").unwrap();
+    let r = get(h.addr, AUTH, &path, &[]).await;
+    let (ck, csrf) = login_form_with_return(h.addr, &r).await;
     let r = post_form(
         h.addr,
         AUTH,
@@ -711,4 +734,167 @@ async fn read_grant_delivery_and_provenance() {
             .header("nodkey-grant")
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn approval_controls_delayed_and_early_post_rejected() {
+    let h = start_tl().await;
+    let pid = new_pid();
+    let digest = add_record(&h.world, refund_record(&pid, "user:u-17", 1250), "PENDING");
+    let alice = login(h.addr, ALICE).await;
+    let page = render(&h, &alice, &pid).await.text();
+    assert!(
+        page.contains("class=\"buttons delayed\""),
+        "CSS activation delay on the buttons"
+    );
+    let css = get(h.addr, AUTH, "/static/nodkey.css", &[]).await.text();
+    assert!(css.contains("animation: nodkey-reveal 0s 1.5s both"));
+    assert!(css.contains("visibility: hidden; pointer-events: none"));
+    assert!(
+        page.find("value=\"deny\"").unwrap() < page.find("value=\"approve\"").unwrap(),
+        "Deny first"
+    );
+    // An approve POST right after the render (a hijacked double-click) is rejected, and the token is
+    // gone.
+    let tok = form_value(&page, "token").unwrap();
+    uniform(
+        &decide(
+            &h,
+            &alice,
+            &pid,
+            &NAV_SAME_ORIGIN,
+            &body(&tok, &digest, "approve"),
+        )
+        .await,
+    );
+    wait_delay().await;
+    uniform(
+        &decide(
+            &h,
+            &alice,
+            &pid,
+            &NAV_SAME_ORIGIN,
+            &body(&tok, &digest, "approve"),
+        )
+        .await,
+    );
+    assert_eq!(approvals(&h), 0);
+    // Deny is not delayed.
+    let tok = form_value(&render(&h, &alice, &pid).await.text(), "token").unwrap();
+    let r = decide(
+        &h,
+        &alice,
+        &pid,
+        &NAV_SAME_ORIGIN,
+        &body_typed(&tok, &digest, "deny", ""),
+    )
+    .await;
+    assert_eq!(r.status, 200);
+}
+
+#[tokio::test]
+async fn typed_amount_must_match() {
+    let h = start_tl().await;
+    let pid = new_pid();
+    let digest = add_record(&h.world, refund_record(&pid, "user:u-17", 1250), "PENDING");
+    let alice = login(h.addr, ALICE).await;
+    let page = render(&h, &alice, &pid).await.text();
+    assert!(page.contains("name=\"confirm_amount_minor\""));
+    let tok = form_value(&page, "token").unwrap();
+    wait_delay().await;
+    for wrong in ["", "1250", "12.5", "12,50", "12.50 EUR", "13.50"] {
+        let r = decide(
+            &h,
+            &alice,
+            &pid,
+            &NAV_SAME_ORIGIN,
+            &body_typed(&tok, &digest, "approve", wrong),
+        )
+        .await;
+        assert_eq!(r.status, 200, "{wrong:?}");
+        let t = r.text();
+        assert!(t.contains("does not match the amount shown"), "{wrong:?}");
+        assert_eq!(
+            form_value(&t, "token").as_deref(),
+            Some(tok.as_str()),
+            "token kept"
+        );
+    }
+    // Missing field entirely: uniform error (the form shape is wrong) and the token is consumed.
+    let tok2 = form_value(&render(&h, &alice, &pid).await.text(), "token").unwrap();
+    wait_delay().await;
+    let r = decide(
+        &h,
+        &alice,
+        &pid,
+        &NAV_SAME_ORIGIN,
+        &format!("token={tok2}&digest={digest}&decision=approve"),
+    )
+    .await;
+    uniform(&r);
+    assert_eq!(approvals(&h), 0);
+    // Correct amount (surrounding spaces ignored).
+    let tok3 = form_value(&render(&h, &alice, &pid).await.text(), "token").unwrap();
+    wait_delay().await;
+    let r = decide(
+        &h,
+        &alice,
+        &pid,
+        &NAV_SAME_ORIGIN,
+        &body_typed(&tok3, &digest, "approve", "+12.50+"),
+    )
+    .await;
+    assert_eq!(r.status, 200);
+    assert!(r.text().contains("Your decision has been submitted."));
+    assert_eq!(approvals(&h), 1);
+}
+
+#[tokio::test]
+async fn login_state_flood_cannot_block_login() {
+    let h = start_tl_with(|c| c.limits.max_store_entries = 16).await;
+    // Cookie-less GET /confirm creates no server-side state.
+    for _ in 0..2000 {
+        let r = get(h.addr, AUTH, &format!("/confirm/{}", new_pid()), &[]).await;
+        assert_eq!(r.status, 303);
+    }
+    // Rendering the login form many times only evicts this client's oldest states.
+    for _ in 0..200 {
+        assert_eq!(get(h.addr, AUTH, "/login", &[]).await.status, 200);
+    }
+    let _ = login(h.addr, ALICE).await;
+}
+
+#[tokio::test]
+async fn app_origin_subresource_cannot_reset_token() {
+    let h = start_tl().await;
+    let pid = new_pid();
+    let digest = add_record(&h.world, refund_record(&pid, "user:u-17", 1250), "PENDING");
+    let alice = login(h.addr, ALICE).await;
+    let tok = form_value(&render(&h, &alice, &pid).await.text(), "token").unwrap();
+    // A no-cors fetch from the app origin to the confirm page is not rendered.
+    let c = sess(&alice);
+    let r = get(
+        h.addr,
+        AUTH,
+        &format!("/confirm/{pid}"),
+        &[
+            "Sec-Fetch-Site: same-site",
+            "Sec-Fetch-Mode: no-cors",
+            "Sec-Fetch-Dest: image",
+            &c,
+        ],
+    )
+    .await;
+    uniform(&r);
+    wait_delay().await;
+    let r = decide(
+        &h,
+        &alice,
+        &pid,
+        &NAV_SAME_ORIGIN,
+        &body(&tok, &digest, "approve"),
+    )
+    .await;
+    assert_eq!(r.status, 200, "the open form's token is still valid");
+    assert_eq!(approvals(&h), 1);
 }

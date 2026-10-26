@@ -15,7 +15,7 @@ h3 { font-size: 1rem; margin-top: 1.25rem; }
 dl { display: grid; grid-template-columns: minmax(8rem, max-content) 1fr; gap: 0.4rem 1rem; }
 dt { font-weight: 600; color: var(--muted); }
 dd { margin: 0; min-width: 0; }
-code, .value { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow-wrap: anywhere;
+code, .value { white-space: pre-wrap; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow-wrap: anywhere;
   word-break: break-all; }
 table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
 th, td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); }
@@ -28,3 +28,13 @@ button { font: inherit; padding: 0.6rem 1.4rem; border-radius: 6px; border: 2px 
 button.approve { background: var(--accent); color: var(--bg); }
 button:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
 label { display: block; margin: 0.4rem 0; }
+/* GW-R-01: approval controls are hidden and receive no clicks for 1.5 s after the page renders.
+   `both` applies the first keyframe during the delay and the last one afterwards. */
+.delayed { animation: nodkey-reveal 0s 1.5s both; }
+@keyframes nodkey-reveal {
+  from { visibility: hidden; pointer-events: none; }
+  to { visibility: visible; pointer-events: auto; }
+}
+.error { background: var(--danger); color: #fff; padding: 0.75rem 1rem; border-radius: 6px; }
+.typed input { font: inherit; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  padding: 0.4rem 0.6rem; margin-top: 0.3rem; }

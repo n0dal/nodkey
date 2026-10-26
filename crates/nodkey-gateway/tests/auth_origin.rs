@@ -64,7 +64,10 @@ async fn confirm_without_session_redirects_to_login_with_server_side_return() {
     );
     let c = r.header("set-cookie");
     assert_eq!(c.len(), 1);
-    assert!(c[0].starts_with("__Host-nodkey_preauth="));
+    assert!(
+        c[0].starts_with(&format!("__Host-nodkey_return=c.{pid}")),
+        "return target in a cookie, no server state"
+    );
     for attr in ["Path=/", "Secure", "HttpOnly", "SameSite=Lax"] {
         assert!(c[0].contains(attr), "{attr}");
     }

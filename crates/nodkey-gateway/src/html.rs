@@ -73,6 +73,35 @@ fn display_amount(r: &CheckedRecord, minor: u64) -> Option<String> {
     Some(format!("{} {}", fmt_amount(minor, *e)?, cur))
 }
 
+/// Amount parameters (declared `uint`, name ending in `_minor`) the user must type to approve, as
+/// `(form field, exact expected text)`: the major-unit value formatted with display key 11 (for
+/// example `12.50`), or the raw integer when there is no display data (GW-R-01 ruling).
+pub fn typed_amounts(r: &CheckedRecord) -> Vec<(String, String)> {
+    use crate::json::Scalar;
+    let d = &r.rec.display.0;
+    let exp = match d.get("amount_exponent") {
+        Some(Scalar::Uint(e)) => Some(*e),
+        _ => None,
+    };
+    r.rec
+        .params
+        .0
+        .iter()
+        .filter_map(|(name, v)| match v {
+            Scalar::Uint(n)
+                if name.ends_with("_minor")
+                    && r.rec.param_types.0.get(name).map(String::as_str) == Some("uint") =>
+            {
+                let want = exp
+                    .and_then(|e| fmt_amount(*n, e))
+                    .unwrap_or_else(|| n.to_string());
+                Some((format!("confirm_{name}"), want))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn related_list(items: &[crate::ipc::Related], r: &CheckedRecord) -> String {
     if items.is_empty() {
         return "<p>None.</p>".into();
@@ -103,6 +132,7 @@ pub fn confirm_page(
     rd: &Render,
     r: &CheckedRecord,
     form: Option<&str>,
+    error: Option<&str>,
     test_login: bool,
 ) -> String {
     use crate::json::Scalar;
@@ -127,7 +157,7 @@ pub fn confirm_page(
                 match (ty, name.ends_with("_minor")) {
                     (Some("uint"), true) => match display_amount(r, *n) {
                         Some(a) => format!("{a} ({n} minor units)"),
-                        None => n.to_string(),
+                        None => format!("{n} (minor units; no currency data)"),
                     },
                     _ => n.to_string(),
                 }
@@ -202,16 +232,39 @@ pub fn confirm_page(
                 tok = esc(token),
                 dg = hex_lower(&r.digest)
             ));
+            if let Some(e) = error {
+                b.push_str(&format!(
+                    "<p class=\"error\" role=\"alert\"><strong>{}</strong></p>",
+                    esc(e)
+                ));
+            }
+            let cur = match rec.display.0.get("currency") {
+                Some(crate::json::Scalar::Text(c)) => format!(" ({})", esc(c)),
+                _ => String::new(),
+            };
+            for (field, _) in typed_amounts(r) {
+                let param = field.strip_prefix("confirm_").unwrap_or(&field);
+                b.push_str(&format!(
+                    "<p class=\"typed\"><label for=\"{f}\">To approve, type the <code>{p}</code> \
+                     amount{cur} exactly as shown above:</label>\
+                     <input type=\"text\" id=\"{f}\" name=\"{f}\" inputmode=\"decimal\" \
+                     autocomplete=\"off\" spellcheck=\"false\" size=\"16\" maxlength=\"32\"></p>",
+                    f = esc(&field),
+                    p = esc(param),
+                ));
+            }
             if ctx.approver_source == "named" {
                 b.push_str(&format!(
                     "<p class=\"warning\" role=\"note\"><strong>Approve only if you just asked {} to do this.</strong></p>",
                     esc(&ctx.workload_display_name)
                 ));
             }
+            // The buttons stay hidden and inert for 1.5 s after rendering (CSS only, GW-R-01); the
+            // server rejects an earlier approval as well. Deny comes first.
             b.push_str(
-                "<div class=\"buttons\">\
-                 <button type=\"submit\" name=\"decision\" value=\"approve\" class=\"approve\">Approve</button>\
+                "<div class=\"buttons delayed\">\
                  <button type=\"submit\" name=\"decision\" value=\"deny\" class=\"deny\">Deny</button>\
+                 <button type=\"submit\" name=\"decision\" value=\"approve\" class=\"approve\">Approve</button>\
                  </div></form>",
             );
         }

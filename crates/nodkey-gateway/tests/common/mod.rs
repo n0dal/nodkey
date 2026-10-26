@@ -1,5 +1,6 @@
 //! Test harness: a fake upstream app, fake broker (socket G) and fake authority (socket I), a raw
-//! HTTP/1.1 client, and a gateway started on 127.0.0.1:0 in plain-HTTP loopback mode.
+//! HTTP/1.1-over-TLS client, and a gateway started on 127.0.0.1:0 in the production `files` TLS mode
+//! with a test certificate (generated once per test process).
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -19,8 +20,72 @@ use tokio::net::{TcpListener, TcpStream, UnixListener};
 
 pub const APP: &str = "app.localhost";
 pub const AUTH: &str = "auth.localhost";
-pub const APP_ORIGIN: &str = "http://app.localhost";
-pub const AUTH_ORIGIN: &str = "http://auth.localhost";
+pub const APP_ORIGIN: &str = "https://app.localhost";
+pub const AUTH_ORIGIN: &str = "https://auth.localhost";
+
+pub struct TestCert {
+    pub cert_pem: PathBuf,
+    pub key_pem: PathBuf,
+    pub client: Arc<rustls::ClientConfig>,
+}
+
+/// One self-signed certificate for both test host names, shared by every harness in the process.
+pub fn test_cert() -> &'static TestCert {
+    static CERT: std::sync::OnceLock<TestCert> = std::sync::OnceLock::new();
+    CERT.get_or_init(|| {
+        let ck = rcgen::generate_simple_self_signed(vec![APP.to_owned(), AUTH.to_owned()]).unwrap();
+        let dir = tmpdir();
+        let cert_pem = dir.join("cert.pem");
+        let key_pem = dir.join("key.pem");
+        std::fs::write(&cert_pem, ck.cert.pem()).unwrap();
+        std::fs::write(&key_pem, ck.signing_key.serialize_pem()).unwrap();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(ck.cert.der().clone()).unwrap();
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let client = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        TestCert {
+            cert_pem,
+            key_pem,
+            client: Arc::new(client),
+        }
+    })
+}
+
+/// The uid that owns files this process creates (the fake broker and authority run as it).
+pub fn my_uid() -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(&test_cert().cert_pem).unwrap().uid()
+}
+
+/// TLS connection to the gateway with SNI `sni`.
+pub async fn tls_connect(
+    addr: SocketAddr,
+    sni: &str,
+) -> tokio_rustls::client::TlsStream<TcpStream> {
+    let tcp = TcpStream::connect(addr).await.unwrap();
+    tokio_rustls::TlsConnector::from(test_cert().client.clone())
+        .connect(
+            rustls::pki_types::ServerName::try_from(sni.to_owned()).unwrap(),
+            tcp,
+        )
+        .await
+        .unwrap()
+}
+
+/// SNI for a request head: the auth host if its first `Host` line names it, else the app host.
+fn sni_for(head: &str) -> &'static str {
+    let host = head
+        .lines()
+        .find_map(|l| l.strip_prefix("Host: "))
+        .unwrap_or("");
+    if host.starts_with(AUTH) { AUTH } else { APP }
+}
+/// Size of the fake upstream's `/big` response.
+pub const BIG: usize = 4 << 20;
 pub const WID: &str = "spiffe://nodkey.test/workload/shop";
 
 /// What the fake upstream saw.
@@ -159,6 +224,13 @@ async fn fake_upstream(world: Shared) -> SocketAddr {
                                 hyper::Response::new(Full::new(Bytes::from("hello from app")));
                             let h = r.headers_mut();
                             h.insert("content-type", "text/html".parse().unwrap());
+                            if target.starts_with("/dupct") {
+                                h.append("content-type", "text/plain".parse().unwrap());
+                            }
+                            if target.starts_with("/big") {
+                                *r.body_mut() = Full::new(Bytes::from(vec![b'x'; BIG]));
+                            }
+                            let h = r.headers_mut();
                             if target.starts_with("/headers") {
                                 for (k, v) in [
                                     ("set-cookie", "PHPSESSID=abc; Path=/; HttpOnly"),
@@ -300,7 +372,10 @@ fn authority(world: &Shared, op: &str, args: &Value) -> Value {
 pub fn base_config(dir: &std::path::Path, upstream: SocketAddr) -> Config {
     Config {
         listen: "127.0.0.1:0".parse().unwrap(),
-        tls: TlsConfig::PlainHttpLoopbackInsecure,
+        tls: TlsConfig::Files {
+            cert_pem: test_cert().cert_pem.clone(),
+            key_pem: test_cert().key_pem.clone(),
+        },
         app_origin: APP_ORIGIN.into(),
         auth_origin: AUTH_ORIGIN.into(),
         upstream: Upstream::Tcp(upstream),
@@ -312,8 +387,10 @@ pub fn base_config(dir: &std::path::Path, upstream: SocketAddr) -> Config {
         app_cookies: vec!["PHPSESSID".into()],
         broker_socket: dir.join("g.sock"),
         authority_socket: dir.join("i.sock"),
-        expected_broker_uid: None,
-        expected_authority_uid: None,
+        expected_broker_uid: my_uid(),
+        expected_authority_uid: my_uid(),
+        dev_local_only: false,
+        trusted_proxies: vec![],
         session: SessionConfig::default(),
         limits: Limits::default(),
         test_login: None,
@@ -388,7 +465,7 @@ impl Resp {
 
 /// Sends `head` (request line + headers, CRLF-separated, without the final blank line) and `body`.
 pub async fn raw(addr: SocketAddr, head: &str, body: &[u8]) -> Resp {
-    let mut s = TcpStream::connect(addr).await.unwrap();
+    let mut s = tls_connect(addr, sni_for(head)).await;
     let mut req = head.replace('\n', "\r\n");
     if !body.is_empty() {
         req.push_str(&format!("\r\nContent-Length: {}", body.len()));

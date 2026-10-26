@@ -202,3 +202,113 @@ async fn app_logout_requires_same_origin_provenance() {
     let r = raw(h.addr, "POST /.nodkey/logout HTTP/1.1\nHost: app.localhost\nSec-Fetch-Site: same-origin\nSec-Fetch-Mode: cors", b"").await;
     assert_eq!(r.status, 303);
 }
+
+#[tokio::test]
+async fn duplicate_single_valued_response_header_is_bad_gateway() {
+    let h = start().await;
+    let r = get(h.addr, APP, "/dupct", &[]).await;
+    assert_eq!(r.status, 502);
+    assert!(r.header("content-type").len() <= 1);
+}
+
+#[tokio::test]
+async fn transfer_encoding_with_content_length_is_not_smuggled() {
+    // hyper decodes `Transfer-Encoding: chunked` and drops `Content-Length` (RFC 9112 §6.3); the
+    // gateway rebuilds the upstream request with one recomputed length (GW-R-07).
+    let h = start().await;
+    let r = raw(
+        h.addr,
+        "POST /x HTTP/1.1\nHost: app.localhost\nTransfer-Encoding: chunked",
+        b"5\r\nhello\r\n0\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: app.localhost\r\n\r\n",
+    )
+    .await;
+    assert_eq!(r.status, 200);
+    let w = h.world.lock().unwrap();
+    assert_eq!(w.upstream.len(), 1, "one request reaches the app");
+    let seen = &w.upstream[0];
+    assert_eq!(seen.body, b"hello");
+    assert!(seen.header("transfer-encoding").is_empty());
+    assert_eq!(seen.header("content-length"), vec!["5"]);
+}
+
+/// Opens a TLS connection and sends a request head announcing a body that never fully arrives.
+async fn stalled_upload(
+    addr: std::net::SocketAddr,
+    host: &str,
+) -> tokio_rustls::client::TlsStream<tokio::net::TcpStream> {
+    use tokio::io::AsyncWriteExt;
+    let mut s = tls_connect(addr, host).await;
+    s.write_all(
+        format!("POST /upload HTTP/1.1\r\nHost: {host}\r\nContent-Length: 1000\r\n\r\nab")
+            .as_bytes(),
+    )
+    .await
+    .unwrap();
+    s.flush().await.unwrap();
+    s
+}
+
+async fn read_all(s: &mut tokio_rustls::client::TlsStream<tokio::net::TcpStream>) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+    let mut out = Vec::new();
+    let mut buf = [0u8; 16384];
+    loop {
+        match s.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn request_body_deadline() {
+    let h = start_with(|c| c.limits.request_body_timeout_ms = 300).await;
+    let mut s = stalled_upload(h.addr, APP).await;
+    let t0 = std::time::Instant::now();
+    let out = tokio::time::timeout(std::time::Duration::from_secs(5), read_all(&mut s))
+        .await
+        .expect("answered before 5 s");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(3));
+    assert_eq!(parse(&out).status, 408);
+    assert!(h.world.lock().unwrap().upstream.is_empty());
+}
+
+#[tokio::test]
+async fn app_origin_cannot_starve_auth_origin() {
+    let h = start_with(|c| {
+        c.limits.app_connections = 4;
+        c.limits.auth_connections = 4;
+    })
+    .await;
+    let mut held = Vec::new();
+    for _ in 0..12 {
+        held.push(stalled_upload(h.addr, APP).await);
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let r = get(h.addr, APP, "/", &[]).await;
+    assert_eq!(r.status, 503, "app origin budget exhausted");
+    let r = get(h.addr, AUTH, "/", &[]).await;
+    assert_eq!(r.status, 200, "auth origin still served");
+    drop(held);
+}
+
+#[tokio::test]
+async fn response_write_deadline_drops_non_reading_client() {
+    use tokio::io::AsyncWriteExt;
+    let h = start_with(|c| c.limits.response_write_timeout_ms = 300).await;
+    let mut s = tls_connect(h.addr, APP).await;
+    s.write_all(b"GET /big HTTP/1.1\r\nHost: app.localhost\r\n\r\n")
+        .await
+        .unwrap();
+    // Do not read until well past the deadline.
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    let out = tokio::time::timeout(std::time::Duration::from_secs(5), read_all(&mut s))
+        .await
+        .expect("connection closed");
+    assert!(
+        out.len() < BIG,
+        "response cut off after the write deadline ({} bytes)",
+        out.len()
+    );
+}
