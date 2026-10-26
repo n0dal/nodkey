@@ -4,9 +4,12 @@
 
 **Maturity:** PROTOTYPE. Nothing in this repository is suitable for production use.
 
-**Active milestone:** Phase 3 — Cryptographic authorization (next). Phase 2 (Demo 1, minimal
-containment) is complete: EXPERIMENTAL, verified locally under Deployment Profile P0, independently
-reviewed, with documented limitations.
+**Focus:** authority control for apps and AI agents performing consequential external actions,
+with user-confirmed intent ([ADR-0010](docs/decisions/0010-project-focus.md)).
+
+**Active milestone:** Phase 3 — Signed grants and confirmed intent: **implementation complete and
+verified locally** (Demo 2); spec Draft 3 alignment in progress. Next: Phase 4 — Demo P (payments).
+Phase 2 (Demo 1, containment) complete.
 
 ## Verified functionality
 
@@ -31,10 +34,32 @@ control (C-03K) to find a secret that is present; R-01 requires the server's own
 any probe that does not report is NOT TESTED. Probes without a breach counterpart (S-01, S-02, B-*,
 P-03, F-01, F-03) rest on direct observation only.
 
+### Phase 3 — confirmed effects (Demo 2, `examples/confirmed-transfer/`)
+
+| Capability | Evidence | Status |
+|---|---|---|
+| A compromised app can propose but cannot execute any transfer the intended approver did not approve with exactly the displayed values | Demo 2 L-01..03, A1, A2, A10 | PASS (local) |
+| Approval cannot be forged from the app origin, a sibling, or cross-site; tokens are single-use and bound to session, pending id, digest | A3, A4 | PASS |
+| Only the intended approver can see or approve; others get a uniform 404 | A5, A8 | PASS |
+| Replay, re-approval, and expiry produce no extra or late effect | A6, A7 | PASS |
+| Authority or broker crash mid-flow → exactly one effect | A11, A12 | PASS |
+| App container cannot reach the DB, the authority key, or any control socket | A9 (14 probes) | PASS |
+| Grants verified by an independent implementation of the spec | `crates/nodkey-grant`: 280 grant / 26 registry / 19 declaration / 11 transport vectors | PASS |
+| Confirmed intent (SI-20) | session-based approval; no WebAuthn yet | **PARTIALLY MET** |
+| Credential entry never on the app origin (SI-18) | test login only | **NOT TESTED** |
+| Approve-button click-hijacking defences (GW-R-01) | gateway unit tests (inert period, typed amount); no real-browser popup test (T13) | PASS (unit) / NOT TESTED (browser) |
+
 ## Test evidence
 
 | Test / suite | Invariants | Last run | Result | Evidence |
 |---|---|---|---|---|
+| `crates/nodkey-grant` conformance + robustness | SI-05..SI-09 | 2026-10-25 | 27 tests; all vector categories 0 failures; 1.7 M mutated inputs, no panic, no false accept | local |
+| `crates/nodkey-authority` | SI-05, SI-09, SI-20 | 2026-10-25 | 51 passed (incl. crash/restart exactly-once) | local, macOS |
+| `crates/nodkey-gateway` (default / features) | SI-18, SI-20, SI-21 | 2026-10-25 | 40 / 54 passed | local, macOS |
+| `broker` unit + PostgreSQL integration | SI-06, SI-09, SI-11, SI-15, SI-16 | 2026-10-25 | 64 unit; 28/28 PG | local + Docker |
+| `tools/simpay` | — (untrusted simulator) | 2026-10-25 | 64 passed | local |
+| `tests/demo2/run.sh` (no retries) | SI-01, SI-02, SI-05, SI-06, SI-09, SI-13, SI-15, SI-20, SI-21 | 2026-10-25 | 29/29 PASS | `var/demo2/results.json` |
+| Demo 1 regression after Phase 3 changes | SI-01..SI-03, SI-08, SI-09, SI-13, SI-16 | 2026-10-25 | protected 65 PASS / 2 N/A; idempotency 7/7 | local |
 | `cargo test` (broker unit tests) | SI-08, SI-09, SI-15, SI-16 | 2026-10-25 | 40 passed | local run, macOS host |
 | `cargo clippy --all-targets` | — | 2026-10-25 | no warnings | local run |
 | `tests/containment/run.sh both` — protected (P0) | SI-01, SI-02, SI-03, SI-08, SI-09, SI-13, SI-16 | 2026-10-25 | 65 PASS, 2 NOT APPLICABLE, 0 FAIL, 0 INCONCLUSIVE | `var/containment/results-protected.json` (local, Git-ignored) |
@@ -48,6 +73,21 @@ Docker default seccomp); Docker 29.5.2; Compose 5.6.1; Rust 1.99.1; PHP 8.4 (ima
 broker resistance to resource exhaustion and per-workload fairness (D1-07); the idempotency unique-violation branch under real DB concurrency (the broker currently serializes on one connection); durable audit of denials (D1-04); business-level limits (D1-06, Phase 3/4); anything in Phases 3+.
 
 ## Checkpoints
+
+### 2026-10-25 — Phase 3 implementation verified
+- **Decisions:** ADR-0010 (refocus on external consequential actions, owner decision), ADR-0011
+  (propose → confirm → execute; workloads never hold write grants), ADR-0003 Phase 3 profile.
+- **Specs:** grant-v1 Draft 2 (336 vectors), effect-protocol-v2 Draft 2 (digest vectors).
+- **Built:** nodkey-grant (clean-room), broker v2, nodkey-authority, nodkey-gateway, simpay,
+  Demo 2. Each security-critical component independently reviewed; no Critical findings; one High
+  (gateway popup click-hijack) fixed; all Medium findings fixed or dispositioned.
+- **Integration found:** DEMO2-F02 (authority stale connection) — fixed; harness retry removed.
+- **Incident:** an agent once sent the owner's email in a User-Agent header to crates.io; reported;
+  rule added to all agent definitions; no repository content affected.
+- **Not tested:** real-browser popup/clickjack test (T13), WebAuthn, Linux multi-uid for unit tests
+  (covered in Demo 2 containers), production hosts, payments (Phase 4), mandates (Phase 4/5).
+- **Next:** spec Draft 3 alignment; then Phase 4 Demo P (payments adapter for simpay, TLS front,
+  budgets/mandates, attacks P-01..P-19).
 
 ### 2026-10-25 — Phase 2 / Demo 1 implemented
 - **Done:** Rust broker (`broker/`), intentionally vulnerable PHP ledger demo with P0 and baseline
