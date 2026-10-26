@@ -1,8 +1,8 @@
 # Nodkey payments adapter v1 — refunds against simpay (Demo P)
 
-- **Status:** **Draft 2** (2026-10-25). Supersedes Draft 1 (changes in §12). Not re-reviewed. Nothing
-  here is implemented or tested.
-- **Implements:** [ADR-0012](../decisions/0012-payments-adapter.md) (rev. 1) and
+- **Status:** **Draft 3** (2026-10-25). Supersedes Draft 2 (changes in §13; Draft 1 → 2 in §12). Draft 2
+  was re-checked (PA-15..PA-19); Draft 3 is not yet re-checked. Nothing here is implemented or tested.
+- **Implements:** [ADR-0012](../decisions/0012-payments-adapter.md) (rev. 2, Proposed) and
   [ADR-0006](../decisions/0006-replay-and-effect-state.md) Amendment 2 (reconciler resend; OQ-10).
 - **Builds on:** [effect-protocol-v2](effect-protocol-v2.md) **Draft 3.1** (`payments.refund` now binds
   `charge_id`); [grant-v1](grant-v1.md) Draft 3; ADR-0002 §5; ADR-0006 (incl. Amendment 1).
@@ -32,18 +32,36 @@ currency, to exactly the signed charge, and only while the grant is younger than
 |---|---|---|---|---|
 | Workload `shop` | 10001 | nothing reusable | none | W (client) |
 | Broker | 10002 | DB credential (`nodkey_broker`) | `data` 172.30.20.10 | W, G, A (listener); P (client) |
-| Payments adapter | 10006 | simpay key, `K_idem`, DB credential (`nodkey_payments_adapter`, read-only) | `data` **172.30.20.30** and `pay-egress` **172.30.30.10** | P (listener) |
-| PostgreSQL | — | — | `data` 172.30.20.20 | — |
+| Payments adapter | 10006 | simpay key, `K_idem`, DB credential (`nodkey_payments_adapter`, read-only) | `pay-egress` **172.30.30.10** only; DB over the Unix socket in volume `pg-adapter` | P (listener); `pg-adapter` (client) |
+| PostgreSQL | — | — | `data` 172.30.20.20 | TCP on `data`; Unix socket in `pg-adapter` |
 | simpay | — | its own state | `pay-egress` 172.30.30.20 (API, TLS); `harness` (admin) | — |
 
 - `data` and `pay-egress` are Docker networks with `internal: true`. `pay-egress` has exactly the adapter
   and the simpay API. The adapter has no other network. Neither the broker, the authority, the gateway
   nor the workload is attached to `pay-egress`.
+- **Adapter DB channel (PA-16).** The adapter is **not** on `data`. It reaches PostgreSQL only through a
+  Unix socket in the volume `pg-adapter`, which is mounted into the PostgreSQL and adapter containers
+  **only** (never into the broker; part of the control set). PostgreSQL: `unix_socket_directories =
+  '/var/run/postgresql, /run/pg-adapter'`, `unix_socket_group = <adapter gid>`,
+  `unix_socket_permissions = 0770`; the directory is owned by the postgres uid, group = adapter gid,
+  mode `2750`. The adapter connects the `UnixStream` itself, requires the server's `SO_PEERCRED` uid =
+  configured `db_uid`, and only then runs the PostgreSQL protocol over it (`tokio-postgres`
+  `connect_raw`). `pg_hba.conf`, in this order:
+
+  ```
+  local  ledger  nodkey_payments_adapter                 scram-sha-256
+  host   all     nodkey_payments_adapter  0.0.0.0/0      reject
+  host   all     nodkey_payments_adapter  ::/0           reject
+  host   ledger  nodkey_broker            172.30.20.10/32 scram-sha-256
+  ```
+
+  The adapter role is therefore usable only over a channel the broker cannot reach, so the broker
+  cannot observe or relay the adapter's session. TLS and channel binding are not needed on a Unix
+  socket.
 - On `data` the only listener is PostgreSQL. The adapter and the broker expose **no** TCP listener.
-  `pg_hba.conf` admits `nodkey_payments_adapter` only from 172.30.20.30 and `nodkey_broker` only
-  from 172.30.20.10 (SCRAM).
-- The adapter container has no `CAP_NET_ADMIN` and IP forwarding is off in its namespace, so it does not
-  route between `data` and `pay-egress`.
+- **Capabilities.** Every Nodkey container (workloads, broker, authority, gateway, adapter) runs with
+  `cap_drop: [ALL]` and `no-new-privileges`, so none has `CAP_NET_RAW` (no ARP spoofing or raw sockets),
+  `CAP_NET_ADMIN` or `CAP_SYS_TIME` (PT-38). The adapter has one network, so it routes nothing.
 - simpay's key is restricted (`refunds: write`, `charges: read`) with `allowed_cidrs:
   ["172.30.30.10/32"]` (SI-03 analogue).
 
@@ -72,7 +90,9 @@ The adapter refuses to start unless every check in this table holds, and re-read
 | Key registry `/etc/nodkey-adapter/keys.json` | the authority's grant keys (grant-v1 §8 format) | operator-provisioned file, owner root, mode `0444`, parent directories root-owned and not group/other-writable; mounted read-only into the adapter only; start check: regular file, not a symlink, owner ∉ {broker uid, adapter uid}, no group/other write bit on file or parents |
 | Config `/etc/nodkey-adapter/config.json` | `broker_id` (= grant `aud`), `wid` of `shop`, `R_max_s`, provider settings, limits | same as the registry |
 | Operation declaration | `payments.refund` opv 1 placements (§3.1) | compiled into the adapter; not configurable |
-| Orders view | `SELECT order_id, ten, owner_sub, charge_id, currency FROM orders` | DB role `nodkey_payments_adapter`: `SELECT` on those `orders` columns only, nothing else. `orders` is owned by `postgres`; only `nodkey_shop_operator` may write it; `nodkey_broker` has `SELECT` only and no `CREATEROLE`, ownership or `GRANT` option, so it can neither write `orders` nor alter the adapter's role. Password file owner adapter, `0400` |
+| Orders view: privileges | `SELECT order_id, ten, owner_sub, charge_id, currency FROM nodkey.orders WHERE order_id = $1` | DB role `nodkey_payments_adapter`: `SELECT` on those columns only, nothing else. `nodkey.orders` is owned by `postgres`; only `nodkey_shop_operator` may write it; `nodkey_broker` has `SELECT` only (no `UPDATE`, so it cannot even lock rows), no `CREATEROLE`, ownership or `GRANT` option. Password file owner adapter, `0400` |
+| Orders view: transport | Unix socket in `pg-adapter` | mounted into PostgreSQL and the adapter only; server peer uid checked; `pg_hba` rejects the adapter role over TCP (§1) |
+| Orders view: name resolution (PA-17) | schema-qualified names | every table used by any Nodkey role is in schema `nodkey` (owner `postgres`) and every statement names it `nodkey.<table>`; `ALTER ROLE … SET search_path = ''` for `nodkey_broker`, `nodkey_payments_adapter` and `nodkey_shop_operator`; `REVOKE CREATE, TEMPORARY ON DATABASE ledger FROM PUBLIC`; `REVOKE CREATE ON SCHEMA public FROM PUBLIC`; no Nodkey role has `CREATE` on any schema. A shadowing table or view therefore cannot be created, and would not be resolved |
 | Clock | host `CLOCK_REALTIME` | no container has `CAP_SYS_TIME`; Linux time namespaces do not virtualize `CLOCK_REALTIME`; the adapter refuses to verify while the clock reads below 2024-01-01. Host clock rollback is attacker I (residual) |
 | simpay key, `K_idem` | secrets | files owner adapter uid, mode `0400`, not symlinks; never mounted into the broker |
 | Pinned CA | one certificate | owner root, `0444`, exactly one certificate |
@@ -84,9 +104,12 @@ container.
 
 ### 3.1 Checked claims
 
-The adapter verifies the grant bytes the broker stored at `APPROVED` with a **new `nodkey-grant` entry
-point**, `verify_retransmission(ctx, bytes, now, r_max) -> RetransmissionAuthorized`, typed differently
-from the broker's consuming `verify(..).decide(..)`, so the broker's path can never skip `exp`. It
+The adapter verifies the grant bytes the broker stored at `APPROVED` with **two new `nodkey-grant`
+entry points**, each typed differently from the broker's consuming `verify(..).decide(..)` and from each
+other, so no path can skip a check by accident: `verify_retransmission(ctx, bytes, now, r_max) ->
+RetransmissionAuthorized` (for `refund.create`: every row below, including age) and
+`verify_binding(ctx, bytes, now) -> BindingVerified` (for `refund.find`, `refund.get`, `idem.status`:
+every row except age; these ops cannot cause an effect). Each
 performs grant-v1 §7.2 steps 1–9 (structure, `typ`, algorithm, registry lookup by `kid`, key validity at
 `iat`, signature, `iss`) and then requires, in order (any failure → `ok:false grant_refused`, nothing
 sent):
@@ -98,13 +121,44 @@ sent):
 | `knd`, `cfm`, `use` | `1`, `1`, `1` (confirmed single-use write) |
 | `op`, `opv` | `payments.refund`, `1` |
 | `res` | exactly `{0: order_id}` (uint) |
-| `con` | exactly `{0: amount_minor (uint ≥ 1), 1: currency, 2: charge_id}`; nothing else |
+| `con` | exactly `{0: amount_minor (uint ≥ 1), 1: currency, 2: charge_id}`; nothing else; con2 MUST match `^ch_[A-Za-z0-9]{8,64}$` on **every** op (PA-19) |
 | `nbf`, `iat` | `≤ now + skew` (skew 5 s) |
-| **age** | `now − iat ≤ R_max_s` (default 43 200 s = 12 h) |
+| **age** (`refund.create` only, PA-18) | `now − iat ≤ R_max_s` (default 43 200 s = 12 h) |
 | `exp` | **not** checked (deliberately: resends happen after `exp`; the age rule replaces it) |
 
 Not checked by the adapter: revocation (`revoked_before`) and consumption. Both are the broker's; their
-loss under broker compromise is a residual (§10).
+loss under broker compromise is a residual (§10). Lookups after `R_max` remain possible, so late
+`UNKNOWN` resolution and settlement polling work (§7.3).
+
+**Exact verification procedure (resolves grant-crate issues RX-1..RX-6, `crates/nodkey-grant/SPEC_ISSUES.md`).**
+The steps below are normative; their order matters only for audit logs, because every failure is
+`grant_refused` and nothing is sent.
+
+1. Clock floor: refuse while the adapter clock reads below 2024-01-01.
+2. grant-v1 §7.2 steps 1–7, including 4c (key `status: revoked` → refuse) and 5 (signature over the
+   `external_aad`, which binds `aud`). Step 4d (key validity window) is evaluated **at `iat`**, not at
+   `now` (RX-2).
+3. Steps 8a–8d, including 8b (time order) and 8c (lifetime measured from `iat`). Step **8e (`exp`) is
+   not run**; for `refund.create` it is replaced by the age rule `now − iat ≤ R_max_s`; `verify_binding`
+   has no age rule (RX-2).
+4. Steps 9a–9c, with 9c (`ten` ∈ the workload's tenants) checked against the adapter's **own configured
+   `tenants` list** for `wid` (§9), passed to the crate as `workload_tenants`. An empty list is a start-up
+   refusal. This is in addition to, not replaced by, §3.2 (RX-1; the crate's stricter reading).
+5. The claim table above: `knd`, `cfm`, `use`, `op`, `opv`, `res`/`con` keys, classes and declared types.
+   `aud` is checked again explicitly although step 5 already binds it (RX-4).
+6. **Adapter rules on the crate's output** (`RetransmissionAuthorized::params()` /
+   `BindingVerified::params()`), which the grant-v1 §6 declaration format cannot express: `amount_minor ≥
+   1` (RX-3); con2 matches `^ch_[A-Za-z0-9]{8,64}$` (PA-19, RX-6); `currency` in the adapter's ISO 4217
+   table.
+7. For `refund.create` only: §3.2.
+
+**`unresolved` is never signed (RX-6).** effect-protocol-v2 Draft 3.1 §2.3 requires the authority to
+refuse approval of a `payments.refund` record whose `charge_id` does not match the charge pattern; step 6
+and §3.2 are the adapter's independent checks.
+
+**Crate status.** `verify_retransmission` exists in `crates/nodkey-grant` (commit 8668eb2) with the
+behaviour above. `verify_binding` is **not yet implemented**; until it is, the adapter MUST refuse lookups
+rather than call `verify_retransmission` with a widened age (that would merge the two types).
 
 **`R_max` start-up rule.** `R_max_s < provider_retention_s − resend_margin_s`, and `resend_margin_s <
 provider_retention_s ≤` the profile's documented minimum retention (simpay: its configured
@@ -148,7 +202,7 @@ non-final; the broker refuses to start payment processing (alarm) if non-final r
 | `refund.get` | `{grant, refund_id}` | `Lookup` (a found refund must match the grant's charge) |
 | `idem.status` | `{grant}` (cap `idem_status`) | `{"state":"none"\|"in_progress"\|"done"}` or `{"state":"ambiguous","cause"}` |
 
-Every op runs §3.1 first; `refund.create` also runs §3.2. Errors (`ok:false`, nothing sent):
+`refund.create` runs `verify_retransmission` and §3.2; the other ops run `verify_binding`. Errors (`ok:false`, nothing sent):
 `grant_refused`, `unavailable`, `invalid_argument`, plus the envelope errors.
 
 ```
@@ -197,7 +251,8 @@ nodkey-payments-adapter/1`, `Content-Length`. Body (`form_urlencoded`, from the 
 `charge=<con2>&amount=<con0>&reference=<reference>`, plus `&currency=<lowercase con1>` with cap
 `send_currency`. Lookups: `GET /v1/refunds/{refund_id}` (id `^re_[A-Za-z0-9]{8,64}$`),
 `GET /v1/refunds?charge=<con2>&reference=<reference>&limit=3`, `GET /v1/idempotency_keys?key=<idem_key>`
-(simpay **[sim]**).
+(simpay **[sim]**). Query strings are serialized with `form_urlencoded` (every byte outside
+`[A-Za-z0-9*-._]` percent-encoded); path segments are only pattern-checked ids, inserted verbatim.
 
 **Custody (SI-02).** Secrets are read once from the §2 files; never in environment, command line, logs,
 alarms or responses; held in zeroizing buffers; redacted in every debug path.
@@ -237,12 +292,24 @@ lookups, ignored idempotency, invented settlement) cannot be detected. The adapt
 
 ### 7.1 Tables (broker DB)
 
-**`orders`** — trusted facts. Columns: `order_id` bigint PK (`1 ..= 2^53 − 1`); `ten`, `owner_sub` (ID
+All tables are in schema `nodkey` (§2); prose below omits the prefix, statements MUST NOT.
+
+**`nodkey.orders`** — trusted facts. Columns: `order_id` bigint PK (`1 ..= 2^53 − 1`); `ten`, `owner_sub` (ID
 rules); `charge_id` **UNIQUE**, `^ch_[A-Za-z0-9]{8,64}$`, immutable; `currency` `^[A-Z]{3}$` in the ISO
 4217 table, immutable; `captured_minor` ≥ 1, immutable; `external_refunded_minor` ≥ 0; `status ∈
 {captured, partially_refunded, refunded, disputed, canceled}`. A trigger rejects updates of immutable
-columns. Because `charge_id` is UNIQUE, one order row **is** the charge row: every per-charge sum and
-lock below is taken on it.
+columns. `nodkey_broker` has `SELECT` only and never locks `orders` (PA-15).
+
+**`nodkey.charge_refund_state`** — broker-owned, one row per charge (PA-15): `charge_id` PK
+(`^ch_[A-Za-z0-9]{8,64}$`), `succeeded_minor`, `inflight_minor` (`RESERVED` + `DISPATCHED`),
+`unknown_minor`, all ≥ 0. The broker has `SELECT`, `INSERT` and `UPDATE` on it. The rows are created by
+the broker (`INSERT … ON CONFLICT DO NOTHING`) and are the **per-charge lock**. A deferred constraint
+trigger checks at commit that the three counters equal the sums over that charge's `payment_effect`
+rows by state, so they cannot drift. Every `FAILED` row is `released`, so encumbrance =
+`succeeded_minor + inflight_minor + unknown_minor`. **Serialization with the operator:** a
+`BEFORE UPDATE OR DELETE` trigger on `nodkey.orders` (`SECURITY DEFINER`, owner `postgres`,
+`search_path = ''`) inserts-if-absent and locks the order's `charge_refund_state` row, so an operator
+change of owner or status waits for, or blocks, any T1 on that charge (SI-11).
 
 **Writer (PA-04).** Only the role `nodkey_shop_operator` may `INSERT`/`UPDATE` `orders`. Its credential
 is held by the operator's payment-capture integration, which MUST run outside the workload's trust
@@ -264,25 +331,31 @@ immutability of frozen columns.
 
 ### 7.2 Transactions
 
-**Lock order:** own `pending_effect` row → `refund_budget` row → `orders` (charge) row → that charge's
-`payment_effect` rows. No transaction locks two `pending_effect` rows.
+**Lock order:** own `pending_effect` row → `refund_budget` row → `charge_refund_state` row → that
+charge's `payment_effect` rows. No transaction locks two `pending_effect` rows. The operator trigger
+takes only the `charge_refund_state` row (after its own `orders` row lock); T1 never locks `orders`, so
+there is no cycle.
 
 **T1 — execution transaction** (effect-protocol-v2 §4.4): lock record; window; verify; W10; savepoint;
 W11–W13; then W14 **in this order**, stopping at the first failure (PA-07):
 
-1. lock `orders` by `order_id`; require it exists, `ten` = grant `ten`, `owner_sub` = grant `sub` —
-   else reason `not_owner_or_unknown`;
-2. `charge_id` = grant con2 (always true for an existing row; a mismatch is an alarm) and `currency` =
-   grant con1 — else `currency`;
-3. `status ∈ {captured, partially_refunded}` — else `order_status`;
-4. no `payment_effect` row of this `charge_id` in `RESERVED`, `DISPATCHED` or `UNKNOWN` — else
-   `order_busy`;
-5. `remaining = captured_minor − external_refunded_minor − Σ amount_minor(rows of this charge_id
-   NOT released)`; `1 ≤ amount_minor ≤ remaining` — else `insufficient_refundable`;
-6. budget (§7.5) — else `budget`.
+0. grant con2 matches the charge pattern — else `not_owner_or_unknown` (so `unresolved` creates no
+   state row);
+1. budget (§7.5) — lock taken here, evaluated at step 7;
+2. insert-if-absent and lock `charge_refund_state` for con2;
+3. **after** that lock, read `nodkey.orders` by `order_id` (a new statement, so it sees every operator
+   change committed before the lock); require it exists, `ten` = grant `ten`, `owner_sub` = grant `sub`,
+   `charge_id` = con2 — else `not_owner_or_unknown`;
+4. `currency` = grant con1 — else `currency`; `status ∈ {captured, partially_refunded}` — else
+   `order_status`;
+5. `inflight_minor + unknown_minor = 0` — else `order_busy`;
+6. `remaining = captured_minor − external_refunded_minor − (succeeded_minor + inflight_minor +
+   unknown_minor)`; `1 ≤ amount_minor ≤ remaining` — else `insufficient_refundable`;
+7. budget guarded update — else `budget`.
 
-On failure: roll back to the savepoint, `consumed_grant = DENIED`, record `FAILED` (`denied`), commit; no
-`payment_effect` row, no adapter call. On success: `consumed_grant = ACCEPT`; insert `payment_effect`
+Steps are evaluated in this order and stop at the first failure (ownership before anything that
+reveals order state). On failure: roll back to the savepoint, `consumed_grant = DENIED`, record `FAILED` (`denied`), commit; no
+`payment_effect` row, no adapter call. On success: `consumed_grant = ACCEPT`; `inflight_minor += amount`; insert `payment_effect`
 `RESERVED` with frozen values, `idem_kid`, `resend_deadline = grant.iat + R_max_s − 60`; record
 `APPROVED → EXECUTING`; deadline-at-commit check (grant-v1 D2-4); commit synchronously.
 
@@ -330,8 +403,9 @@ and runs one **round** (backoff 10 s, 1 min, 5 min, 30 min, then hourly):
 4. Past the gate: lookups only (daily, 7 days); "not found" never concludes anything; then
    `operator_required`, alarm; the charge stays blocked.
 
-The adapter enforces `R_max` independently (§3.1), so a broker clock rollback or a misconfigured
-retention cannot produce a resend after the provider could have pruned the key.
+The adapter enforces `R_max` on `refund.create` independently (§3.1), so a broker clock rollback or a
+misconfigured retention cannot produce a resend after the provider could have pruned the key. Lookups
+(steps 1 and 4, settlement) are not age-bounded.
 
 **Settlement:** for `SUCCEEDED` with `settlement = pending`, `refund.get` on the same backoff for up to
 30 days; `failed` → alarm, amount stays encumbered.
@@ -350,8 +424,9 @@ a grantless effect under SI-19. The workload cannot trigger, delay or shape it.
 | `UNKNOWN` → `SUCCEEDED` / `FAILED` (reconciler only) | `UNKNOWN → SUCCEEDED` / `FAILED` |
 | `SUCCEEDED`: only `settlement` | unchanged |
 
-Both rows change in one transaction, which takes the charge row lock whenever `released` or the in-flight
-set changes. **Encumbrance:** every row encumbers its amount unless `released`; `released` is set only for
+Both rows change in one transaction, which also locks the `charge_refund_state` row and moves the amount
+between its counters (`inflight` → `succeeded` / `unknown`, `unknown` → `succeeded`, or out of all three
+on `FAILED`). **Encumbrance:** every row encumbers its amount unless `released`; `released` is set only for
 `not_dispatched`, `not_sent` and the reconciler's `FAILED`.
 
 ### 7.5 Budget: per customer, per currency, per UTC day (AR-05)
@@ -377,7 +452,7 @@ midnight (published). Not enforced by the adapter (residual under broker comprom
 
 Because ownership is checked first and short-circuits, the shop learns nothing about an order the
 approver does not own. `payments.get_order` returns `amount_minor = captured_minor`, `refunded_minor =
-external_refunded_minor + Σ amount(SUCCEEDED)` (excludes `UNKNOWN`, in-flight and failed-settlement
+external_refunded_minor + succeeded_minor` (excludes `UNKNOWN`, in-flight and failed-settlement
 nuances), `currency`, `status`. Never shown: provider ids, references, keys, provider text, settlement,
 anomalies.
 
@@ -388,12 +463,12 @@ when any row is in flight.
 ## 9. Configuration (strict JSON) and webhooks
 
 Adapter: `{"format":"nodkey.payments-adapter.v1","socket_path","broker_uid","broker_id","wid",
-"R_max_s":43200,"registry_path","db":{"host":"172.30.20.20","port":5432,"dbname","user":
+"tenants":["acme"],"R_max_s":43200,"registry_path","db":{"socket_dir":"/run/pg-adapter","db_uid","dbname","user":
 "nodkey_payments_adapter","password_file"},"provider":{"profile":"simpay","account":
 "acct_demomerchant01","addr":"172.30.30.20:8443","server_name":"simpay.test","ca_file","key_file",
 "idem_key_file","retention_s":86400,"resend_margin_s":7200,"caps":[…]},"limits":{"connect_ms":2000,
 "total_ms":10000,"max_head":16384,"max_body":65536,"max_concurrent":8}}`. Refusals: §2 checks; §3.1
-`R_max` rule; `addr` not an IP literal; uid 0 or = `broker_uid`.
+`R_max` rule; empty `tenants`; `addr` not an IP literal; uid 0 or = `broker_uid`.
 
 Broker: `"payments":{"adapter_socket","adapter_uid","R_max_s","max_resends":5,"budget":{…}}`. At start
 the broker calls `adapter.hello`, requires the format and `r_max_s` = its own, and otherwise does not
@@ -460,13 +535,18 @@ positive control** (shop holds `rk_sim_…`, reaches simpay directly; the attack
 | PT-28 | Restore drill (§10) | non-final rows → `UNKNOWN`; no duplicate | SI-09 |
 | PT-29 | **Broker-compromise suite** on P (test client with broker uid): no grant; grant for another op; read grant; other `wid`/`aud`; `cfm = 0`; foreign key; valid grant whose order now has another owner; same grant 20× (sequential and concurrent); grant older than `R_max`; expired never-executed grant younger than `R_max` | all refused, nothing sent — except: same grant 20× → ledger 1; expired-but-young grant → one refund (published residual) | PA-01..03, SI-05, SI-06 |
 | PT-30 | `orders`: second row with an existing `charge_id`; cross-tenant charge; operator-role insert attempted from shop, broker and adapter | unique violation; rejected; no path (connection refused / permission denied) | PA-04, SI-10 |
-| PT-31 | §2 inputs: registry, config, CA, key, `K_idem` writable by or present in the broker; broker attempts `UPDATE orders`, `ALTER ROLE`, `GRANT` | adapter refuses start; DB permission denied | PA-03 |
+| PT-31 | §2 inputs: registry, config, CA, key, `K_idem` writable by or present in the broker; broker attempts `UPDATE`, `SELECT … FOR UPDATE` on `nodkey.orders`, `ALTER ROLE`, `GRANT`, `CREATE` in any schema, `CREATE TEMP`, a shadowing `orders` view; `pg-adapter` absent in the broker; adapter role over TCP | adapter refuses start; DB permission denied / path absent / `pg_hba` reject | PA-03, PA-15..17 |
 | PT-32 | Broker clock set back past a row's deadline; retention configured above simpay's; `margin ≥ retention`; `R_max` violating §3.1 | no resend after the real window (adapter refuses); refusals at start | PA-05, PA-13 |
 | PT-33 | Dispatcher vs reconciler under an injected 60 s T3 delay | at most one adapter call in flight per row; late T3 discarded; ledger 1 | PA-06 |
 | PT-34 | Reason oracle: proposals on a foreign order in each status, currency, busy and budget state | always `not_permitted` | PA-07 |
 | PT-35 | HTTP edge: `1xx` then 200; 65 headers; non-ASCII header byte; short `Content-Length`; chunked trailers; list of 3 or `has_more` | classified `ambiguous`/as specified; never `created` from malformed input | PA-10 |
 | PT-36 | `K_idem` rotated while a row is non-final | broker refuses payment processing; alarm | PA-09 |
-| PT-37 | `get_order.refunded_minor` with `UNKNOWN`, in-flight and failed-settlement rows | equals external + Σ `SUCCEEDED` | §8 |
+| PT-37 | `get_order.refunded_minor` with `UNKNOWN`, in-flight and failed-settlement rows | equals external + `succeeded_minor` | §8 |
+| PT-38 | Every Nodkey container: `CapEff` in `/proc/self/status`; from the broker: raw/packet socket, ARP send, connect to `pg-adapter` path | `CapEff = 0`; `EPERM`; path absent | PA-16 |
+| PT-39 | `charge_refund_state` counters forced out of step with `payment_effect`; operator owner/status update racing T1 (both orders of arrival) | commit rejected by the constraint trigger; T1 sees the update or the update waits; never an effect under a stale owner | PA-15, SI-11 |
+| PT-40 | After `R_max`: `refund.create` vs `refund.find` / `refund.get` / `idem.status` with the same grant | create `grant_refused`, nothing sent; lookups served; late `UNKNOWN` resolves; settlement observed | PA-18 |
+| PT-42 | Grant for a tenant not in the adapter's `tenants`; `amount_minor = 0` in a test-key grant; key `revoked` in the adapter registry; key window ending between `iat` and `now` | refused / refused / refused / accepted (window at `iat`); nothing sent where refused | RX-1..RX-3 |
+| PT-41 | con2 malformed (`unresolved`, `ch_x`, path or query metacharacters) on every op | `grant_refused`, nothing sent; T1 denies `not_owner_or_unknown` without creating a state row | PA-19 |
 
 ## 12. Changes from Draft 1
 
@@ -485,3 +565,15 @@ positive control** (shop holds `rk_sim_…`, reaches simpay directly; the attack
 | `phantom_success` expectation confirmed from simpay source | PA-12 |
 | Budget values with exponents; test-profile values consistent | PA-13 |
 | Tests PT-29..PT-37; PT-13, PT-22 extended | PA-08 |
+
+## 13. Changes from Draft 2
+
+| Change | Source |
+|---|---|
+| Adapter leaves `data`; DB only over a Unix socket in `pg-adapter` (PostgreSQL and adapter only), server peer uid checked, `pg_hba` rejects the adapter role over TCP; `cap_drop: [ALL]` and `no-new-privileges` on every Nodkey container | PA-16 (ruling) |
+| Broker-owned `charge_refund_state` row is the per-charge lock with counters checked against `payment_effect` at commit; `orders` stays `SELECT`-only for the broker; operator updates lock the same row via a trigger; T1 reads `orders` after the lock | PA-15, PA-04 |
+| Schema `nodkey`, qualified names, empty `search_path` per role, no `CREATE`/`TEMP` | PA-17, PA-03 |
+| Age rule on `refund.create` only (`verify_retransmission`); lookups use `verify_binding` (signature and bindings, no age); ADR-0006 7b amended | PA-18 (ruling) |
+| con2 pattern on every op; query percent-encoding stated | PA-19 |
+| Exact grant-v1 step list for the adapter (4c, 4d at `iat`, 8b/8c, no 8e), configured `tenants` for 9c, adapter-side `amount_minor ≥ 1`, explicit `aud` check, normative order, authority refuses `unresolved` | grant crate RX-1..RX-6 |
+| T1 step 0 (pattern) and reordered steps; tests PT-38..PT-41; PT-31 extended | PA-15..PA-19 |

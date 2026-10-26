@@ -106,7 +106,7 @@ asserts that no ACCEPT ever follows a returned denial for the same grant.
 
 Source: [ADR-0012](0012-payments-adapter.md) rev. 1 and review PA-02/PA-05
 ([`docs/reviews/2026-10-25-payments-adapter-review.md`](../reviews/2026-10-25-payments-adapter-review.md));
-specified in [`docs/specs/payments-adapter-v1.md`](../specs/payments-adapter-v1.md) Draft 2 §3, §7.3.
+specified in [`docs/specs/payments-adapter-v1.md`](../specs/payments-adapter-v1.md) Draft 3 §3, §7.3 (clause 7b amended for Draft 3, PA-18).
 Status of this ADR unchanged (Accepted).
 
 Decision 7 is extended:
@@ -121,9 +121,11 @@ Decision 7 is extended:
 > key unknown after the first round.
 >
 > **7b. Adapter-side window.** Independently of the broker, the adapter verifies the grant's signature
-> and claims and refuses any request when `now − iat > R_max` on its own clock, where `R_max <` the
-> provider's documented retention − margin (start-up check). Resends after the provider may have pruned
-> the key are therefore refused even if the broker clock or configuration is wrong.
+> and claims on every operation, and refuses any **create (dispatch or resend)** when `now − iat > R_max`
+> on its own clock, where `R_max <` the provider's documented retention − margin (start-up check).
+> Resends after the provider may have pruned the key are therefore refused even if the broker clock or
+> configuration is wrong. Lookups (which cannot cause an effect) verify signature and bindings but are
+> not age-bounded, so late resolution and settlement tracking remain possible (review PA-18).
 >
 > A resend is a retransmission of an already-decided effect: it creates no effect row, consumes no
 > grant and takes no value from the workload. Its authority is the consumed grant recorded on a

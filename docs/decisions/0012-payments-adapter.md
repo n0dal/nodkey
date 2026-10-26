@@ -1,13 +1,13 @@
-# ADR-0012: Payments adapter for Demo P — grant-verifying adapter process, broker-owned effect state, reconciler (rev. 1)
+# ADR-0012: Payments adapter for Demo P — grant-verifying adapter process, broker-owned effect state, reconciler (rev. 2)
 
-- **Status:** Proposed (2026-10-25) — re-check found PA-01/03/04 partially fixed and new PA-15..PA-19; revision 2 pending.
-  [`2026-10-25-payments-adapter-review.md`](../reviews/2026-10-25-payments-adapter-review.md) (PA-01..PA-04)
-  are addressed in rev. 1 and payments-adapter-v1 Draft 2 (resolution table in the review). Rev. 1 has not
-  been re-reviewed; implementation must be independently reviewed.
+- **Status:** Accepted (2026-10-25, rev. 2) after orchestrator verification of the Draft 3 resolutions. Condition: lookup-only reconciliation is refused until `verify_binding` exists in nodkey-grant (spec §PA-18).
+  [`2026-10-25-payments-adapter-review.md`](../reviews/2026-10-25-payments-adapter-review.md) found
+  PA-01/03/04 partially fixed and new PA-15..PA-19 (PA-16 High). Rev. 2 and payments-adapter-v1 Draft 3
+  address them (resolution tables in the review); acceptance follows the orchestrator's verification.
 - **Date:** 2026-10-25
 - **Invariants:** SI-01, SI-02, SI-03, SI-05, SI-06, SI-09, SI-10, SI-11, SI-15, SI-16, SI-19
-- **Resolves:** OQ-10 (ADR-0006 Amendment 2)
-- **Specified in:** [`payments-adapter-v1.md`](../specs/payments-adapter-v1.md) Draft 2;
+- **Resolves (on acceptance):** OQ-10 (ADR-0006 Amendment 2)
+- **Specified in:** [`payments-adapter-v1.md`](../specs/payments-adapter-v1.md) Draft 3;
   [`effect-protocol-v2.md`](../specs/effect-protocol-v2.md) Draft 3.1 (`charge_id` in `payments.refund`)
 - **Builds on:** ADR-0002 §5, ADR-0006 (incl. Amendment 1), ADR-0010, ADR-0011, research note 06 Part 2
 
@@ -52,25 +52,34 @@ egress; the malicious provider; budgets; webhooks; and whether a reconciler rese
   `orders`. Cost: the adapter joins the internal `data` network and has a DB role.
 - Rejected: an operator-signed mapping file in the adapter (a second copy of `orders` to keep in sync);
   the authority reading `orders` (widens the authority's inputs, which today has no network).
+- **Adapter DB channel (PA-16):** a PostgreSQL Unix socket in a volume mounted only into PostgreSQL and
+  the adapter; the adapter is not on `data`; `pg_hba` rejects its role over TCP; every Nodkey container
+  runs `cap_drop: [ALL]`. Rejected: TLS `verify-full` + channel binding on the shared network (more PKI,
+  and the broker would still share the segment); a dedicated DB network (works, but one more network and
+  address plan for the same effect).
+- **Name resolution (PA-17):** schema `nodkey`, qualified names, empty `search_path`, no `CREATE`/`TEMP`
+  for any Nodkey role.
 
 ### Grant age instead of `exp` (PA-02)
 
 Write grants live ≤ 30 s, but resends are needed for hours, and the adapter cannot tell a resend from a
 first dispatch (the broker labels it). The adapter therefore ignores `exp` and enforces
-`now − iat ≤ R_max` (default 12 h) on its own clock, with the start-up rule `R_max < provider retention
+`now − iat ≤ R_max` (default 12 h) on its own clock for **creates only**; lookups verify signature and
+bindings without an age bound, since they cannot cause an effect (PA-18), with the start-up rule `R_max < provider retention
 − margin`. Every request for a grant is the same request with the same key, so within `R_max` the
 provider deduplicates, and after `R_max` the adapter refuses. Rejected: a stricter gate refusing creates
 later than `exp + grace` unless the provider already knows the key — it would send every lost original
 to an operator. **Accepted residual:** a compromised broker can execute an approved-but-never-executed
 grant once while it is younger than `R_max`; the user approved that exact refund.
-A new, separately typed `nodkey-grant` entry point (`verify_retransmission`) does this, so the
-broker's consuming path can never skip `exp`.
+Two new, separately typed `nodkey-grant` entry points (`verify_retransmission` for creates,
+`verify_binding` for lookups) do this, so the broker's consuming path can never skip `exp`.
 
 ### Broker-unwritable adapter inputs (PA-03)
 
 Registry and config: root-owned `0444` read-only mounts into the adapter only, checked at start (owner ∉
 {broker, adapter}, no group/other write, no symlinks). Operation declaration: compiled in. Orders view:
-DB role with `SELECT` on five `orders` columns; the broker role cannot write `orders` or alter roles.
+DB role with `SELECT` on five `nodkey.orders` columns, reached only over the `pg-adapter` Unix socket;
+the broker role cannot write or lock `orders`, create objects, or alter roles.
 Clock: host `CLOCK_REALTIME`, no container has `CAP_SYS_TIME`. Secrets (`K_idem`, simpay key):
 adapter-owned `0400`, never mounted into the broker. Revocation and consumption are not checked by the
 adapter (stated residual).
@@ -81,8 +90,11 @@ adapter (stated residual).
   onto `pending_effect`; T1 commits consumption, ordered trusted-fact checks under the charge row lock,
   budget, encumbrance and frozen values together; only a socket-level "not sent" fails directly; a
   provider refusal becomes `UNKNOWN` (simpay `deny_but_commit` shows why).
-- **Per-charge accounting (PA-04):** `UNIQUE(charge_id)` makes the order row the charge row; remaining
-  and the in-flight block are computed per charge.
+- **Per-charge accounting (PA-04, PA-15):** `UNIQUE(charge_id)`; a broker-owned `charge_refund_state`
+  row per charge is the T1 lock and holds `succeeded`/`inflight`/`unknown` counters, checked against
+  `payment_effect` at commit. `orders` stays `SELECT`-only for the broker; an operator update locks the
+  same state row via a trigger, so it serializes with T1. Rejected: granting the broker `UPDATE` on an
+  `orders` column to allow `FOR UPDATE` (re-opens PA-04).
 - **Reconciler (PA-05):** lookup first; same-key resend only within the broker deadline
   (`iat + R_max − 60 s`), only within `max_resends`, never after the provider reports the key unknown
   past the first round; after that lookups only, "not found" never concludes anything.
@@ -99,7 +111,8 @@ claim for refunds rests on that path and is not made if the shop application wri
 
 ### Egress and TLS
 
-Internal networks: `pay-egress` (adapter, simpay API only) and `data` (broker, adapter, PostgreSQL); IP
+Internal networks: `pay-egress` (adapter, simpay API only) and `data` (broker, PostgreSQL); adapter DB
+access over the `pg-adapter` socket only; IP
 literal, no DNS, no proxy, no redirects; TLS 1.3 to one pinned test CA; size and time limits; simpay key
 restricted to the adapter's address. TLS front: a rustls listener inside simpay. Rejected: a reverse
 proxy (would replace `commit_then_drop` and malformed responses, destroying the fault tests); stunnel
@@ -115,9 +128,10 @@ proxy (would replace `commit_then_drop` and malformed responses, destroying the 
 ## Decision
 
 Adopt B' with the charge bound in the grant, the age rule, the broker-unwritable input set, the
-broker-owned state machine with per-charge accounting, lookup-first reconciliation with leases, budgets,
-the simpay rustls listener, and webhooks out of scope, as specified in payments-adapter-v1 Draft 2 and
-effect-protocol-v2 Draft 3.1. Append Amendment 2 to ADR-0006 (done with this revision).
+broker-owned state machine with per-charge state rows, lookup-first reconciliation with leases, budgets,
+the Unix-socket adapter DB channel, schema pinning, the simpay rustls listener, and webhooks out of scope,
+as specified in payments-adapter-v1 Draft 3 and effect-protocol-v2 Draft 3.1. ADR-0006 Amendment 2
+(appended; clause 7b amended in rev. 2) takes effect when this ADR is accepted.
 
 ## Evidence
 
@@ -133,8 +147,8 @@ effect-protocol-v2 Draft 3.1. Append Amendment 2 to ADR-0006 (done with this rev
 - **Advantages:** broker compromise bounded by user approvals (one refund per signed grant, signed amount,
   currency and charge); provider parsing isolated from the broker's DB write credential and consumption;
   double refunds excluded under honest-provider semantics; closed-enum output to the workload.
-- **Drawbacks:** the adapter now parses grants and holds a read-only DB credential; two networks on the
-  adapter; conservative liveness (refusals and ambiguity block a charge); budgets never refund; one
+- **Drawbacks:** the adapter now parses grants and holds a read-only DB credential over a dedicated
+  socket; a counter table that must match the effect rows (checked at commit); conservative liveness (refusals and ambiguity block a charge); budgets never refund; one
   confirming GET per success; operator obligations for `orders` and `K_idem` rotation.
 - **Security:** residuals: approved-but-unexecuted grant once within `R_max`; broker-only controls
   (revocation, budget, remaining, status) lost under broker compromise; consistent provider lies; host
@@ -153,4 +167,5 @@ documented). Webhooks can be added later as GET triggers.
 | Rev. | Change |
 |---|---|
 | Draft (Proposed) | Option B; broker held `K_idem`; per-order accounting |
-| rev. 1 (Accepted) | Option B' per the orchestrator ruling and review PA-01..PA-14 |
+| rev. 1 | Option B' per the orchestrator ruling and review PA-01..PA-14 |
+| rev. 2 (Proposed) | Re-check PA-15..PA-19: Unix-socket DB channel and `cap_drop`, `charge_refund_state`, schema pinning, age rule on creates only, con2 pattern |

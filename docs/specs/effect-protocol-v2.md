@@ -217,7 +217,9 @@ A message whose `v` differs from the socket's version gets `unsupported_version`
   check, so the response stays identical, PC-10/T12). If no row exists the broker sets the reserved
   value `unresolved`, which matches no trusted row; render and execution then fail as for a foreign
   resource. The value is part of key 7 like any parameter, so the digest, the confirmation page and the
-  signed grant cover it.
+  signed grant cover it. The authority MUST refuse (`not_available`) to approve a `payments.refund` record whose
+  `charge_id` does not match `^ch_[A-Za-z0-9]{8,64}$`, so the reserved value `unresolved` is never signed
+  (grant crate issue RX-6).
 - On success it creates an immutable record (§3) and returns:
   - `pending_id`: 16 bytes from the broker CSPRNG, as canonical unpadded base64url (22 chars);
   - `confirm_url`: `https://<auth origin>/confirm/<pending_id>`, with nothing else in it;
@@ -826,5 +828,6 @@ Draft 3 records the verified implementation; none of the security properties cha
 | Change | Source |
 |---|---|
 | `payments.refund` gains `charge_id` (con2, exact, `text64`, broker-resolved from `orders` at propose; reserved value `unresolved`). It is absent from the workload's `params`, covered by the digest (key 7), displayed, and signed. Operation files (grant-v1 §6.1) and authority copies MUST add the parameter; `config.digest` changes accordingly. No other operation changes | payments-adapter review PA-01, orchestrator ruling |
-| New digest vector for a `payments.refund` record with `charge_id`, and one with `unresolved`, to be added to `tests/vectors/effect-v2/` (DG-11, DG-12; not yet generated) | PA-01 |
+| Digest vectors DG-11 (`payments.refund` with `charge_id`) and DG-12 (`unresolved`) in `tests/vectors/effect-v2/` (generated; Python cross-check agrees; the broker and authority vector tests still assert a count of 10) | PA-01 |
+| Authority refuses to approve a `payments.refund` record whose `charge_id` is not a charge id (`unresolved` is never signed) | grant crate RX-6 |
 | §5 refund execution rules are now specified in payments-adapter-v1 Draft 2 (per-charge accounting, `RESERVED` also blocks, budget, workload-facing reasons) | payments-adapter-v1 §7–§8 |

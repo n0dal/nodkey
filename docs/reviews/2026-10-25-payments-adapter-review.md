@@ -478,3 +478,20 @@ refuses / exact tables) and I found no new hole in it. It does not mean it is im
 ADR-0012 may be Accepted: no. PA-16 (High) undoes the PA-01 binding under broker compromise. PA-15
 makes the PA-04 lock unimplementable as written. Both need only spec text changes. Re-check after
 they land.
+
+## Resolution of the re-check (2026-10-25, ADR-0012 rev. 2 / payments-adapter-v1 Draft 3)
+
+Appended by the spec author; not a re-check. "Spec" = payments-adapter-v1 Draft 3. ADR-0012 is Proposed
+(rev. 2) pending the orchestrator's verification.
+
+| ID | Disposition | Where |
+|---|---|---|
+| PA-01 (partial) | **Fixed** with PA-16/PA-17: the adapter's order view is reached over a channel the broker cannot reach, under pinned names, so the broker cannot rewrite the §3.2 result | spec §1, §2, §3.2 |
+| PA-03 (partial) | **Fixed:** §2 adds transport and name-resolution rows for the orders view; the exact grant-v1 step list resolves RX-1..RX-6 | spec §2, §3.1 |
+| PA-04 (partial) | **Fixed** with PA-15: the broker never locks `orders`; per-charge state row | spec §7.1, §7.2 |
+| PA-15 | **Fixed (ruling).** Broker-owned `nodkey.charge_refund_state(charge_id PK, succeeded_minor, inflight_minor, unknown_minor)`, created with `INSERT … ON CONFLICT DO NOTHING` and locked `FOR UPDATE` in T1; counters checked against `payment_effect` by a deferred constraint trigger; `orders` stays `SELECT`-only for the broker; a `SECURITY DEFINER` trigger makes operator updates lock the same row; T1 reads `orders` after taking the lock | spec §7.1, §7.2, §7.4; PT-31, PT-39 |
+| PA-16 | **Fixed (ruling, preferred option).** Adapter removed from `data`; PostgreSQL Unix socket in volume `pg-adapter`, mounted only into PostgreSQL and the adapter; server peer uid checked; `pg_hba` `local … nodkey_payments_adapter scram-sha-256` and `host` reject lines for that role; `cap_drop: [ALL]` and `no-new-privileges` on every Nodkey container | spec §1, §2, §9; PT-31, PT-38 |
+| PA-17 | **Fixed (ruling).** Schema `nodkey` owned by `postgres`; every statement schema-qualified; `search_path = ''` for the broker, adapter and operator roles; `CREATE`/`TEMPORARY` revoked on the database and `CREATE` on `public` | spec §2; PT-31 |
+| PA-18 | **Fixed (ruling).** Age rule on `refund.create` only (`verify_retransmission`); lookups use a separately typed `verify_binding` (signature and bindings, no age); ADR-0006 7b amended. `verify_binding` is not yet in the crate: until it is, lookups are refused | spec §3.1, §4, §7.3; ADR-0006 Am. 2; PT-40 |
+| PA-19 | **Fixed.** con2 pattern on every op; T1 step 0; query strings serialized with `form_urlencoded` | spec §3.1, §5, §7.2; PT-41 |
+| RX-1..RX-6 (grant crate) | **Resolved normatively:** configured `tenants` for 9c (the crate's stricter reading), exact step list (4c; 4d at `iat`; 8b/8c; no 8e), adapter-side `amount_minor ≥ 1`, explicit `aud` check noted, normative order, authority refuses `unresolved` (effect-protocol-v2 Draft 3.1) | spec §3.1, §9; PT-42 |
