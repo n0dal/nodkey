@@ -1,4 +1,4 @@
-# Nodkey-Grant v1 test vectors (spec Draft 2)
+# Nodkey-Grant v1 test vectors (spec Draft 2; unchanged for Draft 3)
 
 > [!WARNING]
 > **TEST-ONLY KEYS.** Every signing key used here is a published RFC 8032 test key, and its secret seed
@@ -65,8 +65,11 @@ The generator checks that each seed yields the public key given in the RFC.
    - `peer_wid`: the identity of the submitting workload;
    - `revoked_before`: rows of the form `{"ten"}`, `{"ten","wid"}` or `{"ten","sub"}`, each plus `"before"`.
 3. Each step's `request` is the strictly parsed request: the operation name and arguments keyed by
-   parameter name. A few constraint vectors (CON-20..23) deliberately pass a missing argument or one of
-   the wrong type.
+   parameter name. Five constraint vectors deliberately carry requests outside the declaration, so a
+   broker with a strict request parser must run them through an unvalidated path:
+   - CON-20..23 pass a missing argument or one of the wrong type;
+   - CON-24 passes `p0` of 257 bytes (`text256` allows 256) and omits `p1`..`p7`. Its grant fails
+     earlier anyway, at step 7 (spec D2-1).
 4. The replay store persists across the steps of one vector only.
 
 **Expected results for a step.**

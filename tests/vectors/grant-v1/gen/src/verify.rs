@@ -366,6 +366,10 @@ pub fn load_operations(text: &str) -> Result<Vec<OpDecl>, &'static str> {
             }
             params.push(Param { name: name.to_owned(), place, key, class, ty });
         }
+        // D2-3: a write operation must bind at least one parameter (res, or exact/bounded con).
+        if kind == "write" && !params.iter().any(|p| p.key.is_some()) {
+            return Err(BAD);
+        }
         out.push(OpDecl { op: op.to_owned(), kind: kind.to_owned(), opv, confirm, params });
     }
     Ok(out)
@@ -834,6 +838,16 @@ mod tests {
         assert!(decode_transport("AA==").is_err());
         assert!(decode_transport("+/AA").is_err());
         assert_eq!(decode_transport("").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn write_op_must_bind_a_parameter() {
+        let free_only = r#"{"format":"nodkey.operations.v1","operations":[{"op":"t.x","kind":"write","opv":1,
+            "requires_confirmation":false,"params":[{"name":"memo","in":"con","key":null,"class":"free",
+            "type":"text64","destination":false,"justification":"j"}]}]}"#;
+        assert_eq!(load_operations(free_only).err(), Some("ops_declaration_invalid"));
+        let bound = free_only.replace(r#"[{"name":"memo""#, r#"[{"name":"a","in":"res","key":0,"class":"exact","type":"uint","destination":false},{"name":"memo""#);
+        assert!(load_operations(&bound).is_ok());
     }
 
     #[test]

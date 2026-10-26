@@ -1,7 +1,9 @@
 # Nodkey-Grant v1 — format and verification specification
 
-- **Status:** **Draft 2** (2026-10-25). Not yet re-reviewed. Supersedes Draft 1 (changes in
-  [§15](#15-changes-from-draft-1)). Implements [ADR-0004](../decisions/0004-grant-format.md) (Proposed) as
+- **Status:** **Draft 3** (2026-10-25). Not yet re-reviewed. Supersedes Draft 2 (changes in
+  [§16](#16-changes-from-draft-2); Draft 1 → 2 in [§15](#15-changes-from-draft-1)). Draft 3 settles the
+  independent implementer's issues D2-1..D2-4 (`crates/nodkey-grant/SPEC_ISSUES.md`). It does not
+  change any vector result. Implements [ADR-0004](../decisions/0004-grant-format.md) (Proposed) as
   changed by its Amendments 1 and 2 ([§0](#0-adr-0004-amendments)), with the binding rules of
   [ADR-0003](../decisions/0003-trusted-user-context-and-grant-issuance.md) rev. 3 (Accepted, Phase 3
   implementation profile) and the replay rules of [ADR-0006](../decisions/0006-replay-and-effect-state.md)
@@ -33,6 +35,7 @@ RFC 8174 when, and only when, they appear in all capitals.
 13. [Versioning](#13-versioning)
 14. [References](#14-references)
 15. [Changes from Draft 1](#15-changes-from-draft-1)
+16. [Changes from Draft 2](#16-changes-from-draft-2)
 
 ## 0. ADR-0004 amendments
 
@@ -85,7 +88,9 @@ On every text channel (HTTP header `Nodkey-Grant`, the broker's JSON request mem
 **base64url encoding without padding** (RFC 4648 §5) of the grant bytes defined in §3.
 
 - Alphabet `A–Z a–z 0–9 - _` only: no `=`, no whitespace or line breaks, no `+` or `/`, no non-ASCII.
-- Text length MUST be ≤ **2731** characters (the encoding of 2048 bytes); longer → `grant_too_large`,
+- Text length MUST be ≤ **2731 bytes** (the encoding of 2048 bytes). Valid text is ASCII, so this is
+  also 2731 characters; the limit is applied to the byte length of the received text, before any
+  character decoding (D2-2). Longer text → `grant_too_large`,
   checked **before** decoding.
 - Canonical form: a text length ≡ 1 (mod 4) is invalid, and the unused low bits of the final character
   MUST be zero (2 unused bits when length ≡ 3 mod 4, 4 when ≡ 2 mod 4).
@@ -372,8 +377,14 @@ an unclassified parameter; a `res` parameter that is not `exact`; a `bounded` pa
 `uint`; a parameter with `destination: true` whose class is not `exact`; a `free` parameter with a key
 or without a justification; duplicate operation names, parameter names, or placement/key pairs; more
 than one `opv`; `requires_confirmation` on a read operation; a read operation with `res`/`con`
-parameters; a write operation with `owner_scoped` parameters; an unknown type. Every operation requires a
-grant: there is no grantless class in v1 [D-8]. Vectors OPS-01..OPS-19.
+parameters; a write operation with `owner_scoped` parameters; an unknown type; **a write operation that
+binds no parameter**, i.e. one that has no `res` parameter and no `exact` or `bounded` `con` parameter
+(D2-3; review GC-05). A grant for such an operation would bind only the operation name. Every
+operation requires a grant: there is no grantless class in v1 [D-8]. Vectors OPS-01..OPS-19.
+
+The binds-no-parameter refusal has no conformance vector yet. The vector set is unchanged since Draft 2
+(§12.1), and the independent implementation enforces the rule in its own tests. An `OPS-20` vector is
+to be added together with the next vector revision.
 
 ## 7. Verification procedure
 
@@ -406,7 +417,7 @@ checked (values are ≤ 2^53 − 1, so `exp + skew` and `now + skew` cannot over
 | Step | Check | Error code |
 |---|---|---|
 | 0 | The operation requires a grant (all v1 operations do) and none was supplied (member/header absent) | `grant_missing` |
-| 1a | Transport text longer than 2731 characters | `grant_too_large` |
+| 1a | Transport text longer than 2731 bytes | `grant_too_large` |
 | 1b | Transport text is not canonical unpadded base64url (§2) | `grant_encoding_invalid` |
 | 1c | `len(G) > 2048` | `grant_too_large` |
 | 2 | **Structure.** `G[0] == 0xd2`; the remaining bytes satisfy §4 (envelope rules); the item is an array of exactly 4 elements typed bstr, map, bstr, bstr; the signature bstr is 64 bytes | `grant_malformed` |
@@ -449,10 +460,21 @@ After step 9 the broker opens the **effect transaction** and runs:
 | W12b | for each `res` entry: the request has that parameter with an identical value (§5.3) | `grant_resource_mismatch` |
 | W12c | for each `con` entry in ascending key order: exact → the request value is identical, else `grant_constraint_mismatch`; bounded → the request value is a uint, else `grant_constraint_mismatch`, and ≤ ceiling, else `grant_bound_exceeded` | `grant_constraint_mismatch` / `grant_bound_exceeded` |
 | W13 | **Revocation**: for each `revoked_before` row matching `(ten)`, `(ten, wid)` or `(ten, sub)`, deny if `iat < revoked_before` | `grant_revoked` |
-| W14 | Policy, state, and budget preconditions (ADR-0005/0006); execute the effect; set `outcome = ACCEPT`; commit | (outside this spec) |
+| W14 | Policy, state, and budget preconditions (ADR-0005/0006); execute the effect; set `outcome = ACCEPT`; re-check the deadline (below); commit | (outside this spec) |
 
 A missing request parameter or a request value of the wrong type cannot normally reach W12 (the request
 parser rejects it), but if it does, W12b/W12c give the codes above (vectors CON-20..23).
+
+**Deadline at commit (D2-4).** The time checks of steps 4d, 8d and 8e are made when the grant is
+verified. A transaction that waits on locks can therefore reach its commit later. Immediately before
+committing an **accepted** effect, the broker MUST re-read its clock. If `now ≥ exp + skew`, it MUST roll
+back the whole transaction, so nothing is consumed and no decision is recorded. The answer to the
+caller is then `unavailable`, and the grant can no longer verify. A denial MAY commit after the
+deadline, because recording it only narrows authority.
+
+Alternatively, a broker MAY bound the transaction time so that commit provably happens before
+`exp + skew`. Verification libraries (such as `nodkey-grant`) cannot enforce this rule: it is an
+obligation of the broker's transaction code.
 
 **Recording rule (GS-02; ADR-0006 Amendment 1).** On any denial at W10 (`grant_replayed` excepted), W11,
 W12, W13 or a W14 precondition, the broker MUST `ROLLBACK TO SAVEPOINT decision`, set the row's
@@ -675,7 +697,9 @@ Further considerations:
 
 [`tests/vectors/grant-v1/`](../../tests/vectors/grant-v1/README.md) contains 280 grant vectors (293
 checked steps, including multi-step replay and multi-use sequences), 26 key-registry vectors, 19
-operation-declaration vectors, 11 transport vectors, and 3 request-hash examples. They are generated
+operation-declaration vectors, 11 transport vectors, and 3 request-hash examples. The set is
+**unchanged since Draft 2** (the manifest still says `"spec_draft": 2`): no Draft 3 change alters any
+expected result. They are generated
 deterministically from TEST-ONLY RFC 8032 keys by a committed generator, checked by a reference verifier
 that implements this Draft, and cross-checked for signatures with OpenSSL. Expected results are
 `ACCEPT`, `STORED_OUTCOME:<ACCEPT|DENIED>`, `LOAD_OK`, `DECODED`, or an exact error code from §7, §8.3 or
@@ -740,3 +764,13 @@ step 7b).
 | README: `jti` derivation described correctly | SPEC_ISSUES SI-6 |
 | New key F (not yet valid) and key-window boundary vectors; read-grant missing/extra keys; ID-length boundaries; `rop` limits, ordering and duplicates; SIG-39 (altered `rop`), SIG-40/41 (small-order and non-canonical `R`); REV-09 (future-`iat` residual) | review coverage gaps 1–17 |
 | Step numbering: write path W10–W14, read path R11–R14 | consumption-first ordering |
+
+## 16. Changes from Draft 2
+
+| Change | Source |
+|---|---|
+| §2 / step 1a: the 2731 limit is in bytes of the received text | D2-2 |
+| §6.3: a write operation that binds no `res` or `con` parameter is refused (`ops_declaration_invalid`); conformance vector deferred | D2-3, review GC-05 |
+| §7.3: deadline re-checked before committing an accepted effect; on expiry the transaction rolls back (`unavailable`, nothing consumed) | D2-4, review GC-03 |
+| §12.1 / vectors README: CON-24 listed with CON-20..23 as a vector whose request lies outside the declaration (its grant fails earlier, at step 7); vector set otherwise unchanged | D2-1 |
+
