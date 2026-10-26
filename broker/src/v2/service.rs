@@ -149,24 +149,27 @@ pub enum Execution {
     /// stays `APPROVED` until it expires.
     Unverified(&'static str),
     Succeeded,
+    /// External effect decided: consumed `ACCEPT`, `RESERVED` row, record `EXECUTING`. The
+    /// dispatcher (T2) follows.
+    Reserved,
     /// A recorded denial: `FAILED/denied`, `consumed_grant.outcome = DENIED`.
     Denied(String),
 }
 
-fn unavailable(d: impl std::fmt::Display) -> Fail {
+pub(crate) fn unavailable(d: impl std::fmt::Display) -> Fail {
     Fail::new(Code::Unavailable, d.to_string())
 }
 
-fn dbf(what: &'static str) -> impl Fn(tokio_postgres::Error) -> Fail {
+pub(crate) fn dbf(what: &'static str) -> impl Fn(tokio_postgres::Error) -> Fail {
     move |e| Fail::new(Code::Unavailable, format!("{what}: {e}"))
 }
 
-fn to_i64(n: u64) -> i64 {
+pub(crate) fn to_i64(n: u64) -> i64 {
     // Every stored number is ≤ 2^53 − 1 (validated), so this never saturates in practice.
     i64::try_from(n).unwrap_or(i64::MAX)
 }
 
-fn to_u64(n: i64) -> Result<u64, Fail> {
+pub(crate) fn to_u64(n: i64) -> Result<u64, Fail> {
     u64::try_from(n).map_err(|_| unavailable("negative stored value"))
 }
 
@@ -251,13 +254,13 @@ fn record_from_row(r: &Row) -> Result<Record, Fail> {
     })
 }
 
-async fn select_record(
+pub(crate) async fn select_record(
     c: &impl GenericClient,
     pid: &[u8; 16],
     for_update: bool,
 ) -> Result<Option<Record>, Fail> {
     let sql = format!(
-        "SELECT {RECORD_COLS} FROM pending_effect WHERE pending_id = $1{}",
+        "SELECT {RECORD_COLS} FROM public.pending_effect WHERE pending_id = $1{}",
         if for_update { " FOR UPDATE" } else { "" }
     );
     let row = c
@@ -270,7 +273,7 @@ async fn select_record(
 async fn revocations(c: &impl GenericClient, ten: &str) -> Result<Vec<RevokedBefore>, Fail> {
     let rows = c
         .query(
-            "SELECT wid, sub, before FROM revoked_before WHERE ten = $1",
+            "SELECT wid, sub, before FROM public.revoked_before WHERE ten = $1",
             &[&ten],
         )
         .await
@@ -298,7 +301,7 @@ async fn revocations(c: &impl GenericClient, ten: &str) -> Result<Vec<RevokedBef
 }
 
 /// Final-state CAS from `from` with an outcome class and a fresh random receipt id.
-async fn finalize(
+pub(crate) async fn finalize(
     c: &impl GenericClient,
     pid: &[u8; 16],
     from: State,
@@ -309,7 +312,7 @@ async fn finalize(
 ) -> Result<bool, Fail> {
     let receipt = random16().map_err(unavailable)?;
     let sql = format!(
-        "UPDATE pending_effect SET state = $3, state_changed_at = $4, outcome_class = $5, \
+        "UPDATE public.pending_effect SET state = $3, state_changed_at = $4, outcome_class = $5, \
          receipt_id = $6 WHERE pending_id = $1 AND state = $2{extra_cond}"
     );
     let now_i = to_i64(now);
@@ -378,14 +381,14 @@ fn is_grant_mismatch(e: GrantError) -> bool {
     )
 }
 
-fn text_param<'a>(p: &'a Params, k: &str) -> Result<&'a str, Fail> {
+pub(crate) fn text_param<'a>(p: &'a Params, k: &str) -> Result<&'a str, Fail> {
     match p.get(k) {
         Some(ParamValue::Text(s)) => Ok(s),
         _ => Err(unavailable(format!("param {k}"))),
     }
 }
 
-fn uint_param(p: &Params, k: &str) -> Result<u64, Fail> {
+pub(crate) fn uint_param(p: &Params, k: &str) -> Result<u64, Fail> {
     match p.get(k) {
         Some(ParamValue::Uint(n)) => Ok(*n),
         _ => Err(unavailable(format!("param {k}"))),
@@ -412,14 +415,14 @@ async fn transfer_facts(
     lock: bool,
 ) -> Result<TransferFacts, Fail> {
     let sql = if lock {
-        "SELECT id, balance_cents FROM accounts WHERE id = $1 OR id = $2 ORDER BY id FOR UPDATE"
+        "SELECT id, balance_cents FROM public.accounts WHERE id = $1 OR id = $2 ORDER BY id FOR UPDATE"
     } else {
-        "SELECT id, balance_cents FROM accounts WHERE id = $1 OR id = $2"
+        "SELECT id, balance_cents FROM public.accounts WHERE id = $1 OR id = $2"
     };
     let accts = c.query(sql, &[&from, &to]).await.map_err(dbf("accounts"))?;
     let owners = c
         .query(
-            "SELECT account_id, ten, owner_sub FROM account_owner WHERE account_id = $1 OR account_id = $2",
+            "SELECT account_id, ten, owner_sub FROM public.account_owner WHERE account_id = $1 OR account_id = $2",
             &[&from, &to],
         )
         .await
@@ -474,7 +477,9 @@ pub struct Broker {
     /// workload flood cannot starve approvals or approved effects (BR-01).
     pub control_db: Pool,
     config_digest: [u8; 32],
-    clock: Clock,
+    pub(crate) clock: Clock,
+    /// Demo P payments side (payments-adapter-v1); `None` when not configured.
+    pub payments: Option<super::payments::PaymentsRuntime>,
     high_water: AtomicU64,
     proposals: RateLimiter,
     statuses: RateLimiter,
@@ -515,7 +520,11 @@ impl Broker {
             RateLimiter::new(cfg.limits.status_per_min, cfg.limits.status_per_min, wids());
         let reads = RateLimiter::new(cfg.limits.reads_per_min, cfg.limits.reads_per_min, wids());
         let workload_gate = ConcurrencyGate::new(cfg.limits.db_conns_per_wid, wids());
+        let payments = cfg.payments.clone().map(|p| {
+            super::payments::PaymentsRuntime::new(p).expect("OS CSPRNG for the lease owner id")
+        });
         Broker {
+            payments,
             cfg,
             registry,
             ops,
@@ -553,7 +562,7 @@ impl Broker {
     }
 
     /// Control-lane connection (sockets G, A, execution, recovery, start-up).
-    async fn conn(&self) -> Result<Conn<'_>, Fail> {
+    pub(crate) async fn conn(&self) -> Result<Conn<'_>, Fail> {
         self.control_db.get().await.map_err(unavailable)
     }
 
@@ -573,7 +582,7 @@ impl Broker {
 
     /// Runs one database operation under the deadline; discards the connection on any
     /// infrastructure failure so the server rolls back whatever was open.
-    async fn run<T>(
+    pub(crate) async fn run<T>(
         mut conn: Conn<'_>,
         fut: impl AsyncFnOnce(&mut Client) -> Result<T, Fail>,
     ) -> Result<T, Fail> {
@@ -604,14 +613,14 @@ impl Broker {
         let mark = Self::run(conn, async move |c: &mut Client| {
             let bid = bid2;
             c.execute(
-                "INSERT INTO broker_claim (singleton, protocol, broker_id) VALUES (true, 2, $1) \
+                "INSERT INTO public.broker_claim (singleton, protocol, broker_id) VALUES (true, 2, $1) \
                  ON CONFLICT (singleton) DO NOTHING",
                 &[&bid],
             )
             .await
             .map_err(dbf("claim"))?;
             let r = c
-                .query_one("SELECT protocol, broker_id FROM broker_claim", &[])
+                .query_one("SELECT protocol, broker_id FROM public.broker_claim", &[])
                 .await
                 .map_err(dbf("claim read"))?;
             let p: i32 = r.try_get(0).map_err(unavailable)?;
@@ -623,13 +632,13 @@ impl Broker {
                 ));
             }
             c.execute(
-                "INSERT INTO broker_clock (broker_id, mark) VALUES ($1, $2) ON CONFLICT (broker_id) DO NOTHING",
+                "INSERT INTO public.broker_clock (broker_id, mark) VALUES ($1, $2) ON CONFLICT (broker_id) DO NOTHING",
                 &[&bid, &to_i64(now)],
             )
             .await
             .map_err(dbf("clock init"))?;
             let r = c
-                .query_one("SELECT mark FROM broker_clock WHERE broker_id = $1", &[&bid])
+                .query_one("SELECT mark FROM public.broker_clock WHERE broker_id = $1", &[&bid])
                 .await
                 .map_err(dbf("clock read"))?;
             to_u64(r.try_get(0).map_err(unavailable)?)
@@ -646,7 +655,7 @@ impl Broker {
         let conn = self.conn().await.map_err(|f| f.detail)?;
         Self::run(conn, async |c: &mut Client| {
             c.execute(
-                "UPDATE broker_clock SET mark = GREATEST(mark, $2) WHERE broker_id = $1",
+                "UPDATE public.broker_clock SET mark = GREATEST(mark, $2) WHERE broker_id = $1",
                 &[&bid, &to_i64(now)],
             )
             .await
@@ -658,6 +667,27 @@ impl Broker {
     }
 
     // ------------------------------------------------------------------ socket W
+
+    /// Resolves `charge_id` for `payments.refund` by `(ten, order_id)` only, without any ownership
+    /// check, so the propose response is identical for every order (Draft 3.1 §2.3, T12).
+    async fn resolve_charge(&self, wid: &str, ten: &str, order_id: u64) -> Result<String, Fail> {
+        let (_slot, conn) = self.wl_conn(wid).await?;
+        let ten = ten.to_owned();
+        Self::run(conn, async move |c: &mut Client| {
+            let row = c
+                .query_opt(
+                    "SELECT charge_id FROM nodkey.orders WHERE ten = $1 AND order_id = $2",
+                    &[&ten, &to_i64(order_id)],
+                )
+                .await
+                .map_err(dbf("resolve charge"))?;
+            Ok(match row {
+                Some(r) => r.try_get::<_, String>(0).map_err(unavailable)?,
+                None => decls::UNRESOLVED.to_owned(),
+            })
+        })
+        .await
+    }
 
     /// `effect.propose` (§2.3): syntax, types and registration only; never trusted state.
     pub async fn propose(
@@ -671,10 +701,10 @@ impl Broker {
         }
         check_keys(args, &["op", "params", "approver"], &[]).map_err(|f| inv(&f.detail))?;
         let op = args["op"].as_str().ok_or_else(|| inv("op type"))?;
-        if decls::executor(op) == Some(Executor::NotImplemented) {
+        if decls::executor_of(&self.ops, op) == Some(Executor::NotImplemented) {
             return Err(Fail::new(
                 Code::OperationNotPermitted,
-                "not_implemented_phase3",
+                "not_implemented_legacy_declaration",
             ));
         }
         let decl = self
@@ -696,15 +726,40 @@ impl Broker {
             .iter()
             .map(|p| (p.name.clone(), param_type_name(p.ty).to_owned()))
             .collect();
-        let params = typed_params(raw_params, &param_types).map_err(|e| inv(&e))?;
-        // Grammar check through the same parser the grant verifier uses.
-        self.ops
-            .parse_request(op, params.clone())
-            .map_err(|e| inv(&e.to_string()))?;
+        // Broker-resolved parameters (Draft 3.1 §2.3) must be absent from the workload's params.
+        let resolved = decls::resolved_by_broker(op);
+        let wl_types: BTreeMap<String, String> = param_types
+            .iter()
+            .filter(|(k, _)| !resolved.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let mut params = typed_params(raw_params, &wl_types).map_err(|e| inv(&e))?;
         let (ten, sub) = subject_arg(&args["approver"]).map_err(|f| inv(&f.detail))?;
         if !is_id(&ten, 128) || !is_id(&sub, 256) {
             return Err(inv("approver is not an ID"));
         }
+        let exec = decls::executor_of(&self.ops, op);
+        if exec == Some(Executor::PaymentsRefund) {
+            // Syntax first, so that a malformed proposal never touches the database.
+            let currency = text_param(&params, "currency")?.to_owned();
+            if uint_param(&params, "amount_minor")? < 1
+                || decls::iso4217_exponent(&currency).is_none()
+            {
+                return Err(inv(
+                    "amount_minor < 1 or currency not in the ISO 4217 table",
+                ));
+            }
+            let order_id = uint_param(&params, "order_id")?;
+            let charge = self.resolve_charge(&wl.wid, &ten, order_id).await?;
+            params.insert(
+                decls::CHARGE_ID.to_owned(),
+                nodkey_grant::ParamValue::Text(charge),
+            );
+        }
+        // Grammar check through the same parser the grant verifier uses.
+        self.ops
+            .parse_request(op, params.clone())
+            .map_err(|e| inv(&e.to_string()))?;
         match &wl.approver_source {
             ApproverSource::Enrolled { ten: et, sub: es } => {
                 if *et != ten || *es != sub {
@@ -720,7 +775,15 @@ impl Broker {
                 }
             }
         }
-        let display = match decls::executor(op) {
+        let display = match exec {
+            Some(Executor::PaymentsRefund) => {
+                let currency = text_param(&params, "currency")?.to_owned();
+                let exp = decls::iso4217_exponent(&currency).ok_or_else(|| inv("currency"))?;
+                BTreeMap::from([
+                    ("amount_exponent".to_owned(), DisplayValue::Uint(exp)),
+                    ("currency".to_owned(), DisplayValue::Text(currency)),
+                ])
+            }
             Some(Executor::LedgerTransfer) => {
                 if text_param(&params, "from")? == text_param(&params, "to")? {
                     return Err(inv("from == to"));
@@ -769,7 +832,7 @@ impl Broker {
             let r = tx
                 .query_one(
                     "SELECT count(*), count(*) FILTER (WHERE ten = $2 AND approver_sub = $3) \
-                     FROM pending_effect WHERE wid = $1 AND state = 'PENDING' AND expires_at > $4",
+                     FROM public.pending_effect WHERE wid = $1 AND state = 'PENDING' AND expires_at > $4",
                     &[&f2.wid, &f2.ten, &f2.approver_sub, &to_i64(now)],
                 )
                 .await
@@ -780,7 +843,7 @@ impl Broker {
                 return Err(Fail::new(Code::LimitExceeded, "outstanding pending records"));
             }
             tx.execute(
-                "INSERT INTO pending_effect (pending_id, broker_id, wid, ten, approver_sub, op, opv, \
+                "INSERT INTO public.pending_effect (pending_id, broker_id, wid, ten, approver_sub, op, opv, \
                  params, param_types, display, created_at, expires_at, digest, state, state_changed_at) \
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'PENDING',$11)",
                 &[
@@ -834,7 +897,7 @@ impl Broker {
         let (_slot, conn) = self.wl_conn(&wl.wid).await?;
         let rec = Self::run(conn, async move |c: &mut Client| {
             let sql = format!(
-                "SELECT {RECORD_COLS} FROM pending_effect WHERE pending_id = $1 AND wid = $2"
+                "SELECT {RECORD_COLS} FROM public.pending_effect WHERE pending_id = $1 AND wid = $2"
             );
             let row = c
                 .query_opt(&sql, &[&pid.as_slice(), &wid])
@@ -843,25 +906,40 @@ impl Broker {
             let Some(row) = row.filter(|_| canonical) else {
                 return Ok(None);
             };
-            let rec = record_from_row(&row)?;
-            if rec.state.is_final() {
-                return Ok(Some(rec));
+            let mut rec = record_from_row(&row)?;
+            if !rec.state.is_final() {
+                lazy_expire(c, &pid, now, skew).await?;
+                match select_record(c, &pid, false).await? {
+                    Some(r) => rec = r,
+                    None => return Ok(None),
+                }
             }
-            lazy_expire(c, &pid, now, skew).await?;
-            select_record(c, &pid, false).await
+            // payments-adapter-v1 §8: refunds carry the workload-facing reason enum.
+            let reason = if rec.fields.op == decls::PAYMENTS_REFUND && rec.state.is_final() {
+                Some(super::payments::status_reason(&*c, &pid).await?)
+            } else if rec.fields.op == decls::PAYMENTS_REFUND {
+                Some(None)
+            } else {
+                None
+            };
+            Ok(Some((rec, reason)))
         })
         .await?;
-        let Some(rec) = rec else {
+        let Some((rec, reason)) = rec else {
             return Err(Fail::new(
                 Code::NotFound,
                 "no such record for this workload",
             ));
         };
+        let mut outcome = rec.outcome_json();
+        if let (Some(reason), Value::Object(o)) = (reason, &mut outcome) {
+            o.insert("reason".into(), json!(reason));
+        }
         Ok(json!({
             "pending_id": encode_id(&rec.fields.pending_id),
             "state": rec.state.as_str(),
             "expires_at": rec.fields.expires_at,
-            "outcome": rec.outcome_json(),
+            "outcome": outcome,
         }))
     }
 
@@ -877,21 +955,27 @@ impl Broker {
         if !self.reads.try_take(&wl.wid, (self.clock)()) {
             return Err(Fail::new(Code::LimitExceeded, "read rate"));
         }
-        let Some(exec) = decls::executor(op).filter(|_| self.op_names.iter().any(|n| n == op))
+        let Some(exec) =
+            decls::executor_of(&self.ops, op).filter(|_| self.op_names.iter().any(|n| n == op))
         else {
             return Err(Fail::new(Code::UnknownOperation, "undeclared op"));
         };
         if exec == Executor::NotImplemented {
             return Err(Fail::new(
                 Code::OperationNotPermitted,
-                "not_implemented_phase3",
+                "not_implemented_legacy_declaration",
             ));
         }
         if !wl.allowed_ops.contains(op) {
             return Err(Fail::new(Code::OperationNotPermitted, "op not allowed"));
         }
         let decl = self.ops.get(op).ok_or_else(|| unavailable("decl"))?;
-        if decl.kind != OpKind::Read || exec != Executor::LedgerGetBalance {
+        if decl.kind != OpKind::Read
+            || !matches!(
+                exec,
+                Executor::LedgerGetBalance | Executor::PaymentsGetOrder
+            )
+        {
             return Err(Fail::new(Code::UnknownOperation, "not a read method"));
         }
         let names: Vec<&str> = decl.params.iter().map(|p| p.name.as_str()).collect();
@@ -930,6 +1014,28 @@ impl Broker {
             Ok(Verified::Read(r)) => r,
         };
         let ten = rg.identity().ten.clone();
+        if exec == Executor::PaymentsGetOrder {
+            let order_id = uint_param(request.params(), "order_id")?;
+            let (_slot, conn) = self.wl_conn(&wl.wid).await?;
+            let r = Self::run(conn, async move |c: &mut Client| {
+                let tx = c
+                    .build_transaction()
+                    .read_only(true)
+                    .start()
+                    .await
+                    .map_err(dbf("begin read only"))?;
+                let rows = revocations(&tx, &ten).await?;
+                let a = match rg.decide(&rows) {
+                    Ok(a) => a,
+                    Err(e) => return Ok(Err(e.as_str().to_owned())),
+                };
+                let v = super::payments::get_order(&tx, order_id, a.tenant(), a.subject()).await?;
+                tx.commit().await.map_err(dbf("commit read"))?;
+                Ok(v.ok_or_else(|| "resource not found for subject".to_owned()))
+            })
+            .await?;
+            return r.map_err(denied);
+        }
         let account = text_param(request.params(), "account")?.to_owned();
         let (_slot, conn) = self.wl_conn(&wl.wid).await?;
         let r = Self::run(conn, async move |c: &mut Client| {
@@ -947,7 +1053,7 @@ impl Broker {
             // R14: filtered by the grant's tenant and subject on trusted rows.
             let row = tx
                 .query_opt(
-                    "SELECT a.balance_cents FROM accounts a JOIN account_owner o ON o.account_id = a.id \
+                    "SELECT a.balance_cents FROM public.accounts a JOIN public.account_owner o ON o.account_id = a.id \
                      WHERE a.id = $1 AND o.ten = $2 AND o.owner_sub = $3",
                     &[&account, &a.tenant(), &a.subject()],
                 )
@@ -999,6 +1105,23 @@ impl Broker {
             let Some(wl) = me.cfg.workload(&rec.fields.wid) else {
                 return Ok(None);
             };
+            if decls::executor_of(&me.ops, &rec.fields.op) == Some(Executor::PaymentsRefund) {
+                let Some(pc) = me.cfg.payments.as_ref() else {
+                    return Ok(None);
+                };
+                let Some(facts) = super::payments::render_facts(&tx, &rec, pc, now).await? else {
+                    return Ok(None);
+                };
+                let ctx = me.render_context(&tx, &rec, wl, now).await?;
+                tx.commit().await.map_err(dbf("commit"))?;
+                return Ok(Some(json!({
+                    "record": rec.fields.to_json(),
+                    "digest": hex(&rec.digest),
+                    "state": rec.state.as_str(),
+                    "facts": facts,
+                    "context": ctx,
+                })));
+            }
             if rec.fields.op != LEDGER_TRANSFER {
                 return Ok(None);
             }
@@ -1043,7 +1166,7 @@ impl Broker {
         let pid = f.pending_id.as_slice();
         let pending: i64 = c
             .query_one(
-                "SELECT count(*) FROM pending_effect WHERE wid = $1 AND ten = $2 AND approver_sub = $3 \
+                "SELECT count(*) FROM public.pending_effect WHERE wid = $1 AND ten = $2 AND approver_sub = $3 \
                  AND state = 'PENDING' AND expires_at > $4",
                 &[&f.wid, &f.ten, &f.approver_sub, &to_i64(now)],
             )
@@ -1053,7 +1176,7 @@ impl Broker {
             .map_err(unavailable)?;
         let recent = c
             .query(
-                "SELECT pending_id, state, created_at, params FROM pending_effect WHERE wid = $1 AND ten = $2 \
+                "SELECT pending_id, state, created_at, params FROM public.pending_effect WHERE wid = $1 AND ten = $2 \
                  AND approver_sub = $3 AND op = $4 AND params = $5 AND created_at >= $6 AND pending_id <> $7 \
                  ORDER BY created_at DESC LIMIT $8",
                 &[
@@ -1069,13 +1192,18 @@ impl Broker {
             )
             .await
             .map_err(dbf("recent"))?;
-        let from = text_param(&f.params, "from")?;
+        // The resource parameter: `from` for transfers, `order_id` for refunds.
+        let (key, resource) = if f.op == LEDGER_TRANSFER {
+            ("from", text_param(&f.params, "from")?.to_owned())
+        } else {
+            ("order_id", uint_param(&f.params, "order_id")?.to_string())
+        };
         let open = c
             .query(
-                "SELECT pending_id, state, created_at, params FROM pending_effect WHERE op = $1 AND ten = $2 \
-                 AND state IN ('PENDING','APPROVED','EXECUTING') AND (params::jsonb ->> 'from') = $3 \
+                "SELECT pending_id, state, created_at, params FROM public.pending_effect WHERE op = $1 AND ten = $2 \
+                 AND state IN ('PENDING','APPROVED','EXECUTING') AND (params::jsonb ->> $6) = $3 \
                  AND pending_id <> $4 ORDER BY created_at DESC LIMIT $5",
-                &[&f.op, &f.ten, &from, &pid, &CONTEXT_LIST_MAX],
+                &[&f.op, &f.ten, &resource, &pid, &CONTEXT_LIST_MAX, &key],
             )
             .await
             .map_err(dbf("open on resource"))?;
@@ -1284,21 +1412,33 @@ impl Broker {
             }
             // Approval checks of §5 under lock.
             let p = &rec.fields.params;
-            let facts = transfer_facts(
-                &tx,
-                &rec.fields.ten,
-                &rec.fields.approver_sub,
-                text_param(p, "from")?,
-                text_param(p, "to")?,
-                true,
-            )
-            .await?;
-            if !facts.from_owned {
-                return Ok(Delivery::Rejected("approval check: from not owned by approver".into()));
+            match decls::executor_of(&me.ops, &rec.fields.op) {
+                Some(Executor::PaymentsRefund) => {
+                    if !super::payments::deliver_checks(&tx, &rec).await? {
+                        return Ok(Delivery::Rejected("approval check: order".into()));
+                    }
+                }
+                Some(Executor::LedgerTransfer) => {
+                    let facts = transfer_facts(
+                        &tx,
+                        &rec.fields.ten,
+                        &rec.fields.approver_sub,
+                        text_param(p, "from")?,
+                        text_param(p, "to")?,
+                        true,
+                    )
+                    .await?;
+                    if !facts.from_owned {
+                        return Ok(Delivery::Rejected(
+                            "approval check: from not owned by approver".into(),
+                        ));
+                    }
+                }
+                _ => return Ok(Delivery::Rejected("no executor".into())),
             }
             let n = tx
                 .execute(
-                    "UPDATE pending_effect SET state = 'APPROVED', state_changed_at = $2, grant_bytes = $3, \
+                    "UPDATE public.pending_effect SET state = 'APPROVED', state_changed_at = $2, grant_bytes = $3, \
                      grant_exp = $4 WHERE pending_id = $1 AND state = 'PENDING' AND expires_at > $2",
                     &[&pid.as_slice(), &to_i64(now), &bytes.as_slice(), &to_i64(grant_exp)],
                 )
@@ -1350,9 +1490,17 @@ impl Broker {
                 tx.commit().await.map_err(dbf("commit expiry"))?;
                 return Ok(Execution::Expired);
             }
-            if decls::executor(&rec.fields.op) != Some(Executor::LedgerTransfer) {
-                return Ok(Execution::Unverified("no_executor"));
-            }
+            let exec = decls::executor_of(&me.ops, &rec.fields.op);
+            let refund_kid = match exec {
+                Some(Executor::LedgerTransfer) => None,
+                // payments-adapter-v1 §9: without a successful `adapter.hello` (and a consistent
+                // idem_kid), refunds are not executed; the record stays APPROVED and expires.
+                Some(Executor::PaymentsRefund) => match me.payments_kid() {
+                    Some(k) => Some(k),
+                    None => return Ok(Execution::Unverified("payments_not_ready")),
+                },
+                _ => return Ok(Execution::Unverified("no_executor")),
+            };
             // 3. Verify the stored grant (steps 1–9), peer_wid := the record's wid.
             let Some(wl) = me.cfg.workload(&rec.fields.wid) else {
                 return Ok(Execution::Unverified("workload_not_registered"));
@@ -1379,7 +1527,7 @@ impl Broker {
             let cons = w.consumption();
             let n = tx
                 .execute(
-                    "INSERT INTO consumed_grant (iss, jti, exp, request_hash, outcome) \
+                    "INSERT INTO public.consumed_grant (iss, jti, exp, request_hash, outcome) \
                      VALUES ($1, $2, $3, $4, 'PENDING') ON CONFLICT (iss, jti) DO NOTHING",
                     &[&cons.iss, &cons.jti.as_slice(), &to_i64(cons.exp), &cons.request_hash.as_slice()],
                 )
@@ -1393,8 +1541,25 @@ impl Broker {
             }
             tx.batch_execute("SAVEPOINT decision").await.map_err(dbf("savepoint"))?;
             let rows = revocations(&tx, &rec.fields.ten).await?;
+            let iat = w.identity().iat;
+            let mut refund_reason: Option<&'static str> = None;
             let decision: Result<(), String> = match w.decide(&rows) {
-                Err(e) => Err(e.as_str().to_owned()),
+                Err(e) => {
+                    refund_reason = Some("grant");
+                    Err(e.as_str().to_owned())
+                }
+                Ok(a) if refund_kid.is_some() => {
+                    // payments-adapter-v1 §7.2 T1, W14 steps 0–7 and the reservation.
+                    let pc = me.cfg.payments.as_ref().ok_or_else(|| unavailable("payments config"))?;
+                    let kid = refund_kid.as_deref().unwrap_or_default();
+                    match super::payments::refund_t1(&tx, &rec, a.params(), pc, kid, iat, now).await? {
+                        Ok(()) => Ok(()),
+                        Err(r) => {
+                            refund_reason = Some(r);
+                            Err(r.to_owned())
+                        }
+                    }
+                }
                 Ok(a) => {
                     // W14: approval checks again under lock, then the effect, reading values
                     // only from the authorized params.
@@ -1409,15 +1574,34 @@ impl Broker {
                 Ok(()) => {
                     let n = tx
                         .execute(
-                            "UPDATE consumed_grant SET outcome = 'ACCEPT' WHERE iss = $1 AND jti = $2 AND outcome = 'PENDING'",
+                            "UPDATE public.consumed_grant SET outcome = 'ACCEPT' WHERE iss = $1 AND jti = $2 AND outcome = 'PENDING'",
                             &[&cons.iss, &cons.jti.as_slice()],
                         )
                         .await
                         .map_err(dbf("record accept"))?;
-                    if n != 1 || !finalize(&tx, &pid, State::Approved, (State::Succeeded, "succeeded"), now, "", &[]).await? {
+                    if n != 1 {
                         return Err(unavailable("success recording touched no row"));
                     }
-                    Execution::Succeeded
+                    if refund_kid.is_some() {
+                        // External effect: APPROVED → EXECUTING with the RESERVED row (§4.4 step 6).
+                        let m = tx
+                            .execute(
+                                "UPDATE public.pending_effect SET state = 'EXECUTING', state_changed_at = $2 \
+                                 WHERE pending_id = $1 AND state = 'APPROVED'",
+                                &[&pid.as_slice(), &to_i64(now)],
+                            )
+                            .await
+                            .map_err(dbf("executing"))?;
+                        if m != 1 {
+                            return Err(unavailable("EXECUTING CAS touched no row"));
+                        }
+                        Execution::Reserved
+                    } else {
+                        if !finalize(&tx, &pid, State::Approved, (State::Succeeded, "succeeded"), now, "", &[]).await? {
+                            return Err(unavailable("success recording touched no row"));
+                        }
+                        Execution::Succeeded
+                    }
                 }
                 Err(code) => {
                     tx.batch_execute("ROLLBACK TO SAVEPOINT decision")
@@ -1425,7 +1609,7 @@ impl Broker {
                         .map_err(dbf("rollback to savepoint"))?;
                     let n = tx
                         .execute(
-                            "UPDATE consumed_grant SET outcome = 'DENIED' WHERE iss = $1 AND jti = $2 AND outcome = 'PENDING'",
+                            "UPDATE public.consumed_grant SET outcome = 'DENIED' WHERE iss = $1 AND jti = $2 AND outcome = 'PENDING'",
                             &[&cons.iss, &cons.jti.as_slice()],
                         )
                         .await
@@ -1433,11 +1617,16 @@ impl Broker {
                     if n != 1 || !finalize(&tx, &pid, State::Approved, (State::Failed, "denied"), now, "", &[]).await? {
                         return Err(unavailable("denial recording touched no row"));
                     }
+                    if let (Some(_), Some(r)) = (&refund_kid, refund_reason) {
+                        super::payments::record_denial(&tx, &pid, r).await?;
+                    }
                     Execution::Denied(code)
                 }
             };
             // Deadline at commit (nodkey-grant D2-4): never commit an effect after exp + skew.
-            if result == Execution::Succeeded && (me.clock)() >= grant_exp.saturating_add(skew) {
+            if matches!(result, Execution::Succeeded | Execution::Reserved)
+                && (me.clock)() >= grant_exp.saturating_add(skew)
+            {
                 return Err(unavailable("execution window closed before commit"));
             }
             tx.commit().await.map_err(dbf("commit"))?;
@@ -1500,7 +1689,10 @@ impl Broker {
             return Ok(Err("insufficient funds".into()));
         }
         let to_bal: i64 = tx
-            .query_one("SELECT balance_cents FROM accounts WHERE id = $1", &[&to])
+            .query_one(
+                "SELECT balance_cents FROM public.accounts WHERE id = $1",
+                &[&to],
+            )
             .await
             .map_err(dbf("to balance"))?
             .try_get(0)
@@ -1510,7 +1702,7 @@ impl Broker {
         }
         let key = encode_id(&f.pending_id);
         tx.query_one(
-            "INSERT INTO transfers (from_account, to_account, amount_cents, workload, correlation_id, \
+            "INSERT INTO public.transfers (from_account, to_account, amount_cents, workload, correlation_id, \
              idempotency_key, from_balance_after_cents) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
             &[&from, &to, &amount, &f.wid, &cid, &key, &(bal - amount)],
         )
@@ -1518,14 +1710,14 @@ impl Broker {
         .map_err(dbf("journal"))?;
         let n1 = tx
             .execute(
-                "UPDATE accounts SET balance_cents = balance_cents - $2 WHERE id = $1",
+                "UPDATE public.accounts SET balance_cents = balance_cents - $2 WHERE id = $1",
                 &[&from, &amount],
             )
             .await
             .map_err(dbf("debit"))?;
         let n2 = tx
             .execute(
-                "UPDATE accounts SET balance_cents = balance_cents + $2 WHERE id = $1",
+                "UPDATE public.accounts SET balance_cents = balance_cents + $2 WHERE id = $1",
                 &[&to, &amount],
             )
             .await
@@ -1544,7 +1736,7 @@ impl Broker {
         let conn = self.conn().await?;
         let (expired, approved) = Self::run(conn, async move |c: &mut Client| {
             c.execute(
-                "UPDATE broker_clock SET mark = GREATEST(mark, $2) WHERE broker_id = $1",
+                "UPDATE public.broker_clock SET mark = GREATEST(mark, $2) WHERE broker_id = $1",
                 &[&bid, &to_i64(now)],
             )
             .await
@@ -1559,7 +1751,7 @@ impl Broker {
             };
             let exp = c
                 .query(
-                    "SELECT pending_id FROM pending_effect WHERE state = 'PENDING' AND expires_at <= $1 LIMIT $2",
+                    "SELECT pending_id FROM public.pending_effect WHERE state = 'PENDING' AND expires_at <= $1 LIMIT $2",
                     &[&to_i64(now), &RECOVERY_BATCH],
                 )
                 .await
@@ -1570,7 +1762,7 @@ impl Broker {
             }
             let appr = c
                 .query(
-                    "SELECT pending_id FROM pending_effect WHERE state = 'APPROVED' ORDER BY state_changed_at LIMIT $1",
+                    "SELECT pending_id FROM public.pending_effect WHERE state = 'APPROVED' ORDER BY state_changed_at LIMIT $1",
                     &[&RECOVERY_BATCH],
                 )
                 .await
@@ -1581,6 +1773,9 @@ impl Broker {
         let mut out = Vec::with_capacity(approved.len());
         for pid in approved {
             let r = self.execute(pid, "recovery").await;
+            if r == Ok(Execution::Reserved) {
+                let _ = self.dispatch(pid).await;
+            }
             out.push((pid, r));
         }
         if expired > 0 || !out.is_empty() {

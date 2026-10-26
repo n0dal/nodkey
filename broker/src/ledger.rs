@@ -118,7 +118,7 @@ pub fn replay_or_conflict(
 }
 
 const LOOKUP_SQL: &str = "SELECT id, from_account, to_account, amount_cents, from_balance_after_cents \
-     FROM transfers WHERE workload = $1 AND idempotency_key = $2";
+     FROM public.transfers WHERE workload = $1 AND idempotency_key = $2";
 
 async fn lookup(
     c: &(impl tokio_postgres::GenericClient + Sync),
@@ -217,7 +217,7 @@ impl Ledger {
                 Box::pin(async move {
                     let ins = c
                         .execute(
-                            "INSERT INTO broker_claim (singleton, protocol, broker_id) \
+                            "INSERT INTO public.broker_claim (singleton, protocol, broker_id) \
                              VALUES (true, 1, 'demo1') ON CONFLICT (singleton) DO NOTHING",
                             &[],
                         )
@@ -230,7 +230,7 @@ impl Ledger {
                     ins.map_err(|e| w.failure("claim", e))?;
 
                     let row = c
-                        .query_one("SELECT protocol FROM broker_claim", &[])
+                        .query_one("SELECT protocol FROM public.broker_claim", &[])
                         .await
                         .map_err(|e| w.failure("claim read", e))?;
                     let p: i32 = row.try_get(0).map_err(|e| w.failure("decode", e))?;
@@ -258,7 +258,7 @@ impl Ledger {
             Box::pin(async move {
                 let rows = c
                     .query(
-                        "SELECT balance_cents FROM accounts WHERE id = $1",
+                        "SELECT balance_cents FROM public.accounts WHERE id = $1",
                         &[&account],
                     )
                     .await
@@ -301,7 +301,7 @@ impl Ledger {
                 // cannot be invalidated before COMMIT (SI-11).
                 let rows = tx
                     .query(
-                        "SELECT id, balance_cents FROM accounts WHERE id = $1 OR id = $2 ORDER BY id FOR UPDATE",
+                        "SELECT id, balance_cents FROM public.accounts WHERE id = $1 OR id = $2 ORDER BY id FOR UPDATE",
                         &[&from, &to],
                     )
                     .await
@@ -347,7 +347,7 @@ impl Ledger {
                 w.mark();
                 let inserted = tx
                     .query_one(
-                        "INSERT INTO transfers (from_account, to_account, amount_cents, workload, correlation_id, \
+                        "INSERT INTO public.transfers (from_account, to_account, amount_cents, workload, correlation_id, \
                          idempotency_key, from_balance_after_cents) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id",
                         &[&from, &to, &amount, &workload, &correlation_id, &key, &from_after],
                     )
@@ -375,11 +375,11 @@ impl Ledger {
                     }
                 };
                 let n1 = tx
-                    .execute("UPDATE accounts SET balance_cents = balance_cents - $2 WHERE id = $1", &[&from, &amount])
+                    .execute("UPDATE public.accounts SET balance_cents = balance_cents - $2 WHERE id = $1", &[&from, &amount])
                     .await
                     .map_err(|e| w.failure("debit", e))?;
                 let n2 = tx
-                    .execute("UPDATE accounts SET balance_cents = balance_cents + $2 WHERE id = $1", &[&to, &amount])
+                    .execute("UPDATE public.accounts SET balance_cents = balance_cents + $2 WHERE id = $1", &[&to, &amount])
                     .await
                     .map_err(|e| w.failure("credit", e))?;
                 if n1 != 1 || n2 != 1 {

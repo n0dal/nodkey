@@ -61,6 +61,34 @@ runs only with an explicit `"profile": "demo1"` in its configuration.
 - `config.digest` requires `authority_workloads_path`: the authority's `nodkey.workloads.v1`
   file, which must describe exactly this broker's workloads.
 
+## Payments (Demo P, `docs/specs/payments-adapter-v1.md` Draft 3)
+
+Enabled by a `payments` section in the v2 configuration:
+
+```json
+{"adapter_socket": "...", "adapter_uid": 0, "R_max_s": 43200, "max_resends": 5, "adapter_total_ms": 10000,
+ "budget": {"max_count_per_day": 3, "limits_minor": {"USD": 20000}}}
+```
+
+It also needs the effect-protocol-v2 Draft 3.1 `payments.refund` declaration, which includes
+`charge_id`. The legacy 3-parameter declaration still loads but is never executable.
+
+- Schema: `examples/php-ledger/docker/postgres/initdb/03-payments.sh`. Schema `nodkey` holds:
+  - `orders` (operator-written; the broker has `SELECT` only);
+  - `charge_refund_state` (per-charge lock and counters, checked at commit);
+  - `payment_effect`, `refund_budget`, `refund_denial`.
+
+  Every Nodkey role has an empty `search_path`, and every broker statement is schema-qualified.
+- Propose resolves `charge_id` from `orders` (or `unresolved`) into the record.
+- T1 runs consumption, the ordered W14 checks, the budget, encumbrance and `RESERVED` in one
+  transaction.
+- T2/T3: `refund.create` on socket P under a row lease, followed by a confirming `refund.get`.
+- The reconciler looks up first. It resends with the same key only inside the gate, and only the
+  lease holder calls the adapter.
+- Workloads see only the §8 reason enum.
+
+The pg_hba lines for the adapter role (§1) belong to the deployment; they are not set here.
+
 ## Build and test
 
 ```sh

@@ -13,23 +13,63 @@ pub const LEDGER_GET_BALANCE: &str = "ledger.get_balance";
 pub const PAYMENTS_REFUND: &str = "payments.refund";
 pub const PAYMENTS_GET_ORDER: &str = "payments.get_order";
 
-/// How the broker serves a declared operation in Phase 3.
+/// The parameter of `payments.refund` that the broker resolves from `nodkey.orders` at
+/// propose (effect-protocol-v2 Draft 3.1 §2.3); never supplied by the workload.
+pub const CHARGE_ID: &str = "charge_id";
+/// Reserved value for an order with no trusted row; matches no charge (and is never signed).
+pub const UNRESOLVED: &str = "unresolved";
+
+/// How the broker serves a declared operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Executor {
     LedgerTransfer,
     LedgerGetBalance,
-    /// Declared per spec §5 but not implemented in Phase 3: always denied
-    /// (`operation_not_permitted`, audit detail `not_implemented_phase3`).
+    /// `payments.refund` with the Draft 3.1 declaration (`charge_id` con2), payments-adapter-v1.
+    PaymentsRefund,
+    PaymentsGetOrder,
+    /// The legacy Phase 3 `payments.refund` declaration (no `charge_id`): loadable, so existing
+    /// operation files still start, but always denied (`operation_not_permitted`, audit detail
+    /// `not_implemented_legacy_declaration`).
     NotImplemented,
 }
 
-pub fn executor(op: &str) -> Option<Executor> {
+/// The executor for `op` under the loaded declarations.
+pub fn executor_of(ops: &Operations, op: &str) -> Option<Executor> {
+    let d = ops.get(op)?;
     match op {
         LEDGER_TRANSFER => Some(Executor::LedgerTransfer),
         LEDGER_GET_BALANCE => Some(Executor::LedgerGetBalance),
-        PAYMENTS_REFUND | PAYMENTS_GET_ORDER => Some(Executor::NotImplemented),
+        PAYMENTS_GET_ORDER => Some(Executor::PaymentsGetOrder),
+        PAYMENTS_REFUND if Some(d) == refund_v31().as_ref() => Some(Executor::PaymentsRefund),
+        PAYMENTS_REFUND => Some(Executor::NotImplemented),
         _ => None,
     }
+}
+
+/// Parameters the broker sets itself (absent from the workload's `params`).
+pub fn resolved_by_broker(op: &str) -> &'static [&'static str] {
+    if op == PAYMENTS_REFUND {
+        &[CHARGE_ID]
+    } else {
+        &[]
+    }
+}
+
+fn refund_v31() -> Option<OperationDecl> {
+    use Binding::*;
+    use ParamType::*;
+    Some(OperationDecl {
+        name: PAYMENTS_REFUND.into(),
+        kind: OpKind::Write,
+        opv: 1,
+        requires_confirmation: true,
+        params: vec![
+            p("order_id", Resource(0), Uint, false),
+            p("amount_minor", Exact(0), Uint, false),
+            p("currency", Exact(1), Currency, false),
+            p(CHARGE_ID, Exact(2), Text64, false),
+        ],
+    })
 }
 
 fn p(name: &str, binding: Binding, ty: ParamType, destination: bool) -> ParamDecl {
@@ -42,7 +82,8 @@ fn p(name: &str, binding: Binding, ty: ParamType, destination: bool) -> ParamDec
     }
 }
 
-/// The exact declarations of spec §5 (`opv: 1`, every write `requires_confirmation`).
+/// The exact declarations of spec §5 (`opv: 1`, every write `requires_confirmation`). For
+/// `payments.refund` this is the legacy Phase 3 form; [`expected_all`] adds Draft 3.1.
 pub fn expected(op: &str) -> Option<OperationDecl> {
     use Binding::*;
     use ParamType::*;
@@ -94,9 +135,13 @@ pub fn load(json: &str) -> Result<(Operations, Vec<String>), String> {
     let mut names = Vec::new();
     for o in doc["operations"].as_array().ok_or("operations")? {
         let name = o["op"].as_str().ok_or("op")?.to_owned();
-        let want = expected(&name)
-            .ok_or_else(|| format!("operation {name} is not implemented by this broker"))?;
-        if ops.get(&name) != Some(&want) {
+        let want = expected_all(&name);
+        if want.is_empty() {
+            return Err(format!(
+                "operation {name} is not implemented by this broker"
+            ));
+        }
+        if !want.iter().any(|w| ops.get(&name) == Some(w)) {
             return Err(format!(
                 "operation {name} differs from the declaration this broker implements"
             ));
@@ -107,6 +152,15 @@ pub fn load(json: &str) -> Result<(Operations, Vec<String>), String> {
         return Err("no operations declared".into());
     }
     Ok((ops, names))
+}
+
+/// Every declaration accepted for `op`.
+pub fn expected_all(op: &str) -> Vec<OperationDecl> {
+    let mut v: Vec<OperationDecl> = expected(op).into_iter().collect();
+    if op == PAYMENTS_REFUND {
+        v.extend(refund_v31());
+    }
+    v
 }
 
 /// True if the operation has a `destination: true` parameter (spec §2.4: never for `named`).
@@ -181,11 +235,49 @@ pub mod tests {
         assert!(load(r#"{"format":"nodkey.operations.v1","operations":[]}"#).is_err());
     }
 
+    /// Draft 3.1 `payments.refund` (broker-resolved `charge_id` con2).
+    pub fn ops_v31() -> String {
+        OPS_JSON.replace(
+            r#"{"name":"currency","in":"con","key":1,"class":"exact","type":"currency","destination":false}]}"#,
+            r#"{"name":"currency","in":"con","key":1,"class":"exact","type":"currency","destination":false},
+  {"name":"charge_id","in":"con","key":2,"class":"exact","type":"text64","destination":false}]}"#,
+        )
+    }
+
     #[test]
     fn executors() {
-        assert_eq!(executor(PAYMENTS_REFUND), Some(Executor::NotImplemented));
-        assert_eq!(executor(PAYMENTS_GET_ORDER), Some(Executor::NotImplemented));
-        assert_eq!(executor("sql.query"), None);
+        let (legacy, _) = load(OPS_JSON).unwrap();
+        assert_eq!(
+            executor_of(&legacy, PAYMENTS_REFUND),
+            Some(Executor::NotImplemented)
+        );
+        assert_eq!(
+            executor_of(&legacy, PAYMENTS_GET_ORDER),
+            Some(Executor::PaymentsGetOrder)
+        );
+        assert_eq!(executor_of(&legacy, "sql.query"), None);
+        let v31 = ops_v31();
+        assert_ne!(v31, OPS_JSON);
+        let (ops, _) = load(&v31).unwrap();
+        assert_eq!(
+            executor_of(&ops, PAYMENTS_REFUND),
+            Some(Executor::PaymentsRefund)
+        );
+        assert_eq!(resolved_by_broker(PAYMENTS_REFUND), &[CHARGE_ID]);
+        assert!(resolved_by_broker(LEDGER_TRANSFER).is_empty());
+        // charge_id with another class or type is refused.
+        for (from, to) in [
+            (
+                r#""key":2,"class":"exact","type":"text64""#,
+                r#""key":2,"class":"exact","type":"text256""#,
+            ),
+            (
+                r#""name":"charge_id","in":"con","key":2"#,
+                r#""name":"charge_id","in":"con","key":3"#,
+            ),
+        ] {
+            assert!(load(&v31.replacen(from, to, 1)).is_err(), "{to}");
+        }
         assert_eq!(iso4217_exponent("JPY"), Some(0));
         assert_eq!(iso4217_exponent("XXX"), None);
     }

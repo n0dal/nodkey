@@ -10,12 +10,14 @@
 //! - [`server`]: Unix-socket listeners, framing, `SO_PEERCRED` checks.
 //! - [`limits`]: per-workload rate limiting.
 
+pub mod adapter;
 pub mod config;
 pub mod db;
 pub mod decls;
 pub mod digest;
 pub mod ids;
 pub mod limits;
+pub mod payments;
 pub mod server;
 pub mod service;
 pub mod wire;

@@ -150,7 +150,9 @@ pub fn spawn_execution(server: &Arc<Server>, pid: [u8; 16]) {
     let s = server.clone();
     tokio::spawn(async move {
         let cid = s.ids.next();
-        let _ = s.broker.execute(pid, &cid).await;
+        if s.broker.execute(pid, &cid).await == Ok(super::service::Execution::Reserved) {
+            let _ = s.broker.dispatch(pid).await;
+        }
     });
 }
 
@@ -248,6 +250,9 @@ pub async fn recovery_loop(server: Arc<Server>) {
     loop {
         if let Err(f) = server.broker.recovery_tick().await {
             log_event("v2_recovery_error", json!({"detail": f.detail}));
+        }
+        if let Err(f) = server.broker.payments_tick().await {
+            log_event("v2_payments_recovery_error", json!({"detail": f.detail}));
         }
         tokio::time::sleep(RECOVERY_PERIOD).await;
     }

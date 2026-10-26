@@ -33,4 +33,4 @@ done
 cd "$here/.."
 NODKEY_PG_HOST=127.0.0.1 NODKEY_PG_PORT="$port" \
 NODKEY_PG_SUPER_PASSWORD="$super_pw" NODKEY_PG_BROKER_PASSWORD="$broker_pw" \
-  cargo test --offline --test pg_integration -- --ignored --test-threads=4 "$@"
+  cargo test --offline --test pg_integration --test pg_payments -- --ignored --test-threads=4 "$@"

@@ -141,7 +141,8 @@ async fn t02_propose_validation() {
     assert_eq!(e.code, Code::InvalidArgument);
 }
 
-/// payments.* are declared but not implemented in Phase 3: a clear, distinct deny.
+/// The legacy (Phase 3) payments.refund declaration is loadable but never executable; payments
+/// operations are not in this workload's allowlist.
 #[tokio::test]
 #[ignore]
 async fn payments_not_implemented_in_phase3() {
@@ -153,7 +154,10 @@ async fn payments_not_implemented_in_phase3() {
         .unwrap_err();
     assert_eq!(
         (e.code, e.detail.as_str()),
-        (Code::OperationNotPermitted, "not_implemented_phase3")
+        (
+            Code::OperationNotPermitted,
+            "not_implemented_legacy_declaration"
+        )
     );
     let e =
         h.b.read(
@@ -165,7 +169,7 @@ async fn payments_not_implemented_in_phase3() {
         .unwrap_err();
     assert_eq!(
         (e.code, e.detail.as_str()),
-        (Code::OperationNotPermitted, "not_implemented_phase3")
+        (Code::OperationNotPermitted, "op not allowed")
     );
 }
 
@@ -190,17 +194,25 @@ async fn t09_immutability() {
     let br = connect(pg_config(&h.db, "nodkey_broker", &e.broker_pw)).await;
     let err = br
         .execute(
-            "UPDATE pending_effect SET params = '{}' WHERE pending_id = $1",
+            "UPDATE public.pending_effect SET params = '{}' WHERE pending_id = $1",
             &[&id.as_slice()],
         )
         .await
         .unwrap_err();
     assert!(format!("{err:?}").contains("permission denied"), "{err:?}");
-    assert!(br.execute("DELETE FROM pending_effect", &[]).await.is_err());
-    assert!(br.execute("DELETE FROM consumed_grant", &[]).await.is_err());
+    assert!(
+        br.execute("DELETE FROM public.pending_effect", &[])
+            .await
+            .is_err()
+    );
+    assert!(
+        br.execute("DELETE FROM public.consumed_grant", &[])
+            .await
+            .is_err()
+    );
     assert!(
         br.execute(
-            "INSERT INTO account_owner VALUES ('carol','acme','user:alice')",
+            "INSERT INTO public.account_owner VALUES ('carol','acme','user:alice')",
             &[]
         )
         .await
@@ -1121,7 +1133,10 @@ async fn sockets_and_authority_wire_format() {
     async fn exchange(path: &std::path::Path, line: &str) -> (Option<serde_json::Value>, bool) {
         let s = tokio::net::UnixStream::connect(path).await.unwrap();
         let (r, mut w) = s.into_split();
-        w.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+        // A wrong-uid peer is refused at accept: the broker writes `unauthenticated` and closes
+        // before reading, so this write may race the close (EPIPE). The assertions below still
+        // require the refusal response and the closed connection.
+        let _ = w.write_all(format!("{line}\n").as_bytes()).await;
         let mut r = BufReader::new(r);
         let mut first = String::new();
         r.read_line(&mut first).await.unwrap();
@@ -1315,7 +1330,7 @@ async fn br08_final_state_requires_consumption() {
     for (to, class) in [("SUCCEEDED", "succeeded"), ("FAILED", "denied")] {
         let tx = br.transaction().await.unwrap();
         tx.execute(
-            "UPDATE pending_effect SET state = $2, outcome_class = $3, state_changed_at = 0, \
+            "UPDATE public.pending_effect SET state = $2, outcome_class = $3, state_changed_at = 0, \
              receipt_id = '\\x00112233445566778899aabbccddeeff' WHERE pending_id = $1",
             &[&id.as_slice(), &to, &class],
         )

@@ -6,7 +6,7 @@
 //! (§2.1). Sharing one database between a v1 and a v2 broker is refused at start-up through the
 //! `broker_claim` row (see `service::claim_database`).
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use nodkey_grant::{BrokerId, Limits, OpKind, Operations};
@@ -100,6 +100,64 @@ pub struct V2Config {
     pub gateway: Channel,
     pub authority: Channel,
     pub workloads: Vec<WorkloadReg>,
+    /// Demo P (payments-adapter-v1 §9). `None`: payments operations are not executable.
+    pub payments: Option<PaymentsConfig>,
+}
+
+/// Broker side of payments-adapter-v1 §9.
+#[derive(Debug, Clone)]
+pub struct PaymentsConfig {
+    pub adapter_socket: PathBuf,
+    pub adapter_uid: u32,
+    pub r_max_s: u64,
+    pub max_resends: u32,
+    /// The adapter's whole-exchange limit (`total_ms`); P calls time out at `total_ms + 2 s`.
+    pub total_ms: u64,
+    pub max_count_per_day: u32,
+    /// Daily refund budget per (ten, sub, currency), in minor units.
+    pub limits_minor: BTreeMap<String, u64>,
+}
+
+impl PaymentsConfig {
+    pub fn call_timeout_ms(&self) -> u64 {
+        self.total_ms + 2000
+    }
+    /// `L_dispatch = 3 × (total_ms + 2 s) + 3 s + 10 s` (§7.2), in seconds, rounded up.
+    pub fn lease_dispatch_s(&self) -> u64 {
+        (3 * self.call_timeout_ms() + 13_000).div_ceil(1000)
+    }
+    /// `L_reconcile = total_ms + 2 s + 10 s` per call, in seconds, rounded up.
+    pub fn lease_reconcile_s(&self) -> u64 {
+        (self.call_timeout_ms() + 10_000).div_ceil(1000)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawPayments {
+    adapter_socket: PathBuf,
+    adapter_uid: u32,
+    #[serde(rename = "R_max_s")]
+    r_max_s: u64,
+    #[serde(default = "default_resends")]
+    max_resends: u32,
+    #[serde(default = "default_total_ms")]
+    adapter_total_ms: u64,
+    budget: RawBudget,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawBudget {
+    max_count_per_day: u32,
+    limits_minor: BTreeMap<String, u64>,
+}
+
+fn default_resends() -> u32 {
+    5
+}
+fn default_total_ms() -> u64 {
+    10_000
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,6 +190,8 @@ pub struct RawV2Config {
     pub gateway: RawChannel,
     pub authority: RawChannel,
     pub workloads: Vec<RawWorkload>,
+    #[serde(default)]
+    pub payments: Option<RawPayments>,
 }
 
 fn default_pool() -> usize {
@@ -361,6 +421,39 @@ impl V2Config {
         };
         role("gateway", &raw.gateway.socket_path, raw.gateway.uid)?;
         role("authority", &raw.authority.socket_path, raw.authority.uid)?;
+        let payments = match &raw.payments {
+            None => None,
+            Some(p) => {
+                role("payments adapter", &p.adapter_socket, p.adapter_uid)?;
+                if !(61..=604_800).contains(&p.r_max_s) {
+                    return e("payments.R_max_s must be 61..=604800".into());
+                }
+                if !(1..=20).contains(&p.max_resends)
+                    || !(100..=60_000).contains(&p.adapter_total_ms)
+                {
+                    return e("payments: max_resends 1..=20, adapter_total_ms 100..=60000".into());
+                }
+                if !(1..=1000).contains(&p.budget.max_count_per_day) {
+                    return e("payments.budget.max_count_per_day must be 1..=1000".into());
+                }
+                for (c, v) in &p.budget.limits_minor {
+                    if decls::iso4217_exponent(c).is_none()
+                        || !(1..=super::digest::MAX_UINT).contains(v)
+                    {
+                        return e(format!("payments.budget: bad currency or limit {c}"));
+                    }
+                }
+                Some(PaymentsConfig {
+                    adapter_socket: p.adapter_socket.clone(),
+                    adapter_uid: p.adapter_uid,
+                    r_max_s: p.r_max_s,
+                    max_resends: p.max_resends,
+                    total_ms: p.adapter_total_ms,
+                    max_count_per_day: p.budget.max_count_per_day,
+                    limits_minor: p.budget.limits_minor.clone(),
+                })
+            }
+        };
 
         if raw.workloads.is_empty() {
             return e("at least one workload required".into());
@@ -418,8 +511,19 @@ impl V2Config {
                 let Some(d) = ops.get(op).filter(|_| declared.contains(op)) else {
                     return e(format!("{}: op {op} is not declared", w.wid));
                 };
-                if decls::executor(op) == Some(Executor::NotImplemented) {
-                    return e(format!("{}: op {op} is not implemented in Phase 3", w.wid));
+                match decls::executor_of(ops, op) {
+                    Some(Executor::NotImplemented) | None => {
+                        return e(format!(
+                            "{}: op {op} is not implemented with this declaration",
+                            w.wid
+                        ));
+                    }
+                    Some(Executor::PaymentsRefund | Executor::PaymentsGetOrder)
+                        if payments.is_none() =>
+                    {
+                        return e(format!("{}: op {op} needs the payments section", w.wid));
+                    }
+                    _ => {}
                 }
                 if approver_source == ApproverSource::Named
                     && d.kind == OpKind::Write
@@ -477,6 +581,7 @@ impl V2Config {
                 uid: raw.authority.uid,
             },
             workloads,
+            payments,
         })
     }
 
