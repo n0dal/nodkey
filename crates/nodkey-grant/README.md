@@ -93,6 +93,31 @@ The broker must meet these obligations. They cannot be enforced inside a library
 8. **Concurrency, restart and replay-store restore** must be covered by integration tests
    (§12.2).
 
+### Payments adapter: `verify_retransmission`
+
+The payments adapter calls this to (re)send an effect the broker already decided
+(payments-adapter-v1 Draft 2 §3.1). It is separate from `verify` and cannot be confused with it:
+
+- it has its own context (`RetransmissionContext`), result (`RetransmissionAuthorized`) and error
+  (`RetransmissionError`) types;
+- it never yields a `WriteGrant` or `Authorized`, and has no consumption step;
+- it does **not** check `exp`. It requires `now − iat ≤ R_max` instead, where `RMax::new` enforces
+  the start-up rule against provider retention and resend margin;
+- it evaluates the key window at `iat`;
+- it refuses while the clock reads below 2024-01-01.
+
+`idempotency_identity()` returns the `(iss, jti)` pair for the provider idempotency key. Every
+provider value comes from `params()`, the signed `res`/`con` values.
+
+Adapter obligations:
+- check `amount_minor ≥ 1` (SPEC_ISSUES.md RX-3);
+- check its own order view (§3.2);
+- map every error to `grant_refused`;
+- never use this function on the broker path.
+
+Open spec points are RX-1..RX-6 in SPEC_ISSUES.md. The most important is RX-1: the tenant check
+is enforced against a caller-supplied tenant list.
+
 The feature `conformance-unvalidated-requests` exposes `Request::unvalidated_for_conformance`. It
 exists only so that this crate's tests can reach W12b/W12c, and is enabled only through the
 crate's own dev-dependency. **Never enable it in a broker.**
@@ -124,6 +149,7 @@ cargo fmt --check
 |---|---|
 | `tests/conformance.rs` | Every vector in the manifest:<br>• 280 grant vectors (293 steps)<br>• 26 registry, 19 operation-declaration and 11 transport vectors<br>• 3 request-hash examples<br>W10 and the savepoint recording rule are simulated with an in-memory store. The test also asserts that only CON-20..24 bypass the strict request parser. |
 | `tests/roundtrip.rs` | • Builder → verify → decide<br>• Byte-exact reproduction of ACC-01<br>• Strict request parsing (GC-01)<br>• The consumption hash and `Authorized::params` match the validated request (GC-02)<br>• Builder refusals<br>• 300 randomized `test.hold` grants |
+| `tests/retransmission.rs` | `verify_retransmission`:<br>• age-cap boundaries, and an expired-but-young grant accepted while `verify` still says `grant_expired`<br>• future `iat`, and every binding or schema mismatch<br>• read grant, key revoked or unknown, key window at `iat`<br>• clock floor, the `R_max` start-up rule, and context refusals |
 | `tests/robustness.rs` | • Over 1.4 million truncated, mutated, extended and random variants of every vector<br>• Re-signed mutated payloads<br>The checks are no panics, and no mutation of an accepted grant is ever accepted. |
 
 Spec issues: [`SPEC_ISSUES.md`](SPEC_ISSUES.md).

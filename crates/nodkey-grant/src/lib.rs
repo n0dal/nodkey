@@ -8,6 +8,9 @@
 //! - [`verify`] — spec §7.2 steps 1c–9, then [`WriteGrant::decide`] (W11–W13, after the broker's
 //!   W10 insert of [`WriteGrant::consumption`]) or [`ReadGrant::decide`] (R11, R13). The caller
 //!   obligations are listed in the crate README.
+//! - [`verify_retransmission`] — payments adapter only (payments-adapter-v1 Draft 2 §3.1):
+//!   non-consuming check of a stored write grant with an age cap instead of `exp`. Separate
+//!   context, result and error types; never use it on the broker path.
 //! - [`GrantBuilder`] — issuer side (spec §9).
 //!
 //! Error codes are broker-facing (audit log only); the workload sees `grant_denied` (spec §7.4).
@@ -23,6 +26,7 @@ mod json;
 mod ops;
 mod payload;
 mod registry;
+mod retransmit;
 mod text;
 mod transport;
 mod verify;
@@ -36,6 +40,10 @@ pub use ops::{
 };
 pub use payload::GrantKind;
 pub use registry::{ALG_ED25519, KeyEntry, KeyStatus, Registry, derive_kid};
+pub use retransmit::{
+    CLOCK_FLOOR, RMax, RetransmissionAuthorized, RetransmissionContext, RetransmissionError,
+    verify_retransmission,
+};
 pub use transport::{decode_transport, encode_transport};
 pub use verify::{
     Authorized, BrokerId, Consumption, GrantIdentity, Limits, ReadGrant, RevocationScope,

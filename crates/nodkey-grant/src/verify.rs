@@ -13,7 +13,7 @@ use crate::cbor::{self, Value};
 use crate::error::GrantError;
 use crate::ops::{Binding, OpKind, Operations, ParamDecl, ParamValue, Params, Request, Scalar};
 use crate::payload::{self, Body, Constraint, GrantKind, Payload};
-use crate::registry::{KeyStatus, Registry};
+use crate::registry::{KeyEntry, KeyStatus, Registry};
 use crate::text::is_id;
 use crate::{AAD_TAG, MAX_GRANT_BYTES, MAX_SKEW, MAX_TTL, TYP};
 
@@ -252,15 +252,22 @@ fn parse_protected(protected: &[u8]) -> Result<(i128, [u8; 16]), GrantError> {
     }
 }
 
-/// Steps 1c–9 on the grant bytes (after [`crate::decode_transport`]).
-///
-/// An `Err` is an unverified denial: the broker answers `grant_denied`, consumes and records
-/// nothing.
-pub fn verify<'a>(
+/// When step 4d evaluates the key's validity window.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum KeyWindowAt {
+    /// At the broker clock, in step 4d (grant-v1 §7.2).
+    Now(u64),
+    /// At the grant's `iat`; the caller checks it after step 7 (payments-adapter-v1 §3.1).
+    Iat,
+}
+
+/// Steps 1c–7 (with 4d per `key_window`): structure, header, key, signature, payload schema.
+pub(crate) fn verify_signed<'r>(
     grant: &[u8],
-    registry: &Registry,
-    ctx: &VerifyContext<'a>,
-) -> Result<Verified<'a>, GrantError> {
+    registry: &'r Registry,
+    broker_id: &BrokerId,
+    key_window: KeyWindowAt,
+) -> Result<(Payload, [u8; 16], &'r KeyEntry), GrantError> {
     use GrantError::*;
     // 1c
     if grant.len() > MAX_GRANT_BYTES {
@@ -300,16 +307,14 @@ pub fn verify<'a>(
     if entry.status() != KeyStatus::Active {
         return Err(KeyRevoked);
     }
-    if !(entry.not_before() <= ctx.now && ctx.now < entry.not_after()) {
-        return Err(KeyInactive);
+    if let KeyWindowAt::Now(now) = key_window {
+        if !(entry.not_before() <= now && now < entry.not_after()) {
+            return Err(KeyInactive);
+        }
     }
 
     // 5
-    let msg = sig_structure(
-        protected,
-        &external_aad(ctx.broker_id.as_str()),
-        payload_bytes,
-    );
+    let msg = sig_structure(protected, &external_aad(broker_id.as_str()), payload_bytes);
     entry
         .public_key()
         .verify_strict(&msg, &Signature::from_bytes(&sig))
@@ -318,6 +323,20 @@ pub fn verify<'a>(
     // 6, 7
     let pv = cbor::decode(payload_bytes, cbor::PAYLOAD).map_err(|_| PayloadMalformed)?;
     let p: Payload = payload::parse(&pv)?;
+    Ok((p, kid, entry))
+}
+
+/// Steps 1c–9 on the grant bytes (after [`crate::decode_transport`]).
+///
+/// An `Err` is an unverified denial: the broker answers `grant_denied`, consumes and records
+/// nothing.
+pub fn verify<'a>(
+    grant: &[u8],
+    registry: &Registry,
+    ctx: &VerifyContext<'a>,
+) -> Result<Verified<'a>, GrantError> {
+    use GrantError::*;
+    let (p, kid, entry) = verify_signed(grant, registry, ctx.broker_id, KeyWindowAt::Now(ctx.now))?;
 
     // 8 (times are <= 2^53 - 1 after step 7; `now` saturates)
     let skew = ctx.limits.skew();
