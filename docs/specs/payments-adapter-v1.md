@@ -121,7 +121,7 @@ sent):
 | `knd`, `cfm`, `use` | `1`, `1`, `1` (confirmed single-use write) |
 | `op`, `opv` | `payments.refund`, `1` |
 | `res` | exactly `{0: order_id}` (uint) |
-| `con` | exactly `{0: amount_minor (uint ≥ 1), 1: currency, 2: charge_id}`; nothing else; con2 MUST match `^ch_[A-Za-z0-9]{8,64}$` on **every** op (PA-19) |
+| `con` | exactly `{0: amount_minor (uint ≥ 1), 1: currency, 2: charge_id}`; nothing else; con2 MUST match `^ch_[A-Za-z0-9]{8,61}$` on **every** op (PA-19) |
 | `nbf`, `iat` | `≤ now + skew` (skew 5 s) |
 | **age** (`refund.create` only, PA-18) | `now − iat ≤ R_max_s` (default 43 200 s = 12 h) |
 | `exp` | **not** checked (deliberately: resends happen after `exp`; the age rule replaces it) |
@@ -148,7 +148,7 @@ The steps below are normative; their order matters only for audit logs, because 
    `aud` is checked again explicitly although step 5 already binds it (RX-4).
 6. **Adapter rules on the crate's output** (`RetransmissionAuthorized::params()` /
    `BindingVerified::params()`), which the grant-v1 §6 declaration format cannot express: `amount_minor ≥
-   1` (RX-3); con2 matches `^ch_[A-Za-z0-9]{8,64}$` (PA-19, RX-6); `currency` in the adapter's ISO 4217
+   1` (RX-3); con2 matches `^ch_[A-Za-z0-9]{8,61}$` (PA-19, RX-6); `currency` in the adapter's ISO 4217
    table.
 7. For `refund.create` only: §3.2.
 
@@ -295,13 +295,13 @@ lookups, ignored idempotency, invented settlement) cannot be detected. The adapt
 All tables are in schema `nodkey` (§2); prose below omits the prefix, statements MUST NOT.
 
 **`nodkey.orders`** — trusted facts. Columns: `order_id` bigint PK (`1 ..= 2^53 − 1`); `ten`, `owner_sub` (ID
-rules); `charge_id` **UNIQUE**, `^ch_[A-Za-z0-9]{8,64}$`, immutable; `currency` `^[A-Z]{3}$` in the ISO
+rules); `charge_id` **UNIQUE**, `^ch_[A-Za-z0-9]{8,61}$`, immutable; `currency` `^[A-Z]{3}$` in the ISO
 4217 table, immutable; `captured_minor` ≥ 1, immutable; `external_refunded_minor` ≥ 0; `status ∈
 {captured, partially_refunded, refunded, disputed, canceled}`. A trigger rejects updates of immutable
 columns. `nodkey_broker` has `SELECT` only and never locks `orders` (PA-15).
 
 **`nodkey.charge_refund_state`** — broker-owned, one row per charge (PA-15): `charge_id` PK
-(`^ch_[A-Za-z0-9]{8,64}$`), `succeeded_minor`, `inflight_minor` (`RESERVED` + `DISPATCHED`),
+(`^ch_[A-Za-z0-9]{8,61}$`), `succeeded_minor`, `inflight_minor` (`RESERVED` + `DISPATCHED`),
 `unknown_minor`, all ≥ 0. The broker has `SELECT`, `INSERT` and `UPDATE` on it. The rows are created by
 the broker (`INSERT … ON CONFLICT DO NOTHING`) and are the **per-charge lock**. A deferred constraint
 trigger checks at commit that the three counters equal the sums over that charge's `payment_effect`

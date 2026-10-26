@@ -218,7 +218,7 @@ A message whose `v` differs from the socket's version gets `unsupported_version`
   value `unresolved`, which matches no trusted row; render and execution then fail as for a foreign
   resource. The value is part of key 7 like any parameter, so the digest, the confirmation page and the
   signed grant cover it. The authority MUST refuse (`not_available`) to approve a `payments.refund` record whose
-  `charge_id` does not match `^ch_[A-Za-z0-9]{8,64}$`, so the reserved value `unresolved` is never signed
+  `charge_id` does not match `^ch_[A-Za-z0-9]{8,61}$`, so the reserved value `unresolved` is never signed
   (grant crate issue RX-6).
 - On success it creates an immutable record (§3) and returns:
   - `pending_id`: 16 bytes from the broker CSPRNG, as canonical unpadded base64url (22 chars);

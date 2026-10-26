@@ -777,10 +777,11 @@ impl Authority {
     }
 }
 
-/// `^ch_[A-Za-z0-9]{8,64}$` (payments-adapter-v1 PA-19, RX-6).
+/// `^ch_[A-Za-z0-9]{8,61}$` (payments-adapter-v1 PA-19, RX-6).
+/// 61 so that the whole id (`ch_` + 61) fits the grant type `text64`.
 pub fn is_charge_id(s: &str) -> bool {
     s.strip_prefix("ch_").is_some_and(|rest| {
-        (8..=64).contains(&rest.len()) && rest.bytes().all(|c| c.is_ascii_alphanumeric())
+        (8..=61).contains(&rest.len()) && rest.bytes().all(|c| c.is_ascii_alphanumeric())
     })
 }
 
