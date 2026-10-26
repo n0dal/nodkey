@@ -8,7 +8,7 @@
 with user-confirmed intent ([ADR-0010](docs/decisions/0010-project-focus.md)).
 
 **Active milestone:** Phase 3 — Signed grants and confirmed intent: **implementation complete and
-verified locally** (Demo 2); spec Draft 3 alignment in progress. Next: Phase 4 — Demo P (payments).
+verified locally** (Demo 2); specs aligned (Draft 3). Next: Phase 4 — Demo P (payments).
 Phase 2 (Demo 1, containment) complete.
 
 ## Verified functionality
