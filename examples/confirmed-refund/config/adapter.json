@@ -1,0 +1,8 @@
+{"format":"nodkey.payments-adapter.v1","socket_path":"/run/nodkey/br-pay/adapter.sock","broker_uid":10002,
+ "broker_id":"nodkey.broker.demop","wid":"spiffe://nodkey.demo/workload/shop","tenants":["acme"],"R_max_s":180,
+ "registry_path":"/etc/nodkey-adapter/keys.json",
+ "db":{"socket_dir":"/run/pg-adapter","db_uid":70,"dbname":"ledger","user":"nodkey_payments_adapter","password_file":"/run/adapter-secrets/db_password"},
+ "provider":{"profile":"simpay","account":"acct_demomerchant01","addr":"172.30.30.20:8443","server_name":"simpay.test",
+  "ca_file":"/etc/nodkey-adapter/ca.crt","key_file":"/run/adapter-secrets/simpay_key","idem_key_file":"/run/adapter-secrets/k_idem",
+  "retention_s":300,"resend_margin_s":60,"caps":["idem_status"]},
+ "limits":{"connect_ms":2000,"total_ms":5000,"max_head":16384,"max_body":65536,"max_concurrent":8}}

@@ -1,0 +1,464 @@
+{
+ "_comment": "Demo P seed data (SIMULATED). One source for the simpay fixture (charges) and the operator seed of nodkey.orders. Customers c03..c30 exist so that each test has its own order and its own daily refund budget (3/day per customer and currency).",
+ "account": "acct_demomerchant01",
+ "customers": [
+  {
+   "index": 0,
+   "ten": "acme",
+   "sub": "user:alice",
+   "label": "Alice (TEST USER)"
+  },
+  {
+   "index": 1,
+   "ten": "acme",
+   "sub": "user:bob",
+   "label": "Bob (TEST USER)"
+  },
+  {
+   "index": 2,
+   "ten": "globex",
+   "sub": "user:carol",
+   "label": "Carol (TEST USER, other tenant)"
+  },
+  {
+   "index": 3,
+   "ten": "acme",
+   "sub": "user:c03",
+   "label": "Customer c03 (TEST USER)"
+  },
+  {
+   "index": 4,
+   "ten": "acme",
+   "sub": "user:c04",
+   "label": "Customer c04 (TEST USER)"
+  },
+  {
+   "index": 5,
+   "ten": "acme",
+   "sub": "user:c05",
+   "label": "Customer c05 (TEST USER)"
+  },
+  {
+   "index": 6,
+   "ten": "acme",
+   "sub": "user:c06",
+   "label": "Customer c06 (TEST USER)"
+  },
+  {
+   "index": 7,
+   "ten": "acme",
+   "sub": "user:c07",
+   "label": "Customer c07 (TEST USER)"
+  },
+  {
+   "index": 8,
+   "ten": "acme",
+   "sub": "user:c08",
+   "label": "Customer c08 (TEST USER)"
+  },
+  {
+   "index": 9,
+   "ten": "acme",
+   "sub": "user:c09",
+   "label": "Customer c09 (TEST USER)"
+  },
+  {
+   "index": 10,
+   "ten": "acme",
+   "sub": "user:c10",
+   "label": "Customer c10 (TEST USER)"
+  },
+  {
+   "index": 11,
+   "ten": "acme",
+   "sub": "user:c11",
+   "label": "Customer c11 (TEST USER)"
+  },
+  {
+   "index": 12,
+   "ten": "acme",
+   "sub": "user:c12",
+   "label": "Customer c12 (TEST USER)"
+  },
+  {
+   "index": 13,
+   "ten": "acme",
+   "sub": "user:c13",
+   "label": "Customer c13 (TEST USER)"
+  },
+  {
+   "index": 14,
+   "ten": "acme",
+   "sub": "user:c14",
+   "label": "Customer c14 (TEST USER)"
+  },
+  {
+   "index": 15,
+   "ten": "acme",
+   "sub": "user:c15",
+   "label": "Customer c15 (TEST USER)"
+  },
+  {
+   "index": 16,
+   "ten": "acme",
+   "sub": "user:c16",
+   "label": "Customer c16 (TEST USER)"
+  },
+  {
+   "index": 17,
+   "ten": "acme",
+   "sub": "user:c17",
+   "label": "Customer c17 (TEST USER)"
+  },
+  {
+   "index": 18,
+   "ten": "acme",
+   "sub": "user:c18",
+   "label": "Customer c18 (TEST USER)"
+  },
+  {
+   "index": 19,
+   "ten": "acme",
+   "sub": "user:c19",
+   "label": "Customer c19 (TEST USER)"
+  },
+  {
+   "index": 20,
+   "ten": "acme",
+   "sub": "user:c20",
+   "label": "Customer c20 (TEST USER)"
+  },
+  {
+   "index": 21,
+   "ten": "acme",
+   "sub": "user:c21",
+   "label": "Customer c21 (TEST USER)"
+  },
+  {
+   "index": 22,
+   "ten": "acme",
+   "sub": "user:c22",
+   "label": "Customer c22 (TEST USER)"
+  },
+  {
+   "index": 23,
+   "ten": "acme",
+   "sub": "user:c23",
+   "label": "Customer c23 (TEST USER)"
+  },
+  {
+   "index": 24,
+   "ten": "acme",
+   "sub": "user:c24",
+   "label": "Customer c24 (TEST USER)"
+  },
+  {
+   "index": 25,
+   "ten": "acme",
+   "sub": "user:c25",
+   "label": "Customer c25 (TEST USER)"
+  },
+  {
+   "index": 26,
+   "ten": "acme",
+   "sub": "user:c26",
+   "label": "Customer c26 (TEST USER)"
+  },
+  {
+   "index": 27,
+   "ten": "acme",
+   "sub": "user:c27",
+   "label": "Customer c27 (TEST USER)"
+  },
+  {
+   "index": 28,
+   "ten": "acme",
+   "sub": "user:c28",
+   "label": "Customer c28 (TEST USER)"
+  },
+  {
+   "index": 29,
+   "ten": "acme",
+   "sub": "user:c29",
+   "label": "Customer c29 (TEST USER)"
+  },
+  {
+   "index": 30,
+   "ten": "acme",
+   "sub": "user:c30",
+   "label": "Customer c30 (TEST USER)"
+  }
+ ],
+ "orders": [
+  {
+   "order_id": 1001,
+   "ten": "acme",
+   "owner_sub": "user:alice",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001001",
+   "tag": "legit"
+  },
+  {
+   "order_id": 1002,
+   "ten": "acme",
+   "owner_sub": "user:alice",
+   "currency": "EUR",
+   "captured_minor": 12000,
+   "charge_id": "ch_demop0001002",
+   "tag": "alice_eur"
+  },
+  {
+   "order_id": 1003,
+   "ten": "acme",
+   "owner_sub": "user:bob",
+   "currency": "USD",
+   "captured_minor": 4000,
+   "charge_id": "ch_demop0001003",
+   "tag": "bob_order"
+  },
+  {
+   "order_id": 1004,
+   "ten": "acme",
+   "owner_sub": "user:c03",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001004",
+   "tag": "owner_change"
+  },
+  {
+   "order_id": 1005,
+   "ten": "acme",
+   "owner_sub": "user:c04",
+   "currency": "USD",
+   "captured_minor": 10000,
+   "charge_id": "ch_demop0001005",
+   "tag": "tamper"
+  },
+  {
+   "order_id": 1006,
+   "ten": "acme",
+   "owner_sub": "user:c05",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001006",
+   "tag": "currency_switch"
+  },
+  {
+   "order_id": 1007,
+   "ten": "acme",
+   "owner_sub": "user:c06",
+   "currency": "USD",
+   "captured_minor": 3000,
+   "charge_id": "ch_demop0001007",
+   "tag": "remaining"
+  },
+  {
+   "order_id": 1008,
+   "ten": "acme",
+   "owner_sub": "user:c07",
+   "currency": "USD",
+   "captured_minor": 2000,
+   "charge_id": "ch_demop0001008",
+   "tag": "race"
+  },
+  {
+   "order_id": 1009,
+   "ten": "acme",
+   "owner_sub": "user:c08",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001009",
+   "tag": "f_slow_response"
+  },
+  {
+   "order_id": 1010,
+   "ten": "acme",
+   "owner_sub": "user:c09",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001010",
+   "tag": "f_commit_then_drop"
+  },
+  {
+   "order_id": 1011,
+   "ten": "acme",
+   "owner_sub": "user:c10",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001011",
+   "tag": "f_commit_after_delay"
+  },
+  {
+   "order_id": 1012,
+   "ten": "acme",
+   "owner_sub": "user:c11",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001012",
+   "tag": "f_fail_before_commit"
+  },
+  {
+   "order_id": 1013,
+   "ten": "acme",
+   "owner_sub": "user:c12",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001013",
+   "tag": "f_commit_then_500"
+  },
+  {
+   "order_id": 1014,
+   "ten": "acme",
+   "owner_sub": "user:c13",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001014",
+   "tag": "f_rate_limit"
+  },
+  {
+   "order_id": 1015,
+   "ten": "acme",
+   "owner_sub": "user:c14",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001015",
+   "tag": "m_deny_but_commit"
+  },
+  {
+   "order_id": 1016,
+   "ten": "acme",
+   "owner_sub": "user:c15",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001016",
+   "tag": "m_lie_amount"
+  },
+  {
+   "order_id": 1017,
+   "ten": "acme",
+   "owner_sub": "user:c16",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001017",
+   "tag": "m_phantom_success"
+  },
+  {
+   "order_id": 1018,
+   "ten": "acme",
+   "owner_sub": "user:c17",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001018",
+   "tag": "m_redirect"
+  },
+  {
+   "order_id": 1019,
+   "ten": "acme",
+   "owner_sub": "user:c18",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001019",
+   "tag": "m_oversized_body"
+  },
+  {
+   "order_id": 1020,
+   "ten": "acme",
+   "owner_sub": "user:c19",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001020",
+   "tag": "m_malformed_json"
+  },
+  {
+   "order_id": 1021,
+   "ten": "acme",
+   "owner_sub": "user:c20",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001021",
+   "tag": "m_header_injection"
+  },
+  {
+   "order_id": 1022,
+   "ten": "acme",
+   "owner_sub": "user:c21",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001022",
+   "tag": "m_hostile_error_text"
+  },
+  {
+   "order_id": 1023,
+   "ten": "acme",
+   "owner_sub": "user:c22",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001023",
+   "tag": "m_lie_charge"
+  },
+  {
+   "order_id": 1024,
+   "ten": "acme",
+   "owner_sub": "user:c23",
+   "currency": "USD",
+   "captured_minor": 30000,
+   "charge_id": "ch_demop0001024",
+   "tag": "budget_over"
+  },
+  {
+   "order_id": 1025,
+   "ten": "acme",
+   "owner_sub": "user:c24",
+   "currency": "USD",
+   "captured_minor": 30000,
+   "charge_id": "ch_demop0001025",
+   "tag": "budget_count"
+  },
+  {
+   "order_id": 1026,
+   "ten": "acme",
+   "owner_sub": "user:c25",
+   "currency": "GBP",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001026",
+   "tag": "budget_unconfigured"
+  },
+  {
+   "order_id": 1027,
+   "ten": "acme",
+   "owner_sub": "user:c26",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001027",
+   "tag": "x_adapter_crash"
+  },
+  {
+   "order_id": 1028,
+   "ten": "acme",
+   "owner_sub": "user:c27",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001028",
+   "tag": "x_broker_crash"
+  },
+  {
+   "order_id": 1029,
+   "ten": "acme",
+   "owner_sub": "user:c28",
+   "currency": "JPY",
+   "captured_minor": 20000,
+   "charge_id": "ch_demop0001029",
+   "tag": "jpy_order"
+  },
+  {
+   "order_id": 1030,
+   "ten": "acme",
+   "owner_sub": "user:c29",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001030",
+   "tag": "rce_bob_target"
+  }
+ ]
+}

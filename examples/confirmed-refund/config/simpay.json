@@ -1,0 +1,9 @@
+{
+  "api_listen": "172.30.30.20:8443",
+  "admin_listen": "172.30.40.20:8081",
+  "seed": "nodkey-demo-p",
+  "clock": { "mode": "system" },
+  "idempotency_retention_s": 300,
+  "malicious_mode": false,
+  "fixture_path": "fixture.json"
+}

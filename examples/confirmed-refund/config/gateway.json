@@ -1,0 +1,214 @@
+{
+ "listen": "127.0.0.1:8444",
+ "dev_local_only": true,
+ "tls": {
+  "mode": "dev_self_signed",
+  "cert_out": "/run/gw-tls/gateway-dev-cert.pem"
+ },
+ "app_origin": "https://app.localhost:8443",
+ "auth_origin": "https://auth.localhost:8443",
+ "upstream": {
+  "unix": "/run/app-http/nginx.sock"
+ },
+ "app_wid": "spiffe://nodkey.demo/workload/shop",
+ "read_routes": [
+  {
+   "path": "/orders",
+   "rop": [
+    "payments.get_order"
+   ]
+  },
+  {
+   "path": "/orders/",
+   "rop": [
+    "payments.get_order"
+   ]
+  }
+ ],
+ "app_cookies": [
+  "shop_customer",
+  "shop_last_pid"
+ ],
+ "broker_socket": "/run/nodkey/gw-broker/broker.sock",
+ "authority_socket": "/run/nodkey/gw-authority/authority.sock",
+ "expected_broker_uid": 10002,
+ "expected_authority_uid": 10004,
+ "session": {
+  "absolute_lifetime_s": 3600,
+  "idle_timeout_s": 1800
+ },
+ "limits": {
+  "max_request_body": 262144,
+  "max_response_body": 1048576,
+  "upstream_timeout_ms": 15000,
+  "ipc_timeout_ms": 5000,
+  "approve_timeout_ms": 8000,
+  "max_store_entries": 10000,
+  "preauth_per_client": 8,
+  "request_body_timeout_ms": 15000,
+  "response_write_timeout_ms": 10000,
+  "unrouted_connections": 128,
+  "app_connections": 256,
+  "auth_connections": 64
+ },
+ "test_login": {
+  "enabled": true,
+  "users": [
+   {
+    "ten": "acme",
+    "sub": "user:alice",
+    "label": "Alice (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:bob",
+    "label": "Bob (TEST USER)"
+   },
+   {
+    "ten": "globex",
+    "sub": "user:carol",
+    "label": "Carol (TEST USER, other tenant)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c03",
+    "label": "Customer c03 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c04",
+    "label": "Customer c04 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c05",
+    "label": "Customer c05 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c06",
+    "label": "Customer c06 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c07",
+    "label": "Customer c07 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c08",
+    "label": "Customer c08 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c09",
+    "label": "Customer c09 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c10",
+    "label": "Customer c10 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c11",
+    "label": "Customer c11 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c12",
+    "label": "Customer c12 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c13",
+    "label": "Customer c13 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c14",
+    "label": "Customer c14 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c15",
+    "label": "Customer c15 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c16",
+    "label": "Customer c16 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c17",
+    "label": "Customer c17 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c18",
+    "label": "Customer c18 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c19",
+    "label": "Customer c19 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c20",
+    "label": "Customer c20 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c21",
+    "label": "Customer c21 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c22",
+    "label": "Customer c22 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c23",
+    "label": "Customer c23 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c24",
+    "label": "Customer c24 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c25",
+    "label": "Customer c25 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c26",
+    "label": "Customer c26 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c27",
+    "label": "Customer c27 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c28",
+    "label": "Customer c28 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c29",
+    "label": "Customer c29 (TEST USER)"
+   },
+   {
+    "ten": "acme",
+    "sub": "user:c30",
+    "label": "Customer c30 (TEST USER)"
+   }
+  ]
+ }
+}

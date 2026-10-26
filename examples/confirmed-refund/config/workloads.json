@@ -1,0 +1,2 @@
+{"format":"nodkey.workloads.v1","workloads":[
+ {"wid":"spiffe://nodkey.demo/workload/shop","tenants":["acme"],"approver_source":"named","write_ops":["payments.refund"],"read_ops":["payments.get_order"]}]}

@@ -1,0 +1,8 @@
+{"format":"nodkey.operations.v1","operations":[
+ {"op":"payments.refund","kind":"write","opv":1,"requires_confirmation":true,"params":[
+  {"name":"order_id","in":"res","key":0,"class":"exact","type":"uint","destination":false},
+  {"name":"amount_minor","in":"con","key":0,"class":"exact","type":"uint","destination":false},
+  {"name":"currency","in":"con","key":1,"class":"exact","type":"currency","destination":false},
+  {"name":"charge_id","in":"con","key":2,"class":"exact","type":"text64","destination":false}]},
+ {"op":"payments.get_order","kind":"read","opv":1,"requires_confirmation":false,"params":[
+  {"name":"order_id","in":"request","key":null,"class":"owner_scoped","type":"uint","destination":false}]}]}

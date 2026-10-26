@@ -1,0 +1,22 @@
+{
+  "format": "nodkey.authority-config.v1",
+  "issuer": "nodkey.authority.demop",
+  "broker_id": "nodkey.broker.demop",
+  "signing_key_path": "/var/lib/nodkey-authority/signing.key",
+  "signing_kid": "@KID@",
+  "store_path": "/var/lib/nodkey-authority/issuance.log",
+  "gateway_socket": "/run/nodkey/gw-authority/authority.sock",
+  "broker_socket": "/run/nodkey/au-broker/broker.sock",
+  "authority_uid": 10004,
+  "gateway_uid": 10005,
+  "broker_uid": 10002,
+  "workload_uids": [10001, 101],
+  "operations_path": "/etc/nodkey/operations.json",
+  "workloads_path": "/etc/nodkey/workloads.json",
+  "manifest_path": null,
+  "grant_ttl_secs": 30,
+  "skew_secs": 5,
+  "approve_reply_timeout_ms": 5000,
+  "broker_call_timeout_ms": 3000,
+  "ledger_currency": "USD"
+}
