@@ -30,7 +30,8 @@ pub const OPERATIONS: &str = r#"{"format":"nodkey.operations.v1","operations":[
 {"op":"payments.refund","kind":"write","opv":1,"requires_confirmation":true,"params":[
  {"name":"order_id","in":"res","key":0,"class":"exact","type":"uint","destination":false},
  {"name":"amount_minor","in":"con","key":0,"class":"exact","type":"uint","destination":false},
- {"name":"currency","in":"con","key":1,"class":"exact","type":"currency","destination":false}]},
+ {"name":"currency","in":"con","key":1,"class":"exact","type":"currency","destination":false},
+ {"name":"charge_id","in":"con","key":2,"class":"exact","type":"text64","destination":false}]},
 {"op":"ledger.transfer","kind":"write","opv":1,"requires_confirmation":true,"params":[
  {"name":"from","in":"res","key":0,"class":"exact","type":"account_id","destination":false},
  {"name":"to","in":"con","key":0,"class":"exact","type":"account_id","destination":true},
@@ -78,8 +79,8 @@ pub fn refund_record(pid: &str, sub: &str, amount: u64, expires_at: u64) -> Map<
     json!({
         "pending_id": pid, "broker_id": BROKER_ID, "wid": SHOP, "ten": "acme",
         "approver_sub": sub, "op": "payments.refund", "opv": 1,
-        "params": {"order_id": 9821, "amount_minor": amount, "currency": "EUR"},
-        "param_types": {"order_id": "uint", "amount_minor": "uint", "currency": "currency"},
+        "params": {"order_id": 9821, "amount_minor": amount, "currency": "EUR", "charge_id": "ch_demoorder0001"},
+        "param_types": {"order_id": "uint", "amount_minor": "uint", "currency": "currency", "charge_id": "text64"},
         "created_at": expires_at.saturating_sub(600), "expires_at": expires_at,
         "display": {"amount_exponent": 2, "currency": "EUR"}
     })

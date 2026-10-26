@@ -339,6 +339,21 @@ impl Authority {
                 }
             }
         }
+        // RX-6 (effect-protocol-v2 Draft 3.1 §2.3): a refund is signed only for a resolved charge;
+        // the reserved value `unresolved` (or anything not a charge id) is never signed.
+        let has_charge = decl.params.iter().any(|p| p.name == "charge_id");
+        if rec.op == "payments.refund" || has_charge {
+            match rec.params.get("charge_id") {
+                Some(ParamValue::Text(c)) if is_charge_id(c) => {}
+                _ => {
+                    log::event(
+                        "charge_id_unresolved",
+                        json!({"correlation_id": cid, "jti": pid.to_text()}),
+                    );
+                    return Err(Refusal("charge_id is not a resolved charge id"));
+                }
+            }
+        }
         // AU-R-01: what the gateway displayed is interpreted with key 11, so the authority
         // requires key 11 to equal its own derivation instead of trusting the broker.
         if rec.display != self.expected_display(decl, rec)? {
@@ -760,6 +775,13 @@ impl Authority {
             });
         }
     }
+}
+
+/// `^ch_[A-Za-z0-9]{8,64}$` (payments-adapter-v1 PA-19, RX-6).
+pub fn is_charge_id(s: &str) -> bool {
+    s.strip_prefix("ch_").is_some_and(|rest| {
+        (8..=64).contains(&rest.len()) && rest.bytes().all(|c| c.is_ascii_alphanumeric())
+    })
 }
 
 fn parse_subject(v: &Value) -> Result<(String, String), Refusal> {

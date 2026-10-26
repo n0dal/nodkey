@@ -613,3 +613,61 @@ async fn au_r_04_clock_error_and_rollback_refuse_to_sign() {
     assert_eq!(err_code(&r), Some("not_available"));
     assert_eq!(broker.deliveries().len(), 1);
 }
+
+#[tokio::test]
+async fn rx6_refund_with_unresolved_or_malformed_charge_id_is_never_signed() {
+    let (_d, broker, run) = setup("charge").await;
+    for bad in [
+        "unresolved",
+        "ch_x",
+        "ch_1234567",
+        "ch_abc/../12345",
+        "ch_abcdefgh?x=1",
+        "CH_abcdefgh",
+        "",
+        "ch_abcd efgh",
+        "ch_abcdefgh\\",
+    ] {
+        let pid = random_pid();
+        let mut rec = refund_record(&pid, "user:u-17", 1250, now() + 600);
+        rec["params"]["charge_id"] = json!(bad);
+        let digest = digest_of(&rec);
+        broker.add(rec, "PENDING");
+        let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+        assert_eq!(err_code(&r), Some("not_available"), "{bad:?}");
+        assert!(
+            run.authority
+                .issuance(&PendingId::parse(&pid).unwrap())
+                .await
+                .is_none()
+        );
+    }
+    assert!(broker.deliveries().is_empty());
+}
+
+#[tokio::test]
+async fn rx6_refund_with_resolved_charge_id_signs_con2_end_to_end() {
+    let (_d, broker, run) = setup("charge-ok").await;
+    let pid = random_pid();
+    let mut rec = refund_record(&pid, "user:u-17", 1250, now() + 600);
+    rec["params"]["charge_id"] = json!("ch_A1b2C3d4");
+    // Display facts derived by the authority itself: EUR, exponent 2.
+    rec.insert(
+        "display".into(),
+        json!({"amount_exponent": 2, "currency": "EUR"}),
+    );
+    let digest = digest_of(&rec);
+    broker.add(rec, "PENDING");
+    let r = approve(&run.gateway_path, &pid, &digest, "acme", "user:u-17").await;
+    assert!(is_ok(&r), "{r}");
+    // The fake broker verified the grant against the record's params, including charge_id
+    // as con2 exact (a different charge_id would fail W12).
+    assert_eq!(broker.state.lock().unwrap().results, vec!["accepted"]);
+    assert_eq!(broker.record_state(&pid), "APPROVED");
+    let row = run
+        .authority
+        .issuance(&PendingId::parse(&pid).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(row.status, nodkey_authority::store::Status::Accepted);
+}

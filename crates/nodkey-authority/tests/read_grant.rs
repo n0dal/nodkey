@@ -77,6 +77,7 @@ async fn read_grant_signs_knd2_that_a_broker_accepts_for_reads_only() {
             ("order_id", ParamValue::Uint(1)),
             ("amount_minor", ParamValue::Uint(1)),
             ("currency", ParamValue::Text("EUR".into())),
+            ("charge_id", ParamValue::Text("ch_demoorder0001".into())),
         ],
     );
     assert!(w.is_err());
