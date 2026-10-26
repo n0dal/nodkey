@@ -16,3 +16,4 @@ Statuses: `Proposed` → `Accepted` | `Rejected`; later `Superseded by ADR-NNNN`
 | [0009](0009-workload-authority-and-background-operations.md) | Workload-authority and background operations (rev. 2) | Proposed (Phase 5 scope) |
 | [0010](0010-project-focus.md) | Project focus: authority control for consequential external actions | Accepted (owner) |
 | [0011](0011-propose-confirm-execute.md) | Propose → confirm → execute for consequential effects | Accepted (rev. 1) |
+| [0012](0012-payments-adapter.md) | Payments adapter for Demo P: separate process, broker-owned effect state, reconciler (incl. proposed ADR-0006 Amendment 2, OQ-10) | Proposed |
