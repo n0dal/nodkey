@@ -63,6 +63,10 @@ pub struct EffectLimits {
     pub proposal_burst: u32,
     pub status_per_min: u32,
     pub pending_lifetime_s: u64,
+    /// Read operations per workload per minute (BR-01).
+    pub reads_per_min: u32,
+    /// Concurrent workload-lane DB connections per workload (BR-01).
+    pub db_conns_per_wid: usize,
 }
 
 impl Default for EffectLimits {
@@ -74,6 +78,8 @@ impl Default for EffectLimits {
             proposal_burst: 10,
             status_per_min: 120,
             pending_lifetime_s: 600,
+            reads_per_min: 600,
+            db_conns_per_wid: 2,
         }
     }
 }
@@ -85,6 +91,7 @@ pub struct V2Config {
     pub auth_origin: String,
     pub db: DbConfig,
     pub db_pool_size: usize,
+    pub db_control_pool_size: usize,
     pub registry_path: PathBuf,
     pub ledger_currency: String,
     pub ledger_exponent: u64,
@@ -103,8 +110,12 @@ pub struct RawV2Config {
     pub broker_id: String,
     pub auth_origin: String,
     pub db: DbConfig,
+    /// Workload-lane pool (socket W).
     #[serde(default = "default_pool")]
     pub db_pool_size: usize,
+    /// Control-lane pool (sockets G and A, execution, recovery), never used by workloads.
+    #[serde(default = "default_control_pool")]
+    pub db_control_pool_size: usize,
     pub registry_path: PathBuf,
     pub operations_path: PathBuf,
     /// The authority's copy of the workload registrations (`nodkey.workloads.v1`, see
@@ -126,6 +137,9 @@ pub struct RawV2Config {
 fn default_pool() -> usize {
     8
 }
+fn default_control_pool() -> usize {
+    4
+}
 fn default_skew() -> u64 {
     5
 }
@@ -142,6 +156,8 @@ pub struct RawLimits {
     proposal_burst: u32,
     status_per_min: u32,
     pending_lifetime_s: u64,
+    reads_per_min: u32,
+    db_conns_per_wid: usize,
 }
 
 impl Default for RawLimits {
@@ -154,6 +170,8 @@ impl Default for RawLimits {
             proposal_burst: d.proposal_burst,
             status_per_min: d.status_per_min,
             pending_lifetime_s: d.pending_lifetime_s,
+            reads_per_min: d.reads_per_min,
+            db_conns_per_wid: d.db_conns_per_wid,
         }
     }
 }
@@ -286,8 +304,8 @@ impl V2Config {
                 "auth_origin must be https://<lowercase host>[:port] with nothing else".into(),
             );
         }
-        if !(1..=32).contains(&raw.db_pool_size) {
-            return e("db_pool_size must be 1..=32".into());
+        if !(1..=32).contains(&raw.db_pool_size) || !(1..=16).contains(&raw.db_control_pool_size) {
+            return e("db_pool_size must be 1..=32 and db_control_pool_size 1..=16".into());
         }
         let Some(ledger_exponent) = decls::iso4217_exponent(&raw.ledger_currency) else {
             return e("ledger_currency is not in the broker's ISO 4217 table".into());
@@ -304,6 +322,8 @@ impl V2Config {
             || !(1..=600).contains(&l.proposals_per_min)
             || !(1..=600).contains(&l.proposal_burst)
             || !(1..=6000).contains(&l.status_per_min)
+            || !(1..=6000).contains(&l.reads_per_min)
+            || !(1..=raw.db_pool_size).contains(&l.db_conns_per_wid)
         {
             return e("limits out of range".into());
         }
@@ -314,6 +334,8 @@ impl V2Config {
             proposal_burst: l.proposal_burst,
             status_per_min: l.status_per_min,
             pending_lifetime_s: l.pending_lifetime_s,
+            reads_per_min: l.reads_per_min,
+            db_conns_per_wid: l.db_conns_per_wid,
         };
 
         // §1.2 start-up refusals: distinct uids per role, distinct directories per socket.
@@ -422,12 +444,25 @@ impl V2Config {
                 allowed_ops: allowed,
             });
         }
+        // BR-05: no socket directory may contain another (mounting one would expose the other).
+        for a in &dirs {
+            for b in &dirs {
+                if a != b && a.starts_with(b) {
+                    return e(format!(
+                        "socket directory {} is nested in {} (refusing to start)",
+                        a.display(),
+                        b.display()
+                    ));
+                }
+            }
+        }
         Ok(V2Config {
             profile: raw.profile,
             broker_id,
             auth_origin: raw.auth_origin,
             db: raw.db,
             db_pool_size: raw.db_pool_size,
+            db_control_pool_size: raw.db_control_pool_size,
             registry_path: raw.registry_path,
             ledger_currency: raw.ledger_currency,
             ledger_exponent,

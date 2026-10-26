@@ -29,7 +29,7 @@ use super::db::{Conn, Pool};
 use super::decls::{self, Executor, LEDGER_TRANSFER};
 use super::digest::{DisplayValue, PendingFields, json_uint, typed_params};
 use super::ids::{decode_id, encode_id, hex, is_id, parse_hex32, random16};
-use super::limits::RateLimiter;
+use super::limits::{ConcurrencyGate, RateLimiter};
 use super::wire::{Code, Fail, check_keys, str_arg, subject_arg};
 use crate::server::log_event;
 use crate::strict_json;
@@ -468,13 +468,24 @@ pub struct Broker {
     pub registry: Registry,
     pub ops: Operations,
     pub op_names: Vec<String>,
+    /// Workload lane: socket W only, bounded per workload by `workload_gate` (BR-01).
     pub db: Pool,
+    /// Control lane: sockets G and A, execution and recovery. A workload can never use it, so a
+    /// workload flood cannot starve approvals or approved effects (BR-01).
+    pub control_db: Pool,
     config_digest: [u8; 32],
     clock: Clock,
     high_water: AtomicU64,
     proposals: RateLimiter,
     statuses: RateLimiter,
+    reads: RateLimiter,
+    workload_gate: ConcurrencyGate,
+    unverifiable_alarmed: std::sync::Mutex<std::collections::HashSet<[u8; 16]>>,
 }
+
+/// Wait for a per-workload DB slot before answering `limit_exceeded`.
+pub const WORKLOAD_SLOT_WAIT: Duration = Duration::from_secs(1);
+const MAX_ALARM_MEMORY: usize = 4096;
 
 impl std::fmt::Debug for Broker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -490,7 +501,7 @@ impl Broker {
         registry: Registry,
         ops: Operations,
         op_names: Vec<String>,
-        db: Pool,
+        (db, control_db): (Pool, Pool),
         config_digest: [u8; 32],
         clock: Clock,
     ) -> Broker {
@@ -502,17 +513,23 @@ impl Broker {
         );
         let statuses =
             RateLimiter::new(cfg.limits.status_per_min, cfg.limits.status_per_min, wids());
+        let reads = RateLimiter::new(cfg.limits.reads_per_min, cfg.limits.reads_per_min, wids());
+        let workload_gate = ConcurrencyGate::new(cfg.limits.db_conns_per_wid, wids());
         Broker {
             cfg,
             registry,
             ops,
             op_names,
             db,
+            control_db,
             config_digest,
             clock,
             high_water: AtomicU64::new(0),
             proposals,
             statuses,
+            reads,
+            workload_gate,
+            unverifiable_alarmed: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -535,8 +552,23 @@ impl Broker {
         Ok(now)
     }
 
+    /// Control-lane connection (sockets G, A, execution, recovery, start-up).
     async fn conn(&self) -> Result<Conn<'_>, Fail> {
-        self.db.get().await.map_err(unavailable)
+        self.control_db.get().await.map_err(unavailable)
+    }
+
+    /// Workload-lane connection for socket W: first a per-workload slot, then a pool slot.
+    async fn wl_conn(
+        &self,
+        wid: &str,
+    ) -> Result<(tokio::sync::OwnedSemaphorePermit, Conn<'_>), Fail> {
+        let permit = self
+            .workload_gate
+            .acquire(wid, WORKLOAD_SLOT_WAIT)
+            .await
+            .ok_or_else(|| Fail::new(Code::LimitExceeded, "workload database concurrency"))?;
+        let conn = self.db.get().await.map_err(unavailable)?;
+        Ok((permit, conn))
     }
 
     /// Runs one database operation under the deadline; discards the connection on any
@@ -568,7 +600,9 @@ impl Broker {
         let now = (self.clock)();
         let bid = self.cfg.broker_id.as_str().to_owned();
         let conn = self.conn().await.map_err(|f| f.detail)?;
-        let mark = Self::run(conn, async |c: &mut Client| {
+        let bid2 = bid.clone();
+        let mark = Self::run(conn, async move |c: &mut Client| {
+            let bid = bid2;
             c.execute(
                 "INSERT INTO broker_claim (singleton, protocol, broker_id) VALUES (true, 2, $1) \
                  ON CONFLICT (singleton) DO NOTHING",
@@ -608,6 +642,18 @@ impl Broker {
             ));
         }
         self.high_water.fetch_max(mark, Ordering::SeqCst);
+        // Persist max(mark, now) at start-up as well, not only in the recovery loop (BR-10).
+        let conn = self.conn().await.map_err(|f| f.detail)?;
+        Self::run(conn, async |c: &mut Client| {
+            c.execute(
+                "UPDATE broker_clock SET mark = GREATEST(mark, $2) WHERE broker_id = $1",
+                &[&bid, &to_i64(now)],
+            )
+            .await
+            .map_err(dbf("clock mark"))
+        })
+        .await
+        .map_err(|f| f.detail)?;
         Ok(())
     }
 
@@ -712,7 +758,7 @@ impl Broker {
         };
         let digest = fields.digest().map_err(|e| inv(&e))?;
         let limits = self.cfg.limits;
-        let conn = self.conn().await?;
+        let (_slot, conn) = self.wl_conn(&wl.wid).await?;
         let f2 = fields.clone();
         Self::run(conn, async move |c: &mut Client| {
             let tx = c.transaction().await.map_err(dbf("begin"))?;
@@ -785,7 +831,7 @@ impl Broker {
         let now = self.now_checked()?;
         let skew = self.skew();
         let wid = wl.wid.clone();
-        let conn = self.conn().await?;
+        let (_slot, conn) = self.wl_conn(&wl.wid).await?;
         let rec = Self::run(conn, async move |c: &mut Client| {
             let sql = format!(
                 "SELECT {RECORD_COLS} FROM pending_effect WHERE pending_id = $1 AND wid = $2"
@@ -828,6 +874,9 @@ impl Broker {
         args: &Map<String, Value>,
     ) -> Result<Value, Fail> {
         let denied = |d: String| Fail::new(Code::GrantDenied, d);
+        if !self.reads.try_take(&wl.wid, (self.clock)()) {
+            return Err(Fail::new(Code::LimitExceeded, "read rate"));
+        }
         let Some(exec) = decls::executor(op).filter(|_| self.op_names.iter().any(|n| n == op))
         else {
             return Err(Fail::new(Code::UnknownOperation, "undeclared op"));
@@ -882,7 +931,7 @@ impl Broker {
         };
         let ten = rg.identity().ten.clone();
         let account = text_param(request.params(), "account")?.to_owned();
-        let conn = self.conn().await?;
+        let (_slot, conn) = self.wl_conn(&wl.wid).await?;
         let r = Self::run(conn, async move |c: &mut Client| {
             let tx = c
                 .build_transaction()
@@ -1166,6 +1215,15 @@ impl Broker {
             if rec.grant.as_deref() == Some(bytes.as_slice()) {
                 return Ok(Delivery::Accepted);
             }
+            if rec.grant.is_some() {
+                // The authority signs at most one grant per jti (§4.2 step 4): a different grant
+                // for a record that already holds one means a faulty or compromised issuer.
+                log_event(
+                    "alarm",
+                    json!({"kind": "second_grant_for_jti", "pending_id": encode_id(&pid),
+                           "state": rec.state.as_str()}),
+                );
+            }
             if rec.state != State::Pending {
                 return Ok(Delivery::Expired(format!("state {}", rec.state.as_str())));
             }
@@ -1391,6 +1449,27 @@ impl Broker {
             json!({"pending_id": encode_id(&pid), "correlation_id": cid_log,
                    "result": match &r { Ok(e) => format!("{e:?}"), Err(f) => format!("unavailable: {}", f.detail) }}),
         );
+        if let Ok(Execution::Unverified(code)) = &r {
+            // BR-09: the stored grant no longer verifies (key revoked, workload unregistered).
+            // Nothing is consumed (grant-v1 §7.2: unverified grants record nothing); the record
+            // stays APPROVED and expires at grant.exp + skew. Alarm once per record.
+            let first = self
+                .unverifiable_alarmed
+                .lock()
+                .map(|mut m| {
+                    if m.len() >= MAX_ALARM_MEMORY {
+                        m.clear();
+                    }
+                    m.insert(pid)
+                })
+                .unwrap_or(true);
+            if first {
+                log_event(
+                    "alarm",
+                    json!({"kind": "stored_grant_unverifiable", "pending_id": encode_id(&pid), "code": code}),
+                );
+            }
+        }
         r
     }
 

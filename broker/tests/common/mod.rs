@@ -163,11 +163,12 @@ pub fn build_broker(db: &str, now: Arc<AtomicU64>, registry_status: &str) -> Bro
     let registry = Registry::load(&registry_json(registry_status)).unwrap();
     let e = pg_env();
     let pool = Pool::from_config(pg_config(db, "nodkey_broker", &e.broker_pw), 8);
+    let control = Pool::from_config(pg_config(db, "nodkey_broker", &e.broker_pw), 4);
     let clock: Clock = {
         let now = now.clone();
         Arc::new(move || now.load(Ordering::SeqCst))
     };
-    Broker::new(cfg, registry, ops, names, pool, digest, clock)
+    Broker::new(cfg, registry, ops, names, (pool, control), digest, clock)
 }
 
 pub async fn harness() -> H {

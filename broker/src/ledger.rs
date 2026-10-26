@@ -209,10 +209,9 @@ impl Ledger {
     }
 
     /// Claims the database for protocol v1 (effect protocol v2 §2.1, EP-10): a v1 and a v2
-    /// broker must never share one database. Returns `Ok(false)` if the database has no
-    /// `broker_claim` table (a Demo 1 database without the v2 schema, which no v2 broker can
-    /// use either). Any other failure, or a claim by another protocol, is an error.
-    pub async fn claim_protocol_v1(&self) -> Result<bool, String> {
+    /// broker must never share one database. Fails closed: a missing `broker_claim` table, any
+    /// database failure, or a claim by another protocol is an error (BR-03).
+    pub async fn claim_protocol_v1(&self) -> Result<(), String> {
         let r = self
             .with_client(move |c, w| {
                 Box::pin(async move {
@@ -229,6 +228,7 @@ impl Ledger {
                         }
                     }
                     ins.map_err(|e| w.failure("claim", e))?;
+
                     let row = c
                         .query_one("SELECT protocol FROM broker_claim", &[])
                         .await
@@ -239,8 +239,11 @@ impl Ledger {
             })
             .await;
         match r {
-            Ok(None) => Ok(false),
-            Ok(Some(1)) => Ok(true),
+            Ok(None) => Err(
+                "no broker_claim table: apply 02-effects-v2.sh before starting (refusing to start)"
+                    .into(),
+            ),
+            Ok(Some(1)) => Ok(()),
             Ok(Some(p)) => Err(format!(
                 "database already claimed by a protocol {p} broker (refusing to start)"
             )),

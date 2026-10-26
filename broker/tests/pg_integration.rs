@@ -983,7 +983,14 @@ async fn t45_status_fields() {
         .await
         .unwrap();
     let id = decode_id(&p).unwrap();
-    // Force a path through EXECUTING → UNKNOWN (no Phase 3 adapter produces it; the trigger allows it).
+    // Force a path through EXECUTING → UNKNOWN (no Phase 3 adapter produces it; the trigger allows
+    // it once the grant is consumed, BR-08).
+    h.su.execute(
+        "INSERT INTO consumed_grant (iss, jti, exp, request_hash, outcome) VALUES ($1, $2, 0, $3, 'PENDING')",
+        &[&ISS, &id.as_slice(), &[0u8; 32].as_slice()],
+    )
+    .await
+    .unwrap();
     h.su.execute(
         "UPDATE pending_effect SET state='APPROVED', grant_bytes='\\x00', grant_exp=$2, state_changed_at=$2 WHERE pending_id=$1",
         &[&id.as_slice(), &(h.now() as i64)],
@@ -1041,7 +1048,7 @@ async fn t32_database_claims() {
         "host": e.host, "port": e.port, "dbname": db2, "user": "nodkey_broker", "password_file": "/x"}))
     .unwrap();
     let v1 = nodkey_broker::ledger::Ledger::new(&dbcfg2, e.broker_pw.clone());
-    assert_eq!(v1.claim_protocol_v1().await, Ok(true));
+    assert_eq!(v1.claim_protocol_v1().await, Ok(()));
     let b = build_broker(
         &db2,
         Arc::new(std::sync::atomic::AtomicU64::new(T0)),
@@ -1293,4 +1300,110 @@ async fn gateway_wire_format() {
     assert_eq!(rd.state, "DENIED");
     assert!(deny(&peer, &p1, &rd.digest, alice).await.is_err());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// BR-08: the database refuses APPROVED → SUCCEEDED/FAILED/EXECUTING without a matching consumed
+/// grant, even for the broker's own role (checked at commit).
+#[tokio::test]
+#[ignore]
+async fn br08_final_state_requires_consumption() {
+    let h = harness().await;
+    let pid = approved_transfer(&h, 10).await;
+    let id = decode_id(&pid).unwrap();
+    let e = pg_env();
+    let mut br = connect(pg_config(&h.db, "nodkey_broker", &e.broker_pw)).await;
+    for (to, class) in [("SUCCEEDED", "succeeded"), ("FAILED", "denied")] {
+        let tx = br.transaction().await.unwrap();
+        tx.execute(
+            "UPDATE pending_effect SET state = $2, outcome_class = $3, state_changed_at = 0, \
+             receipt_id = '\\x00112233445566778899aabbccddeeff' WHERE pending_id = $1",
+            &[&id.as_slice(), &to, &class],
+        )
+        .await
+        .unwrap();
+        let err = tx.commit().await.unwrap_err();
+        assert!(
+            format!("{err:?}").contains("without a consumed grant"),
+            "{to}: {err:?}"
+        );
+    }
+    assert_eq!(h.state(&pid).await, "APPROVED");
+    // The real execution path still succeeds.
+    assert_eq!(h.b.execute(id, "t").await.unwrap(), Execution::Succeeded);
+}
+
+/// BR-01: a workload flood cannot starve sockets G/A or execution. (a) With every workload-lane
+/// connection held, render, delivery and execution still complete on the control lane. (b) One
+/// workload's concurrent read flood is capped per workload and does not block another
+/// workload's approved effect.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore]
+async fn br01_workload_flood_does_not_starve_effects() {
+    let h = harness().await;
+    let pid = h
+        .propose_transfer(AGENT, "alice", "bob", 25, ALICE)
+        .await
+        .unwrap();
+    // (a) Exhaust the workload lane completely.
+    let mut held = Vec::new();
+    for _ in 0..8 {
+        held.push(h.b.db.get().await.unwrap());
+    }
+    let e =
+        h.b.status(&h.wl(AGENT), &obj(json!({"pending_id": pid})))
+            .await
+            .unwrap_err();
+    assert_eq!(e.code, Code::Unavailable, "workload lane is exhausted");
+    assert_eq!(h.approve(&pid, ALICE).await, Delivery::Accepted);
+    assert_eq!(
+        h.b.execute(decode_id(&pid).unwrap(), "t").await.unwrap(),
+        Execution::Succeeded
+    );
+    drop(held);
+
+    // (b) AGENT2 floods reads; AGENT's approved transfer executes meanwhile.
+    let p2 = h
+        .propose_transfer(AGENT, "alice", "bob", 26, ALICE)
+        .await
+        .unwrap();
+    let g = read_grant(h.now(), AGENT2, "acme", "user:bob", KEY_A);
+    let mut flood = Vec::new();
+    for _ in 0..200 {
+        let (b, wl, g) = (h.b.clone(), h.wl(AGENT2), g.clone());
+        flood.push(tokio::spawn(async move {
+            b.read(
+                &wl,
+                "ledger.get_balance",
+                &obj(json!({"account": "bob", "grant": g})),
+            )
+            .await
+        }));
+    }
+    assert_eq!(h.approve(&p2, ALICE).await, Delivery::Accepted);
+    assert_eq!(
+        h.b.execute(decode_id(&p2).unwrap(), "t").await.unwrap(),
+        Execution::Succeeded
+    );
+    let mut ok = 0;
+    for f in flood {
+        match f.await.unwrap() {
+            Ok(_) => ok += 1,
+            Err(e) => assert!(
+                matches!(e.code, Code::LimitExceeded | Code::Unavailable),
+                "{e:?}"
+            ),
+        }
+    }
+    assert!(ok > 0);
+    // AGENT itself is unaffected by AGENT2's flood.
+    let ga = read_grant(h.now(), AGENT, "acme", "user:alice", KEY_A);
+    assert!(
+        h.b.read(
+            &h.wl(AGENT),
+            "ledger.get_balance",
+            &obj(json!({"account": "alice", "grant": ga}))
+        )
+        .await
+        .is_ok()
+    );
 }

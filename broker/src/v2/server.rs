@@ -253,8 +253,41 @@ pub async fn recovery_loop(server: Arc<Server>) {
     }
 }
 
-/// Binds a socket, removing only a stale *socket* at the path. The socket's own directory is the
-/// access boundary (deployment, spec §1.2); the `SO_PEERCRED` uid check is enforced here.
+/// Start-up check of a socket's directory (spec §1.2, BR-05): it must be a real directory (not a
+/// symlink), owned by the broker or by the channel's peer, with no "other" permission bits.
+/// The `SO_PEERCRED` uid check on every connection remains the primary control.
+pub fn check_socket_dir(socket: &Path, broker_uid: u32, peer_uid: u32) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let dir = socket
+        .parent()
+        .ok_or_else(|| format!("{} has no directory", socket.display()))?;
+    let m = std::fs::symlink_metadata(dir)
+        .map_err(|e| format!("socket directory {}: {e}", dir.display()))?;
+    if !m.file_type().is_dir() {
+        return Err(format!(
+            "{} is not a directory (or is a symlink)",
+            dir.display()
+        ));
+    }
+    if m.mode() & 0o007 != 0 {
+        return Err(format!(
+            "socket directory {} has \"other\" permission bits ({:o})",
+            dir.display(),
+            m.mode() & 0o777
+        ));
+    }
+    if m.uid() != broker_uid && m.uid() != peer_uid {
+        return Err(format!(
+            "socket directory {} is owned by uid {}, not the broker or the peer",
+            dir.display(),
+            m.uid()
+        ));
+    }
+    Ok(())
+}
+
+/// Binds a socket, removing only a stale *socket* at the path. Mode 0660: the peer connects
+/// through the socket's group (spec §1.2); the `SO_PEERCRED` uid check is enforced on accept.
 pub fn bind_socket(path: &Path) -> Result<UnixListener, String> {
     if let Ok(m) = std::fs::symlink_metadata(path) {
         if m.file_type().is_socket() {
@@ -265,7 +298,53 @@ pub fn bind_socket(path: &Path) -> Result<UnixListener, String> {
         }
     }
     let l = UnixListener::bind(path).map_err(|e| format!("bind {}: {e}", path.display()))?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o666))
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o660))
         .map_err(|e| format!("chmod {}: {e}", path.display()))?;
     Ok(l)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn own_uid() -> u32 {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(std::env::temp_dir()).map(|_| ()).unwrap();
+        let p = std::env::temp_dir().join(format!("gb-uid-{}", std::process::id()));
+        std::fs::write(&p, b"").unwrap();
+        let u = std::fs::metadata(&p).unwrap().uid();
+        let _ = std::fs::remove_file(&p);
+        u
+    }
+
+    /// BR-05: directory ownership and mode checks.
+    #[test]
+    fn socket_directory_checks() {
+        let me = own_uid();
+        let base = std::env::temp_dir().join(format!("gb-dir-{}", std::process::id()));
+        let d = base.join("ok");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o750)).unwrap();
+        let sock = d.join("broker.sock");
+        assert!(check_socket_dir(&sock, me, me + 1).is_ok());
+        assert!(check_socket_dir(&sock, me + 1, me).is_ok());
+        assert!(
+            check_socket_dir(&sock, me + 1, me + 2)
+                .unwrap_err()
+                .contains("owned by")
+        );
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o751)).unwrap();
+        assert!(
+            check_socket_dir(&sock, me, me + 1)
+                .unwrap_err()
+                .contains("other")
+        );
+        let link = base.join("link");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&d, &link).unwrap();
+        assert!(check_socket_dir(&link.join("broker.sock"), me, me).is_err());
+        assert!(check_socket_dir(&base.join("missing/broker.sock"), me, me).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

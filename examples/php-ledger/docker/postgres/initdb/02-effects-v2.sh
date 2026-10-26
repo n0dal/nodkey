@@ -79,6 +79,9 @@ CREATE TABLE pending_effect (
 CREATE INDEX pending_effect_wid_state ON pending_effect (wid, state, expires_at);
 CREATE INDEX pending_effect_state ON pending_effect (state, state_changed_at);
 CREATE UNIQUE INDEX pending_effect_receipt ON pending_effect (receipt_id);
+-- Render's other_open_on_resource lookup (review BR-06).
+CREATE INDEX pending_effect_open_on_from ON pending_effect (op, ten, ((params::jsonb ->> 'from')))
+    WHERE state IN ('PENDING','APPROVED','EXECUTING');
 
 CREATE FUNCTION pending_effect_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -137,6 +140,7 @@ CREATE TABLE consumed_grant (
     outcome      text NOT NULL CHECK (outcome IN ('PENDING','ACCEPT','DENIED')),
     PRIMARY KEY (iss, jti)
 );
+CREATE INDEX consumed_grant_jti ON consumed_grant (jti);
 CREATE FUNCTION consumed_grant_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'INSERT' THEN
@@ -156,6 +160,24 @@ CREATE TRIGGER consumed_grant_guard BEFORE INSERT OR UPDATE ON consumed_grant
     FOR EACH ROW EXECUTE FUNCTION consumed_grant_guard();
 GRANT SELECT, INSERT ON consumed_grant TO nodkey_broker;
 GRANT UPDATE (outcome) ON consumed_grant TO nodkey_broker;
+
+-- Defense in depth (review BR-08): leaving APPROVED towards an executed state requires the
+-- record's grant (jti = pending_id) to be consumed with a matching decision, checked at commit:
+-- SUCCEEDED needs ACCEPT; FAILED needs DENIED or ACCEPT; EXECUTING needs a consumption row.
+CREATE FUNCTION pending_effect_requires_consumption() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.state = 'APPROVED' AND NEW.state IN ('SUCCEEDED','FAILED','EXECUTING') AND NOT EXISTS (
+        SELECT 1 FROM consumed_grant c WHERE c.jti = NEW.pending_id AND (
+               (NEW.state = 'SUCCEEDED' AND c.outcome = 'ACCEPT')
+            OR (NEW.state = 'FAILED' AND c.outcome IN ('DENIED','ACCEPT'))
+            OR (NEW.state = 'EXECUTING'))) THEN
+        RAISE EXCEPTION 'pending_effect: % -> % without a consumed grant', OLD.state, NEW.state;
+    END IF;
+    RETURN NULL;
+END $$;
+CREATE CONSTRAINT TRIGGER pending_effect_requires_consumption
+    AFTER UPDATE ON pending_effect DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION pending_effect_requires_consumption();
 
 -- Revocation (ADR-0006 §6, grant-v1 §8.6): grants with iat < before are revoked for the scope
 -- (ten), (ten, wid) or (ten, sub). Written by the operator (and later the gateway's revoke

@@ -27,7 +27,8 @@ workloads. It holds the database credential; workloads never do.
 Selected by a configuration with `"format": "nodkey.broker.v2"` (run with
 `--mounts-verified-externally`; the broker has no deployment-manifest reader, so it refuses to start
 without the flag). A v2 configuration cannot describe a v1 socket and vice versa; a v1 and a v2 broker
-never share a database (`broker_claim` row). Protocol v1 is for the Demo 1 profile only.
+never share a database (`broker_claim` row; v1 refuses to start if the table is missing). Protocol v1
+runs only with an explicit `"profile": "demo1"` in its configuration.
 
 | Socket | Methods |
 |---|---|
@@ -42,6 +43,21 @@ never share a database (`broker_claim` row). Protocol v1 is for the Demo 1 profi
   window check → verify → W10 consume → savepoint → W11–W13 → W14 (ownership, funds under row locks)
   → effect + `SUCCEEDED`, or rollback to savepoint + `FAILED/denied`. Any failure before commit leaves
   the record `APPROVED` with nothing consumed.
+- Availability (review BR-01): socket W uses its own pool (`db_pool_size`). Each workload is
+  capped at `limits.db_conns_per_wid` concurrent connections (default 2) and rate limits for
+  proposals, status and reads (`reads_per_min`, default 600). Sockets G and A, execution and
+  recovery use a separate control pool (`db_control_pool_size`, default 4) that workloads cannot reach.
+- Sockets are mode 0660; the peer connects through the socket's group. At start-up each socket
+  directory must be a real directory owned by the broker or the peer, with no "other" bits. Socket
+  directories must not nest. A workload socket that cannot be bound disables only that workload.
+  `SO_PEERCRED` remains the primary control.
+- Operator obligations:
+  - prune final `pending_effect` rows after a retention period;
+  - prune `consumed_grant` rows only after `exp + skew + margin` (grant-v1 §7.6).
+
+  The broker role cannot delete. `effect.propose` may return `unavailable` even though a `PENDING`
+  record was committed (the commit outcome was lost). The record is harmless, and it counts toward
+  the limits until it expires.
 - `config.digest` requires `authority_workloads_path`: the authority's `nodkey.workloads.v1`
   file, which must describe exactly this broker's workloads.
 

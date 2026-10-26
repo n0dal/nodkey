@@ -84,3 +84,58 @@ mod tests {
         assert!(!r.try_take("unknown", t0));
     }
 }
+
+/// Per-workload bound on concurrent database use (BR-01): a workload can hold at most `n`
+/// connections of the workload lane at once, whatever its request mix. Keys are the configured
+/// workloads; unknown keys are refused.
+#[derive(Debug)]
+pub struct ConcurrencyGate {
+    per_key: HashMap<String, std::sync::Arc<tokio::sync::Semaphore>>,
+}
+
+impl ConcurrencyGate {
+    pub fn new<'a>(n: usize, keys: impl Iterator<Item = &'a str>) -> Self {
+        ConcurrencyGate {
+            per_key: keys
+                .map(|k| {
+                    (
+                        k.to_owned(),
+                        std::sync::Arc::new(tokio::sync::Semaphore::new(n)),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// Waits at most `wait` for a slot. `None` on timeout or for an unknown key (fail closed).
+    pub async fn acquire(
+        &self,
+        key: &str,
+        wait: std::time::Duration,
+    ) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        let s = self.per_key.get(key)?.clone();
+        tokio::time::timeout(wait, s.acquire_owned())
+            .await
+            .ok()?
+            .ok()
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn one_workload_cannot_take_anothers_slots() {
+        let g = ConcurrencyGate::new(2, ["a", "b"].into_iter());
+        let w = Duration::from_millis(20);
+        let p1 = g.acquire("a", w).await.unwrap();
+        let _p2 = g.acquire("a", w).await.unwrap();
+        assert!(g.acquire("a", w).await.is_none(), "third slot for a");
+        assert!(g.acquire("b", w).await.is_some(), "b unaffected");
+        assert!(g.acquire("unknown", w).await.is_none());
+        drop(p1);
+        assert!(g.acquire("a", w).await.is_some());
+    }
+}

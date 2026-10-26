@@ -141,8 +141,7 @@ fn run_v1(cfg: Config) -> ExitCode {
             }
         }
         match claimed {
-            Ok(true) => server::log_event("db_claimed", json!({"protocol": 1})),
-            Ok(false) => server::log_event("db_claim_skipped", json!({"detail": "no broker_claim table (no v2 schema)"})),
+            Ok(()) => server::log_event("db_claimed", json!({"protocol": 1})),
             Err(e) => return fatal(&format!("database claim: {e}")),
         }
         let mut tasks = Vec::new();
@@ -200,6 +199,7 @@ fn run_v2(raw: RawV2Config, mounts_verified_externally: bool) -> ExitCode {
             Ok(b) => b,
             Err(e) => return fatal(&e),
         };
+        let broker_uid = uid;
         let cfg = match V2Config::from_raw(raw, &ops, &names, uid, mounts_verified_externally) {
             Ok(c) => c,
             Err(e) => return fatal(&e),
@@ -226,8 +226,11 @@ fn run_v2(raw: RawV2Config, mounts_verified_externally: bool) -> ExitCode {
             Ok(s) => s,
             Err(e) => return fatal(&e),
         };
-        let pool = db::Pool::new(&cfg.db, password, cfg.db_pool_size);
-        let broker = Arc::new(service::Broker::new(cfg, registry, ops, names, pool, config_digest, service::system_clock()));
+        let pool = db::Pool::new(&cfg.db, password.clone(), cfg.db_pool_size);
+        let control_pool = db::Pool::new(&cfg.db, password, cfg.db_control_pool_size);
+        let broker = Arc::new(service::Broker::new(
+            cfg, registry, ops, names, (pool, control_pool), config_digest, service::system_clock(),
+        ));
         let mut started = Err(String::new());
         for _ in 0..15 {
             started = broker.startup_checks().await;
@@ -251,8 +254,17 @@ fn run_v2(raw: RawV2Config, mounts_verified_externally: bool) -> ExitCode {
         }
         let mut tasks = Vec::new();
         for (path, ch, uid) in &channels {
-            let l = match v2server::bind_socket(path) {
+            let is_workload = matches!(ch, v2server::Channel::Workload(_));
+            let bound = v2server::check_socket_dir(path, broker_uid, *uid)
+                .and_then(|()| v2server::bind_socket(path));
+            let l = match bound {
                 Ok(l) => l,
+                // A workload controls its own socket directory: a bad workload path must not stop
+                // the broker serving everyone else (BR-05). That workload is not served.
+                Err(e) if is_workload => {
+                    server::log_event("alarm", json!({"kind": "workload_socket_unusable", "detail": e}));
+                    continue;
+                }
                 Err(e) => return fatal(&e),
             };
             server::log_event("listening", json!({"protocol": 2, "socket": path.display().to_string(), "uid": uid}));
