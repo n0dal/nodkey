@@ -1,5 +1,6 @@
-//! Adapter-side, non-consuming verification of a stored write grant for (re)transmission of an
-//! effect the broker already decided: `verify_retransmission` (payments-adapter-v1 Draft 2 §3.1).
+//! Adapter-side, non-consuming verification of a stored write grant (payments-adapter-v1
+//! Draft 3 §3.1): `verify_retransmission` for (re)transmission of an effect the broker already
+//! decided (with the age cap), and `verify_binding` for lookup-only operations (no age cap).
 //!
 //! This is deliberately a different entry point, context, result and error type from
 //! [`crate::verify`]: it never consumes, never yields a [`crate::WriteGrant`] or
@@ -125,7 +126,8 @@ impl<'a> RetransmissionContext<'a> {
             .params
             .iter()
             .all(|p| matches!(p.binding, Binding::Resource(_) | Binding::Exact(_)));
-        if decl.kind != OpKind::Write || !derivable {
+        // An empty tenant list is a start-up refusal (payments-adapter-v1 Draft 3 §3.1 step 4).
+        if decl.kind != OpKind::Write || !derivable || workload_tenants.is_empty() {
             return None;
         }
         Some(RetransmissionContext {
@@ -139,10 +141,10 @@ impl<'a> RetransmissionContext<'a> {
     }
 }
 
-/// A stored write grant that may be (re)transmitted. Not `Clone`; cannot be turned into a
-/// broker-side decision. All provider request values must be taken from [`Self::params`].
+/// Claims of a stored write grant that passed the adapter checks (private; exposed only through
+/// the two distinct result types).
 #[derive(Debug)]
-pub struct RetransmissionAuthorized {
+struct Checked {
     iss: String,
     jti: [u8; 16],
     kid: [u8; 16],
@@ -155,38 +157,63 @@ pub struct RetransmissionAuthorized {
     params: Params,
 }
 
+macro_rules! claim_accessors {
+    () => {
+        /// `(iss, jti)` for the idempotency-key derivation (payments-adapter-v1 §3.3).
+        pub fn idempotency_identity(&self) -> (&str, &[u8; 16]) {
+            (&self.c.iss, &self.c.jti)
+        }
+        pub fn kid(&self) -> &[u8; 16] {
+            &self.c.kid
+        }
+        pub fn op(&self) -> &str {
+            &self.c.op
+        }
+        pub fn opv(&self) -> u16 {
+            self.c.opv
+        }
+        pub fn iat(&self) -> u64 {
+            self.c.iat
+        }
+        /// Informational only: `exp` is not enforced on the adapter paths.
+        pub fn exp(&self) -> u64 {
+            self.c.exp
+        }
+        /// For the adapter's own order-view check (§3.2).
+        pub fn tenant(&self) -> &str {
+            &self.c.ten
+        }
+        pub fn subject(&self) -> &str {
+            &self.c.sub
+        }
+        /// The signed `res`/`con` values by declared parameter name.
+        pub fn params(&self) -> &Params {
+            &self.c.params
+        }
+    };
+}
+
+/// A stored write grant that may be (re)transmitted (`refund.create`): passed every check
+/// including the age cap. Not `Clone`; cannot be turned into a broker-side decision. All provider
+/// request values must be taken from [`Self::params`].
+#[derive(Debug)]
+pub struct RetransmissionAuthorized {
+    c: Checked,
+}
+
 impl RetransmissionAuthorized {
-    /// `(iss, jti)` for the idempotency-key derivation (payments-adapter-v1 §3.3).
-    pub fn idempotency_identity(&self) -> (&str, &[u8; 16]) {
-        (&self.iss, &self.jti)
-    }
-    pub fn kid(&self) -> &[u8; 16] {
-        &self.kid
-    }
-    pub fn op(&self) -> &str {
-        &self.op
-    }
-    pub fn opv(&self) -> u16 {
-        self.opv
-    }
-    pub fn iat(&self) -> u64 {
-        self.iat
-    }
-    /// Informational only: `exp` is not enforced on this path.
-    pub fn exp(&self) -> u64 {
-        self.exp
-    }
-    /// For the adapter's own order-view check (§3.2).
-    pub fn tenant(&self) -> &str {
-        &self.ten
-    }
-    pub fn subject(&self) -> &str {
-        &self.sub
-    }
-    /// The signed `res`/`con` values by declared parameter name.
-    pub fn params(&self) -> &Params {
-        &self.params
-    }
+    claim_accessors!();
+}
+
+/// A stored write grant verified for **lookups only** (no age cap). Deliberately has no
+/// conversion to [`RetransmissionAuthorized`]: it must never be used to send a create.
+#[derive(Debug)]
+pub struct BindingVerified {
+    c: Checked,
+}
+
+impl BindingVerified {
+    claim_accessors!();
 }
 
 fn to_value(s: &Scalar) -> ParamValue {
@@ -196,14 +223,36 @@ fn to_value(s: &Scalar) -> ParamValue {
     }
 }
 
-/// Verifies a stored write grant for (re)transmission without consuming it. See the module
-/// documentation for the exact checks.
+/// Verifies a stored write grant for (re)transmission (`refund.create`) without consuming it.
+/// See the module documentation for the exact checks, including the age cap.
 pub fn verify_retransmission(
     ctx: &RetransmissionContext<'_>,
     grant: &[u8],
     now: u64,
     r_max: RMax,
 ) -> Result<RetransmissionAuthorized, RetransmissionError> {
+    adapter_check(ctx, grant, now, Some(r_max)).map(|c| RetransmissionAuthorized { c })
+}
+
+/// Verifies a stored write grant for **lookup-only** operations (`refund.find`, `refund.get`,
+/// `idem.status`; payments-adapter-v1 Draft 3 §3.1, PA-18): every check of
+/// [`verify_retransmission`] except the age cap (and, like it, no `exp` and no consumption).
+/// The result, [`BindingVerified`], cannot be used where a [`RetransmissionAuthorized`] is
+/// required, so it can never authorize a create.
+pub fn verify_binding(
+    ctx: &RetransmissionContext<'_>,
+    grant: &[u8],
+    now: u64,
+) -> Result<BindingVerified, RetransmissionError> {
+    adapter_check(ctx, grant, now, None).map(|c| BindingVerified { c })
+}
+
+fn adapter_check(
+    ctx: &RetransmissionContext<'_>,
+    grant: &[u8],
+    now: u64,
+    r_max: Option<RMax>,
+) -> Result<Checked, RetransmissionError> {
     use GrantError::*;
     if now < CLOCK_FLOOR {
         return Err(RetransmissionError::ClockBelowFloor);
@@ -230,8 +279,10 @@ pub fn verify_retransmission(
         return Err(NotYetValid.into());
     }
     // Age cap replaces `exp`. iat may lead `now` by up to `skew` (age 0 then).
-    if now.saturating_sub(p.iat) > r_max.seconds() {
-        return Err(RetransmissionError::AgeExceeded);
+    if let Some(r_max) = r_max {
+        if now.saturating_sub(p.iat) > r_max.seconds() {
+            return Err(RetransmissionError::AgeExceeded);
+        }
     }
     // 9a–9c.
     if p.aud.as_bytes() != ctx.broker_id.as_str().as_bytes() {
@@ -298,7 +349,7 @@ pub fn verify_retransmission(
     if res.len() != n_res || con.len() != n_con {
         return Err(OpSchemaInvalid.into());
     }
-    Ok(RetransmissionAuthorized {
+    Ok(Checked {
         iss: p.iss,
         jti: p.jti,
         kid,

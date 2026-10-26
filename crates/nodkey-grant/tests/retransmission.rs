@@ -426,3 +426,99 @@ fn context_refuses_non_derivable_or_read_operations() {
     assert!(!mk("payments.bounded"), "bounded value is not in the grant");
     assert!(!mk("payments.unknown"));
 }
+
+mod binding {
+    use super::*;
+    use nodkey_grant::verify_binding;
+
+    #[test]
+    fn old_and_expired_grant_accepted_for_lookup_but_not_for_create() {
+        let e = env();
+        let g = refund(IAT).sign(&key(SEED_A)).unwrap();
+        let late = IAT + 10 * RMAX;
+        let b = verify_binding(&ctx(&e), &g, late).unwrap();
+        assert_eq!(b.idempotency_identity(), (ISS, &[9u8; 16]));
+        assert_eq!(
+            b.params()["charge_id"],
+            ParamValue::Text("ch_ABCDEFGH12".into())
+        );
+        assert_eq!(
+            verify_retransmission(&ctx(&e), &g, late, rmax()).map(|_| ()),
+            Err(RetransmissionError::AgeExceeded)
+        );
+    }
+
+    #[test]
+    fn tampered_read_and_mismatched_grants_rejected() {
+        use GrantError::*;
+        let e = env();
+        let now = IAT + 10;
+        let vb = |b: GrantBuilder, seed: &str| {
+            let g = b.sign(&key(seed)).unwrap();
+            verify_binding(&ctx(&e), &g, now).map(|_| ())
+        };
+        let mut g = refund(IAT).sign(&key(SEED_A)).unwrap();
+        let mid = g.len() / 2;
+        g[mid] ^= 1;
+        assert!(verify_binding(&ctx(&e), &g, now).is_err(), "tampered");
+        let read = GrantBuilder::read()
+            .issuer(ISS)
+            .audience(BROKER)
+            .jti([9; 16])
+            .times(IAT, IAT, IAT + 30)
+            .workload(SHOP)
+            .tenant("acme")
+            .subject("user:u-17")
+            .read_op("payments.refund", 1);
+        assert_eq!(vb(read, SEED_A), grant_err(KindMismatch));
+        assert_eq!(
+            vb(refund(IAT).workload(APP1), SEED_A),
+            grant_err(WorkloadMismatch)
+        );
+        assert_eq!(
+            vb(refund(IAT).tenant("globex"), SEED_A),
+            grant_err(TenantMismatch)
+        );
+        assert_eq!(
+            vb(refund(IAT).confirmed(false), SEED_A),
+            grant_err(ConfirmationRequired)
+        );
+        assert_eq!(
+            vb(retarget("payments.refund", 2), SEED_A),
+            grant_err(OpvUnsupported)
+        );
+        assert_eq!(
+            vb(refund(IAT).exact(3, ParamValue::Uint(1)), SEED_A),
+            grant_err(OpSchemaInvalid)
+        );
+        assert_eq!(vb(refund(IAT), SEED_C), grant_err(KeyRevoked));
+        assert_eq!(
+            vb(refund(IAT).issuer("nodkey.other"), SEED_A),
+            grant_err(IssuerMismatch)
+        );
+        assert_eq!(vb(refund(now + 6), SEED_A), grant_err(NotYetValid));
+        assert_eq!(
+            vb(refund(1_767_225_600), SEED_D),
+            grant_err(KeyInactive),
+            "key window at iat"
+        );
+    }
+
+    #[test]
+    fn empty_tenant_list_refused_at_start_up() {
+        let e = env();
+        let none: Vec<String> = Vec::new();
+        assert!(
+            RetransmissionContext::new(
+                &e.registry,
+                &e.bid,
+                SHOP,
+                &none,
+                &e.ops,
+                "payments.refund",
+                Limits::default()
+            )
+            .is_none()
+        );
+    }
+}

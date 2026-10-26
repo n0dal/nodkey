@@ -109,6 +109,11 @@ The payments adapter calls this to (re)send an effect the broker already decided
 `idempotency_identity()` returns the `(iss, jti)` pair for the provider idempotency key. Every
 provider value comes from `params()`, the signed `res`/`con` values.
 
+`verify_binding` (Draft 3, PA-18) is the lookup-only variant for `refund.find`, `refund.get` and
+`idem.status`. It runs the same checks **without** the age cap. Its result, `BindingVerified`, has
+no conversion to `RetransmissionAuthorized`, so it can never authorize a create. An empty tenant
+list makes `RetransmissionContext::new` refuse.
+
 Adapter obligations:
 - check `amount_minor ≥ 1` (SPEC_ISSUES.md RX-3);
 - check its own order view (§3.2);
@@ -149,7 +154,7 @@ cargo fmt --check
 |---|---|
 | `tests/conformance.rs` | Every vector in the manifest:<br>• 280 grant vectors (293 steps)<br>• 26 registry, 19 operation-declaration and 11 transport vectors<br>• 3 request-hash examples<br>W10 and the savepoint recording rule are simulated with an in-memory store. The test also asserts that only CON-20..24 bypass the strict request parser. |
 | `tests/roundtrip.rs` | • Builder → verify → decide<br>• Byte-exact reproduction of ACC-01<br>• Strict request parsing (GC-01)<br>• The consumption hash and `Authorized::params` match the validated request (GC-02)<br>• Builder refusals<br>• 300 randomized `test.hold` grants |
-| `tests/retransmission.rs` | `verify_retransmission`:<br>• age-cap boundaries, and an expired-but-young grant accepted while `verify` still says `grant_expired`<br>• future `iat`, and every binding or schema mismatch<br>• read grant, key revoked or unknown, key window at `iat`<br>• clock floor, the `R_max` start-up rule, and context refusals |
+| `tests/retransmission.rs` | `verify_retransmission` and `verify_binding`:<br>• age-cap boundaries, and an expired-but-young grant accepted while `verify` still says `grant_expired`<br>• future `iat`, and every binding or schema mismatch<br>• read grant, key revoked or unknown, key window at `iat`<br>• clock floor, the `R_max` start-up rule, and context refusals<br>• `verify_binding`: an old grant is accepted for lookup but refused for create; tampered, read and mismatched grants are rejected |
 | `tests/robustness.rs` | • Over 1.4 million truncated, mutated, extended and random variants of every vector<br>• Re-signed mutated payloads<br>The checks are no panics, and no mutation of an accepted grant is ever accepted. |
 
 Spec issues: [`SPEC_ISSUES.md`](SPEC_ISSUES.md).

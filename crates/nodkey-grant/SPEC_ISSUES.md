@@ -26,7 +26,13 @@ crate now implements **Draft 2**.
 | D2-3 | Low | §6.3 | The crate also refuses a write operation that binds no `res` or `con` parameter, because a grant for it would bind only the operation name (review GC-05). §6.3 does not list this refusal; OPS-01 is unaffected. | Refused (`ops_declaration_invalid`). | Ratify the rule in §6.3 (and add an OPS vector), or drop it from the crate. |
 | D2-4 | Low | §7.3, W14 | The spec does not say whether the time checks (4d, 8d, 8e) must still hold at commit. A transaction that waits on locks can commit after `exp + skew` (review GC-03). | Not enforced by the crate. Listed as a caller obligation in the README. | State the rule: re-check `now < exp + skew` at commit, or bound transaction time. |
 
-## `verify_retransmission` (payments-adapter-v1 Draft 2 §3.1)
+## `verify_retransmission` / `verify_binding` (payments-adapter-v1 §3.1)
+
+RX-1 to RX-6 are **resolved** by payments-adapter-v1 Draft 3 §3.1 ("Exact verification procedure"). The crate
+already matched the resolution: the tenant list is the adapter's configured `tenants`, and an empty list is
+now a start-up refusal. RX-3 and RX-6 remain adapter rules on `params()`. Draft 3 adds `verify_binding`
+(PA-18): the same checks without the age cap, for lookups only, with its own result type. The table below
+is kept for history.
 
 | Id | Severity | Where | Issue | Reading used here | Proposed fix |
 |---|---|---|---|---|---|

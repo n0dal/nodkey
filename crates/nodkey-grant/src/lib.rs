@@ -10,7 +10,8 @@
 //!   obligations are listed in the crate README.
 //! - [`verify_retransmission`] — payments adapter only (payments-adapter-v1 Draft 2 §3.1):
 //!   non-consuming check of a stored write grant with an age cap instead of `exp`. Separate
-//!   context, result and error types; never use it on the broker path.
+//!   context, result and error types; never use it on the broker path. [`verify_binding`] is the
+//!   lookup-only variant (no age cap) with its own result type, [`BindingVerified`].
 //! - [`GrantBuilder`] — issuer side (spec §9).
 //!
 //! Error codes are broker-facing (audit log only); the workload sees `grant_denied` (spec §7.4).
@@ -41,8 +42,8 @@ pub use ops::{
 pub use payload::GrantKind;
 pub use registry::{ALG_ED25519, KeyEntry, KeyStatus, Registry, derive_kid};
 pub use retransmit::{
-    CLOCK_FLOOR, RMax, RetransmissionAuthorized, RetransmissionContext, RetransmissionError,
-    verify_retransmission,
+    BindingVerified, CLOCK_FLOOR, RMax, RetransmissionAuthorized, RetransmissionContext,
+    RetransmissionError, verify_binding, verify_retransmission,
 };
 pub use transport::{decode_transport, encode_transport};
 pub use verify::{
