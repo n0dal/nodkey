@@ -401,11 +401,11 @@ mod tests {
     /// T28 / T37 (broker side): every DG vector reproduces its CBOR bytes and digest exactly,
     /// every rejection is rejected.
     #[test]
-    fn digest_vectors_dg01_dg10() {
+    fn digest_vectors_all() {
         let doc = vectors();
         assert_eq!(doc["label"], "nodkey.pending.v1");
         let vs = doc["vectors"].as_array().unwrap();
-        assert_eq!(vs.len(), 10);
+        assert_eq!(vs.len(), 12);
         let (mut accepted, mut rejected) = (0, 0);
         for v in vs {
             let id = v["id"].as_str().unwrap();
@@ -428,7 +428,7 @@ mod tests {
                 accepted += 1;
             }
         }
-        assert_eq!((accepted, rejected), (6, 4));
+        assert_eq!((accepted, rejected), (8, 4));
     }
 
     #[test]

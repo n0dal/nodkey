@@ -236,6 +236,15 @@ fn main() {
     let mut nonascii = refund.clone();
     nonascii["approver_sub"] = json!("user:u-\u{e9}");
     vectors.push(("DG-10-non-ascii-id".into(), "approver_sub contains U+00E9".into(), nonascii, Some("reject".into())));
+    // Draft 3.1: payments.refund binds the broker-resolved charge_id (con2, text64).
+    let charged = |charge: &str| base(
+        "payments.refund",
+        json!({"order_id": "uint", "amount_minor": "uint", "currency": "currency", "charge_id": "text64"}),
+        json!({"order_id": 9821, "amount_minor": 1250, "currency": "EUR", "charge_id": charge}),
+        json!({"amount_exponent": 2, "currency": "EUR"}),
+    );
+    vectors.push(("DG-11-refund-charge-id".into(), "payments.refund (Draft 3.1) with the broker-resolved charge_id as a text64 parameter".into(), charged("ch_demoorder0001"), None));
+    vectors.push(("DG-12-refund-charge-unresolved".into(), "payments.refund (Draft 3.1) for an order with no trusted row: charge_id = reserved value \"unresolved\"".into(), charged("unresolved"), None));
 
     let mut arr = Vec::new();
     for (id, d, rec, rej) in vectors {

@@ -307,6 +307,72 @@
       },
       "expected": "reject",
       "reason": "approver_sub: not an ID"
+    },
+    {
+      "id": "DG-11-refund-charge-id",
+      "description": "payments.refund (Draft 3.1) with the broker-resolved charge_id as a text64 parameter",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 1250,
+          "currency": "EUR",
+          "charge_id": "ch_demoorder0001"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency",
+          "charge_id": "text64"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d3137056f7061796d656e74732e726566756e64060107a46863757272656e637963455552686f726465725f696419265d696368617267655f69647063685f64656d6f6f72646572303030316c616d6f756e745f6d696e6f721904e2081a6add4680091a6add48d80aa46863757272656e63796863757272656e6379686f726465725f69646475696e74696368617267655f6964667465787436346c616d6f756e745f6d696e6f726475696e740ba26863757272656e6379634555526f616d6f756e745f6578706f6e656e7402",
+      "digest": "24ebed8075f9da541ab23665dae6f6bad27fe062e69cf96747ed484aa4a3c259"
+    },
+    {
+      "id": "DG-12-refund-charge-unresolved",
+      "description": "payments.refund (Draft 3.1) for an order with no trusted row: charge_id = reserved value \"unresolved\"",
+      "record": {
+        "pending_id": "-xEiM0RVZneImaq7zN3u_w",
+        "broker_id": "nodkey.broker.payments-test",
+        "wid": "spiffe://nodkey.test/workload/shop",
+        "ten": "acme",
+        "approver_sub": "user:u-17",
+        "op": "payments.refund",
+        "opv": 1,
+        "params": {
+          "order_id": 9821,
+          "amount_minor": 1250,
+          "currency": "EUR",
+          "charge_id": "unresolved"
+        },
+        "param_types": {
+          "order_id": "uint",
+          "amount_minor": "uint",
+          "currency": "currency",
+          "charge_id": "text64"
+        },
+        "created_at": 1792886400,
+        "expires_at": 1792887000,
+        "display": {
+          "amount_exponent": 2,
+          "currency": "EUR"
+        }
+      },
+      "cbor_hex": "ac0050fb112233445566778899aabbccddeeff01781d676c6569706e69722e62726f6b65722e7061796d656e74732d746573740278247370696666653a2f2f676c6569706e69722e746573742f776f726b6c6f61642f73686f70036461636d650469757365723a752d3137056f7061796d656e74732e726566756e64060107a46863757272656e637963455552686f726465725f696419265d696368617267655f69646a756e7265736f6c7665646c616d6f756e745f6d696e6f721904e2081a6add4680091a6add48d80aa46863757272656e63796863757272656e6379686f726465725f69646475696e74696368617267655f6964667465787436346c616d6f756e745f6d696e6f726475696e740ba26863757272656e6379634555526f616d6f756e745f6578706f6e656e7402",
+      "digest": "bc2e5e7818cd149c37a4484b0d5b3b9720cc1ff3e2523ce26e237a0b4613855c"
     }
   ]
 }

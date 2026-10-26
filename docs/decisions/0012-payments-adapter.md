@@ -1,6 +1,6 @@
 # ADR-0012: Payments adapter for Demo P — grant-verifying adapter process, broker-owned effect state, reconciler (rev. 1)
 
-- **Status:** Accepted (rev. 1, 2026-10-25). All blocking findings of
+- **Status:** Proposed (2026-10-25) — re-check found PA-01/03/04 partially fixed and new PA-15..PA-19; revision 2 pending.
   [`2026-10-25-payments-adapter-review.md`](../reviews/2026-10-25-payments-adapter-review.md) (PA-01..PA-04)
   are addressed in rev. 1 and payments-adapter-v1 Draft 2 (resolution table in the review). Rev. 1 has not
   been re-reviewed; implementation must be independently reviewed.

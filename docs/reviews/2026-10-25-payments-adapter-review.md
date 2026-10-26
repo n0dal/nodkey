@@ -412,3 +412,69 @@ Appended by the spec author; not a re-review. "Spec" = payments-adapter-v1 Draft
 
 Blocking items PA-01..PA-04 are addressed; ADR-0012 set to Accepted (rev. 1) per the orchestrator's
 instruction. Draft 2 has not been re-reviewed; the implementation review must cover it.
+
+## Re-check of Draft 2 (2026-10-25)
+
+Independent re-check of the Resolution table above against payments-adapter-v1 Draft 2,
+effect-protocol-v2 Draft 3.1 (§2.3 propose, §5 refund row, §11), ADR-0012 rev. 1 and ADR-0006
+Amendment 2. Design review only, under a time box: nothing was built or run, and simpay source and
+`nodkey-grant` were not re-read. "Verified" means the fix is specified in normative text (MUST /
+refuses / exact tables) and I found no new hole in it. It does not mean it is implemented.
+
+| ID | Re-check | Note |
+|---|---|---|
+| PA-01 | **Partially** | con2 is broker-resolved, digest-covered and signed (effect-protocol §2.3, §5). The adapter's §3.2 check binds con2 to `(ten, owner_sub, currency)` in its own view. `unresolved` cannot match `^ch_…` + UNIQUE, so it fails closed. But the fix is only as strong as the adapter's DB channel, which the broker can attack: see PA-16, PA-17 |
+| PA-02 | **Verified** | §3.1 age rule replaces `exp`. The start-up rule `R_max < retention − margin` is in the safe direction: provider retention runs from the first use of the key, which is ≥ `iat`. The case (i) residual is published in §10. ADR-0006 7b is normative |
+| PA-03 | **Partially** | The §2 file, registry, clock and secret table is sufficient and normative. The "orders view" row covers privileges only. It does not cover transport integrity or name resolution of the view (PA-16, PA-17) |
+| PA-04 | **Partially** | `UNIQUE(charge_id)`, immutable columns, an operator-only writer and SI-10 conditioning are specified. But the per-charge lock in T1 step 1 (`SELECT … FOR UPDATE`) contradicts §2's "`nodkey_broker` has `SELECT` only" (PA-15) |
+| PA-05 | **Verified** | §7.3 does lookup-first and stops on `none` after round 1. `resend_deadline` = `iat + R_max − 60`. The adapter window is independent of the broker clock |
+| PA-06 | **Verified** | §7.2 lease CAS is committed before each call, re-asserted before each retry, and late T3 is discarded. Recovery waits for lease expiry |
+| PA-07 | **Verified** | §7.2 W14 check order is normative, ownership first. §8 enum. PT-34 |
+| PA-08 | **Verified (plan)** | PT-29..PT-37 present. Add tests for PA-15..PA-18 below |
+| PA-09 | Verified | §3.3 derivation has domain separation and length prefixes, plus `idem_kid` |
+| PA-10 | Verified | §5, §6.1 |
+| PA-11 | Verified (SHOULD) | §7.1 |
+| PA-12 | Not re-checked | simpay `src/api.rs` was not read in this pass |
+| PA-13 | Verified | §3.1, §7.5, §9 |
+| PA-14 | Verified | ADR-0012 rev. 1 and ADR-0006 Am. 2 are present and consistent with the spec |
+
+### New findings (PA-15 onward)
+
+- **PA-15 — Medium — T1 cannot take the `orders` row lock with a SELECT-only role.** In PostgreSQL,
+  `SELECT … FOR UPDATE/SHARE` requires `UPDATE` privilege on at least one column (PostgreSQL docs,
+  SELECT, "The Locking Clause"). §2 grants `nodkey_broker` `SELECT` only on `orders`, yet §7.2
+  locks the row. As written, either T1 fails or an implementer grants `UPDATE` on `orders`, which
+  re-opens PA-04 (`status`, `external_refunded_minor`). Fix: lock a broker-owned
+  `charge_lock(charge_id PK)` row instead, or `GRANT UPDATE (lock_dummy)` on one column that no
+  check reads, and state which. Add the case to PT-31.
+- **PA-16 — High — The adapter's DB connection is not protected against the broker on the shared
+  `data` network.** The adapter and the broker share `data`. pg_hba admits by source IP plus SCRAM,
+  and §9 specifies no TLS (`sslmode`, `channel_binding`) and no capability drop. Hypothesis: if the
+  compromised broker container has `CAP_NET_RAW` (in Docker's default set), it can ARP-spoof on the
+  bridge and relay the adapter's cleartext PostgreSQL session. It then rewrites the §3.2 result
+  (owner, charge), so a grant whose con2 the broker chose at propose passes the adapter's check. That
+  undoes PA-01 under attacker J. SCRAM without channel binding does not stop a relaying MITM. Fix
+  (normative): PostgreSQL TLS with `sslmode=verify-full` against a pinned CA, plus
+  `channel_binding=require`. Also `cap_drop: [ALL]` on the broker and the adapter, or a separate
+  network that holds only the adapter and PostgreSQL. Add a PT-13/PT-31 case: from the broker, try
+  ARP/raw socket and a plaintext DB connection as the adapter role.
+- **PA-17 — Medium — The `orders` name that the adapter queries is not pinned.** §2 gives an
+  unqualified `FROM orders` and does not say who owns the database or schema. If `nodkey_broker` has
+  `CREATE` on the database or on any schema in the adapter role's `search_path`, it can create a
+  shadowing `orders` view that returns forged rows. Fix: schema-qualify the name (`nodkey.orders`),
+  `ALTER ROLE nodkey_payments_adapter SET search_path = ''`, and give the broker no `CREATE` on that
+  schema or the database. Add to PT-31.
+- **PA-18 — Medium — The age rule on every op contradicts the post-window lookups.** §4 says "Every op
+  runs §3.1 first", including `now − iat ≤ R_max`, and ADR-0006 7b says "refuses any request". But
+  §7.3 step 4 (daily lookups for 7 days) and settlement polling (30 days) call `refund.find` and
+  `refund.get` with the grant after `R_max`. Those calls are always `grant_refused`, so `UNKNOWN` can
+  never resolve to `SUCCEEDED` after 12 h, and settlement is never observed. This fails safe, but it is
+  a liveness and accounting gap. Fix: apply the age rule to `refund.create` only. Give lookups a
+  separate `R_lookup` bound (e.g. 31 d), still with signature and claim checks. Amend 7b to match.
+- **PA-19 — Low — con2 is not syntax-checked before it is used in a lookup URL.** `refund.find` and
+  `refund.get` do not run §3.2, and con2 is `text64`. §3.1 should require `^ch_[A-Za-z0-9]{8,64}$`
+  for con2 on every op, and §5 should state percent-encoding for query parameters.
+
+ADR-0012 may be Accepted: no. PA-16 (High) undoes the PA-01 binding under broker compromise. PA-15
+makes the PA-04 lock unimplementable as written. Both need only spec text changes. Re-check after
+they land.

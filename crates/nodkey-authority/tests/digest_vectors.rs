@@ -1,5 +1,5 @@
 //! T28/T37: the authority's digest code against tests/vectors/effect-v2/digest-vectors.json
-//! (DG-01..DG-10), which were produced by an independent generator and cross-checked in Python.
+//! (DG-01..DG-12), which were produced by an independent generator and cross-checked in Python.
 
 use nodkey_authority::digest::{PendingRecord, hex};
 use serde_json::Value;
@@ -10,12 +10,12 @@ const VECTORS: &str = concat!(
 );
 
 #[test]
-fn digest_vectors_dg01_to_dg10() {
+fn digest_vectors_all() {
     let doc: Value = serde_json::from_str(&std::fs::read_to_string(VECTORS).unwrap()).unwrap();
     assert_eq!(doc["format"], "nodkey.effect-v2.digest-vectors");
     assert_eq!(doc["label"], "nodkey.pending.v1");
     let vectors = doc["vectors"].as_array().unwrap();
-    assert_eq!(vectors.len(), 10);
+    assert_eq!(vectors.len(), 12);
     let (mut accepted, mut rejected) = (0, 0);
     for v in vectors {
         let id = v["id"].as_str().unwrap();
@@ -39,5 +39,5 @@ fn digest_vectors_dg01_to_dg10() {
             accepted += 1;
         }
     }
-    assert_eq!((accepted, rejected), (6, 4));
+    assert_eq!((accepted, rejected), (8, 4));
 }
