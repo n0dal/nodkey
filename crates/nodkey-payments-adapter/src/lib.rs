@@ -27,7 +27,7 @@ use std::time::Duration;
 
 use nodkey_grant::{BrokerId, Registry};
 
-use config::{Config, Uids};
+use config::Config;
 use server::Adapter;
 
 /// Size limits for the §2 input files.
@@ -47,19 +47,9 @@ pub fn own_uid() -> Result<u32, String> {
 /// adapter. Any error means the adapter must not start. Production order view: PostgreSQL over
 /// the `pg-adapter` Unix socket.
 pub fn load(config_path: &std::path::Path, own_uid: u32) -> Result<(Adapter, Config), String> {
-    // The config file's own owner check needs the broker uid, which is inside the file: read it
-    // with the adapter-uid check first, then re-check with the broker uid once parsed.
-    let pre = Uids {
-        own: own_uid,
-        broker: own_uid,
-    };
-    let bytes = config::read_operator_file(config_path, pre, MAX_CONFIG)?;
+    // One checked read (owner root, §2); the bytes parsed are the bytes checked (PC-A-03).
+    let bytes = config::read_operator_file(config_path, config::OPERATOR_UID, MAX_CONFIG)?;
     let cfg = config::parse_config(&bytes)?;
-    let uids = Uids {
-        own: own_uid,
-        broker: cfg.broker_uid,
-    };
-    config::read_operator_file(config_path, uids, MAX_CONFIG)?;
     config::check_own_uid(&cfg, own_uid)?;
     let sock_dir = cfg
         .socket_path
@@ -71,11 +61,16 @@ pub fn load(config_path: &std::path::Path, own_uid: u32) -> Result<(Adapter, Con
             return Err("socket P directory overlaps an input file".into());
         }
     }
-    let registry_bytes = config::read_operator_file(&cfg.registry_path, uids, MAX_REGISTRY)?;
+    let registry_bytes =
+        config::read_operator_file(&cfg.registry_path, config::OPERATOR_UID, MAX_REGISTRY)?;
     let registry_text =
         std::str::from_utf8(&registry_bytes).map_err(|_| "registry is not UTF-8".to_string())?;
     let registry = Registry::load(registry_text).map_err(|_| "registry invalid".to_string())?;
-    let ca = config::parse_ca(&config::read_operator_file(&cfg.ca_file, uids, MAX_CA)?)?;
+    let ca = config::parse_ca(&config::read_operator_file(
+        &cfg.ca_file,
+        config::OPERATOR_UID,
+        MAX_CA,
+    )?)?;
     let key = config::parse_api_key(&config::read_secret_file(&cfg.key_file, own_uid)?)?;
     let kidem = config::parse_idem_key(&config::read_secret_file(&cfg.idem_key_file, own_uid)?)?;
     let password = config::parse_password(&config::read_secret_file(&cfg.password_file, own_uid)?)?;
@@ -109,6 +104,10 @@ pub fn build(
     orders: Arc<dyn orders::OrderView>,
 ) -> Result<Adapter, String> {
     let broker_id = BrokerId::new(&cfg.broker_id).ok_or("broker_id invalid")?;
+    // §3.3 start check: the key's activation time is not in the future.
+    if cfg.idem_key_not_before > log::now_s() {
+        return Err("provider.idem_key_not_before is in the future".into());
+    }
     let grants = grant::GrantInputs {
         registry,
         operations: grant::operations(),

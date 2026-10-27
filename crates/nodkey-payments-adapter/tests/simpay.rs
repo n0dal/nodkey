@@ -662,3 +662,46 @@ async fn lookup_lies_are_ambiguous() {
         assert_eq!(result_class(&v).0, "ambiguous", "{op} {kind}: {v}");
     }
 }
+
+/// PC-A-01 / PT-36 variant, the reviewer's scenario: a grant younger than `R_max` is executed
+/// (SUCCEEDED) under K1; the operator rotates `K_idem` and restarts the adapter only; a
+/// compromised broker resends the grant. With `idem_key_not_before` = rotation time the resend
+/// is refused under the new kid and refused under the old kid; nothing is sent; ledger 1.
+/// Baseline positive control: the same resend to an adapter with K2 but no activation time
+/// executes a second refund (the attack the rule prevents).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rotated_key_does_not_repeat_a_young_grant() {
+    let e = env().await;
+    let g = grant(500);
+    assert_eq!(result_class(&e.p.create(&g).await).0, "created");
+    assert_eq!(e.s.ledger(CH_USD), (1, 500));
+    let k1 = e.p.adapter.idem.kid();
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    // Rotation: the adapter restarts with K2, activation time = now.
+    let mut o = Opts::new(e.s.api);
+    o.kidem = [0x77; 32];
+    o.idem_key_not_before = now();
+    let p2 = start_p(o).await;
+    let k2 = p2.adapter.idem.kid();
+    assert_ne!(k1, k2);
+    let v = p2.create(&g).await;
+    assert_eq!(err_code(&v), "grant_refused", "{v}");
+    let v = p2
+        .call("refund.create", json!({"grant": g, "idem_kid": k1}))
+        .await;
+    assert_eq!(err_code(&v), "idem_kid_mismatch", "{v}");
+    assert_eq!(e.s.ledger(CH_USD), (1, 500), "no second refund");
+    // A grant issued after the rotation is served under K2.
+    assert_eq!(result_class(&p2.create(&grant(7)).await).0, "created");
+    assert_eq!(e.s.ledger(CH_USD), (2, 507));
+    // Baseline: K2 without an activation time repeats the young grant.
+    let mut o = Opts::new(e.s.api);
+    o.kidem = [0x77; 32];
+    let p3 = start_p(o).await;
+    assert_eq!(result_class(&p3.create(&g).await).0, "created");
+    assert_eq!(
+        e.s.ledger(CH_USD),
+        (3, 1007),
+        "baseline: the attack succeeds"
+    );
+}

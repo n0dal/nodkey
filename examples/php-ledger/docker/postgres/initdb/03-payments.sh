@@ -28,6 +28,8 @@ SQL
 psql -v ON_ERROR_STOP=1 --username postgres --dbname postgres <<'SQL'
 CREATE ROLE nodkey_payments_adapter NOLOGIN NOINHERIT;
 CREATE ROLE nodkey_shop_operator NOLOGIN NOINHERIT;
+-- Owner of the counter check (BP-02): may read the two tables it compares, nothing else.
+CREATE ROLE nodkey_payments_checker NOLOGIN NOINHERIT;
 SQL
 role_login nodkey_payments_adapter /run/secrets/db_adapter_password
 role_login nodkey_shop_operator /run/secrets/db_operator_password
@@ -128,7 +130,8 @@ CREATE TABLE nodkey.payment_effect (
     state              text NOT NULL CHECK (state IN ('RESERVED','DISPATCHED','SUCCEEDED','FAILED','UNKNOWN')),
     reason             text CHECK (reason IN ('not_dispatched','not_sent','provider_declined',
                                               'lost_response','ambiguous','refused','grant_refused',
-                                              'adapter_failure','busy','operator_required')),
+                                              'adapter_failure','busy','operator_required',
+                                              'key_mismatch')),
     released           boolean NOT NULL DEFAULT false,
     provider_refund_id text CHECK (provider_refund_id ~ '^re_[A-Za-z0-9]{8,64}$'),
     settlement         text CHECK (settlement IN ('pending','succeeded','failed')),
@@ -147,6 +150,9 @@ CREATE TABLE nodkey.payment_effect (
     CHECK ((state = 'SUCCEEDED') = (settlement IS NOT NULL))
 );
 CREATE INDEX payment_effect_charge ON nodkey.payment_effect (charge_id);
+-- A provider refund id confirms at most one row (BP-08).
+CREATE UNIQUE INDEX payment_effect_refund_id ON nodkey.payment_effect (provider_refund_id)
+    WHERE provider_refund_id IS NOT NULL;
 CREATE INDEX payment_effect_state ON nodkey.payment_effect (state, next_check_at);
 
 CREATE FUNCTION nodkey.payment_effect_guard() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
@@ -192,29 +198,43 @@ CREATE TRIGGER payment_effect_guard BEFORE INSERT OR UPDATE ON nodkey.payment_ef
     FOR EACH ROW EXECUTE FUNCTION nodkey.payment_effect_guard();
 
 -- At commit, the charge's counters equal the sums over its payment_effect rows (PA-15).
-CREATE FUNCTION nodkey.charge_counters_check() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
+-- SECURITY DEFINER (BP-02): a deferred trigger runs at COMMIT as the committing role, which for
+-- an operator update of `orders` (through orders_lock_charge) is nodkey_shop_operator, a role
+-- without access to either table. The owner is nodkey_payments_checker (SELECT on the two
+-- tables only), search_path is empty, EXECUTE is revoked from PUBLIC. Both sides are read in
+-- one statement, so one snapshot (BP-06).
+CREATE FUNCTION nodkey.charge_counters_check() RETURNS trigger LANGUAGE plpgsql
+    SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
-    s record;
-    e record;
+    r record;
 BEGIN
-    SELECT succeeded_minor, inflight_minor, unknown_minor INTO s
-        FROM nodkey.charge_refund_state WHERE charge_id = NEW.charge_id;
-    SELECT COALESCE(sum(amount_minor) FILTER (WHERE state = 'SUCCEEDED'), 0) AS succ,
-           COALESCE(sum(amount_minor) FILTER (WHERE state IN ('RESERVED','DISPATCHED')), 0) AS infl,
-           COALESCE(sum(amount_minor) FILTER (WHERE state = 'UNKNOWN'), 0) AS unk
-        INTO e FROM nodkey.payment_effect WHERE charge_id = NEW.charge_id;
-    IF s IS NULL THEN
-        IF e.succ + e.infl + e.unk <> 0 THEN
+    SELECT s.charge_id IS NOT NULL AS has_row,
+           s.succeeded_minor, s.inflight_minor, s.unknown_minor, e.succ, e.infl, e.unk
+      INTO r
+      FROM (SELECT COALESCE(sum(amount_minor) FILTER (WHERE state = 'SUCCEEDED'), 0) AS succ,
+                   COALESCE(sum(amount_minor) FILTER (WHERE state IN ('RESERVED','DISPATCHED')), 0) AS infl,
+                   COALESCE(sum(amount_minor) FILTER (WHERE state = 'UNKNOWN'), 0) AS unk
+              FROM nodkey.payment_effect WHERE charge_id = NEW.charge_id) e
+      LEFT JOIN nodkey.charge_refund_state s ON s.charge_id = NEW.charge_id;
+    IF NOT r.has_row THEN
+        IF r.succ + r.infl + r.unk <> 0 THEN
             RAISE EXCEPTION 'charge_refund_state: missing row for charge with effects';
         END IF;
         RETURN NULL;
     END IF;
-    IF s.succeeded_minor <> e.succ OR s.inflight_minor <> e.infl OR s.unknown_minor <> e.unk THEN
+    IF r.succeeded_minor <> r.succ OR r.inflight_minor <> r.infl OR r.unknown_minor <> r.unk THEN
         RAISE EXCEPTION 'charge_refund_state: counters out of step with payment_effect';
     END IF;
     RETURN NULL;
 END $$;
-CREATE CONSTRAINT TRIGGER payment_effect_counters AFTER INSERT OR UPDATE ON nodkey.payment_effect
+REVOKE ALL ON FUNCTION nodkey.charge_counters_check() FROM PUBLIC;
+GRANT USAGE ON SCHEMA nodkey TO nodkey_payments_checker;
+GRANT SELECT ON nodkey.charge_refund_state, nodkey.payment_effect TO nodkey_payments_checker;
+ALTER FUNCTION nodkey.charge_counters_check() OWNER TO nodkey_payments_checker;
+-- Fires only on changes that move amounts between states (BP-06): lease, round and settlement
+-- bookkeeping does not run the check.
+CREATE CONSTRAINT TRIGGER payment_effect_counters AFTER INSERT OR UPDATE OF state, amount_minor, released
+    ON nodkey.payment_effect
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION nodkey.charge_counters_check();
 CREATE CONSTRAINT TRIGGER charge_refund_state_counters AFTER INSERT OR UPDATE ON nodkey.charge_refund_state
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION nodkey.charge_counters_check();

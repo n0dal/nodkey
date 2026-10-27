@@ -288,3 +288,21 @@ The core of the implementation holds against every other hunt item:
 - TLS pinning;
 - the sent/not-sent boundary;
 - response bounding.
+
+## Resolution (2026-10-26, spec Draft 3.2)
+
+Implementer's dispositions; not yet re-reviewed. Test names refer to `crates/nodkey-payments-adapter`
+unless stated otherwise.
+
+| ID | Disposition | Change | Evidence |
+|---|---|---|---|
+| PC-A-01 | Fixed (option (a) plus key binding, combined with BP-01) | Every grant-carrying op takes `idem_kid`; a value other than the loaded key's kid → `ok:false idem_kid_mismatch`, checked before the grant, nothing sent (`src/server.rs`). New `provider.idem_key_not_before` (≥ 2024-01-01; start refusal if in the future); `refund.create` refused (`grant_refused`) for `iat` below it (`src/config.rs`, `src/lib.rs`, `src/server.rs`). Spec §3.3, §4, §9; residual in §10 (the value is an operator statement) | `tests/socket_p.rs` `idem_kid_must_match_the_loaded_key`, `grants_older_than_the_key_are_not_created`; `tests/simpay.rs` `rotated_key_does_not_repeat_a_young_grant` (the PT-36 variant: young SUCCEEDED grant resent after rotation → `grant_refused` under K2, `idem_kid_mismatch` under K1, ledger 1; baseline without the activation time → ledger 2); broker side see BP-01 |
+| PC-A-02 | Fixed | One deadline per request: `total_ms` after the connection is accepted; the order check gets `min(2 s, time left)` as one budget; the provider exchange (`exchange_by`) ends by the same deadline. `adapter.hello` reports `deadline_ms`; the broker refuses an adapter whose `deadline_ms` is not below its wait (`total_ms + 2 s`); adapter start check `connect_ms < total_ms ≤ 60 000`. Spec §1, §4, §9 | `slow_order_view_is_bounded_by_the_request_deadline` (unavailable in < `total_ms` + 300 ms, nothing sent); broker `parse_hello` unit test |
+| PC-A-03 | Fixed | `read_operator_file(path, trusted_owner, max)`: owner must be root (production), every parent root-owned, no group/other write; the config is read once and those bytes parsed | `config::tests::file_checks`, `tests/process.rs` |
+| PC-A-04 | Fixed | Manual `Debug` for `Call` redacts `idem_key` | `provider::tests::call_debug_redacts_idempotency_key` |
+| PC-A-05 | Fixed defensively; hypothesis **not confirmed** | The connection task is wrapped in an abort-on-drop guard. With the guard removed, the new test also passes: hyper closes the connection on its own once the exchange future is dropped. The guard is kept as defence in depth | `tests/http_edge.rs` `stalled_exchanges_release_their_connections` (6 stalled exchanges, all 6 connections closed by the client) |
+| PC-A-06 | Fixed | The connector sends `options=-c search_path=` at start-up. A start-up `SHOW search_path` was not added: it would be a second statement on the adapter's role | `tests/postgres.rs` (ignored test, run): with `ALTER ROLE … RESET search_path`, the connector's session shows an empty `search_path` and the order check still works |
+| PC-A-07 | Fixed in the spec | PT-18 amended: `crlf_injection` → `created`, other `header_injection` variants → `ambiguous/bad_headers`. The optional `unexpected_header` anomaly is not added (no safety gain; would extend a closed enum) | spec §11 PT-18 |
+| PC-A-08 | Fixed | Timer starts right before the request; asserts `< total_ms + 500 ms` | `stall_after_head_times_out` (5 consecutive passes) |
+| PC-A-09 | Accepted, published | Residual in spec §10 | — |
+| PC-A-10 | Rejected | The adapter does not know the broker's gid; the group of P's directory is a deployment property (PT-31) and `SO_PEERCRED` on every connection is the control | — |

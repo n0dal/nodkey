@@ -15,8 +15,8 @@
 //! before the call (PA-06). Lock order: `pending_effect` → `refund_budget` →
 //! `charge_refund_state` → `payment_effect` (§7.2).
 
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use nodkey_grant::{Params, encode_transport};
@@ -41,6 +41,11 @@ use crate::server::log_event;
 /// `RESERVED` rows older than this are failed as never dispatched (§7.2 recovery).
 pub const RESERVED_TIMEOUT_S: u64 = 30;
 pub const ADAPTER_MAX_CONCURRENT: usize = 8;
+/// Rows worked on at once in one payments tick (below the call slots, so a new dispatch still
+/// finds a slot; BP-04).
+pub const ROW_CONCURRENCY: usize = 4;
+/// Next check of a row whose work failed with an error (BP-05).
+pub const ROW_ERROR_BACKOFF_S: u64 = 60;
 const BATCH: i64 = 64;
 /// Reconciler backoff after each round (§7.3): 10 s, 1 min, 5 min, 30 min, then hourly.
 pub fn backoff_s(round: u32) -> u64 {
@@ -67,7 +72,9 @@ pub fn workload_reason(internal: &str) -> Option<&'static str> {
         "not_owner_or_unknown" => "not_permitted",
         "currency" | "order_status" | "order_busy" | "insufficient_refundable" => "not_refundable",
         "budget" => "limit",
-        "not_dispatched" | "not_sent" | "provider_declined" | "grant" => "not_executed",
+        // BP-11: a stored grant that fails W11–W13 (e.g. revoked) is not permitted.
+        "grant" => "not_permitted",
+        "not_dispatched" | "not_sent" | "provider_declined" => "not_executed",
         _ => return None,
     })
 }
@@ -482,15 +489,19 @@ pub struct EffectRow {
     pub resend_stopped: bool,
     pub provider_refund_id: Option<String>,
     pub reason: Option<String>,
+    /// The derived reference from the first adapter result (audit; checked once known, BP-08).
+    pub reference: Option<String>,
     pub grant_text: String,
 }
 
 impl EffectRow {
-    /// A provider refund matches the frozen, grant-derived values.
+    /// A provider refund matches the frozen, grant-derived values and, once known, the row's
+    /// reference.
     fn matches(&self, r: &Refund) -> bool {
         r.charge == self.charge
             && i64::try_from(r.amount_minor).ok() == Some(self.amount)
             && r.currency == self.currency
+            && self.reference.as_ref().is_none_or(|x| *x == r.reference)
     }
 }
 
@@ -498,7 +509,8 @@ async fn effect_row(c: &impl GenericClient, pid: &[u8; 16]) -> Result<Option<Eff
     let r = c
         .query_opt(
             "SELECT e.charge_id, e.amount_minor, e.currency, e.idem_kid, e.state, e.resends, e.reconcile_rounds, \
-             e.resend_deadline, e.dispatched_at, e.resend_stopped, e.provider_refund_id, e.reason, p.grant_bytes \
+             e.resend_deadline, e.dispatched_at, e.resend_stopped, e.provider_refund_id, e.reason, p.grant_bytes, \
+             e.reference \
              FROM nodkey.payment_effect e JOIN public.pending_effect p ON p.pending_id = e.pending_id \
              WHERE e.pending_id = $1",
             &[&pid.as_slice()],
@@ -522,6 +534,7 @@ async fn effect_row(c: &impl GenericClient, pid: &[u8; 16]) -> Result<Option<Eff
         resend_stopped: r.try_get(9).map_err(unavailable)?,
         provider_refund_id: r.try_get(10).map_err(unavailable)?,
         reason: r.try_get(11).map_err(unavailable)?,
+        reference: r.try_get(13).map_err(unavailable)?,
         grant_text: encode_transport(&grant),
     }))
 }
@@ -553,6 +566,47 @@ pub enum PayOutcome {
     StillUnknown,
 }
 
+/// A row's lease as held for its adapter calls (state and lease length).
+struct Held<'a> {
+    row: &'a EffectRow,
+    state: &'static str,
+    lease_s: u64,
+}
+
+enum Gate<'a> {
+    Go(tokio::sync::SemaphorePermit<'a>),
+    /// No call slot within the bound: no call was made.
+    NoSlot,
+    /// The lease could not be re-asserted: the caller stops without writing.
+    Lost,
+}
+
+/// The outcome of a lease-checked call.
+enum Called<T> {
+    Done(T),
+    NoSlot,
+    Lost,
+}
+
+impl<T> Called<T> {
+    fn map<U>(self, f: impl FnOnce(T) -> U) -> Called<U> {
+        match self {
+            Called::Done(t) => Called::Done(f(t)),
+            Called::NoSlot => Called::NoSlot,
+            Called::Lost => Called::Lost,
+        }
+    }
+}
+
+/// One unit of work in a payments tick.
+#[derive(Debug, Clone, Copy)]
+enum Work {
+    Stale(u64),
+    Lost(u64),
+    Reconcile,
+    Settle,
+}
+
 fn alarm(kind: &str, pid: &[u8; 16], extra: Value) {
     let mut o = json!({"kind": kind, "pending_id": encode_id(pid)});
     if let (Some(m), Value::Object(e)) = (o.as_object_mut(), extra) {
@@ -568,30 +622,57 @@ impl Broker {
             .ok_or_else(|| unavailable("payments not configured"))
     }
 
-    /// `adapter.hello` and the `idem_kid` rule (§3.3, §9). Until this passes, `payments.refund`
-    /// records are not executed (they stay `APPROVED` and expire).
+    /// `adapter.hello` and the `idem_kid` rule (§3.3, §9), re-run before every dispatch and every
+    /// reconciliation round (BP-01): the adapter may have been restarted with another `K_idem`
+    /// while the broker kept running. Any failure clears `ready`, so `payments.refund` records
+    /// are not executed (they stay `APPROVED` and expire) and no row is dispatched or reconciled.
     pub async fn ensure_adapter(&self) -> bool {
         let Some(rt) = self.payments.as_ref() else {
             return false;
         };
-        if rt.ready.load(Ordering::SeqCst) {
-            return true;
+        let ok = self.check_adapter(rt).await;
+        let was = rt.ready.swap(ok.is_some(), Ordering::SeqCst);
+        match ok {
+            Some(h) => {
+                let changed = rt.hello().is_some_and(|old| old.idem_kid != h.idem_kid);
+                if changed {
+                    log_event("alarm", json!({"kind": "adapter_idem_kid_changed"}));
+                }
+                if let Ok(mut g) = rt.hello.write() {
+                    *g = Some(h);
+                }
+                if !was {
+                    log_event("payments_adapter_ready", json!({}));
+                }
+                true
+            }
+            None => false,
         }
+    }
+
+    async fn check_adapter(&self, rt: &PaymentsRuntime) -> Option<Hello> {
         let Some(h) = rt.client.hello().await else {
             log_event("payments_adapter_unavailable", json!({}));
-            return false;
+            return None;
         };
         if h.r_max_s != rt.cfg.r_max_s {
             log_event(
                 "alarm",
                 json!({"kind": "adapter_r_max_mismatch", "adapter": h.r_max_s, "broker": rt.cfg.r_max_s}),
             );
-            return false;
+            return None;
+        }
+        // PC-A-02: the adapter answers within its deadline, which must be below our wait.
+        if h.deadline_ms >= rt.cfg.call_timeout_ms() {
+            log_event(
+                "alarm",
+                json!({"kind": "adapter_deadline_not_below_broker_wait", "adapter_deadline_ms": h.deadline_ms,
+                       "broker_wait_ms": rt.cfg.call_timeout_ms()}),
+            );
+            return None;
         }
         let kid = h.idem_kid.clone();
-        let Ok(conn) = self.conn().await else {
-            return false;
-        };
+        let conn = self.conn().await.ok()?;
         let other = Self::run(conn, async move |c: &mut Client| {
             let r = c
                 .query_one(
@@ -605,22 +686,18 @@ impl Broker {
         })
         .await;
         match other {
-            Ok(0) => {}
+            Ok(0) => Some(h),
             Ok(n) => {
+                // Never resend under a new key: those rows keep their kid and stay as they are
+                // until the operator restores the key they were dispatched under.
                 log_event(
                     "alarm",
                     json!({"kind": "idem_kid_rotated_with_open_rows", "rows": n}),
                 );
-                return false;
+                None
             }
-            Err(_) => return false,
+            Err(_) => None,
         }
-        if let Ok(mut g) = rt.hello.write() {
-            *g = Some(h);
-        }
-        rt.ready.store(true, Ordering::SeqCst);
-        log_event("payments_adapter_ready", json!({}));
-        true
     }
 
     /// `idem_kid` for T1, or `None` if payment processing is not ready.
@@ -649,66 +726,96 @@ impl Broker {
         .await
     }
 
-    async fn call_create(&self, grant: &str) -> Option<Attempt> {
-        let rt = self.payments.as_ref()?;
-        let _p = rt.calls.acquire().await.ok()?;
-        match rt
-            .client
-            .call("refund.create", json!({"grant": grant}))
-            .await
-        {
+    /// Before every adapter call (BP-03): a call slot, waited for at most one call timeout, then
+    /// the row's lease re-asserted (committed) for `secs`. Only then may the call be made.
+    async fn gate(&self, g: &Held<'_>) -> Result<Gate<'_>, Fail> {
+        let rt = self.rt()?;
+        let wait = Duration::from_millis(rt.cfg.call_timeout_ms());
+        let permit = match tokio::time::timeout(wait, rt.calls.acquire()).await {
+            Ok(Ok(p)) => p,
+            _ => return Ok(Gate::NoSlot),
+        };
+        if !self.take_lease(&g.row.pid, g.state, g.lease_s).await? {
+            return Ok(Gate::Lost);
+        }
+        Ok(Gate::Go(permit))
+    }
+
+    /// One call on P for a row, with the row's `idem_kid` (BP-01: the adapter refuses any other
+    /// kid, so a resend can never go out under a key the row was not dispatched under).
+    async fn p_call(&self, g: &Held<'_>, op: &str, mut args: Value) -> Result<Called<Call>, Fail> {
+        let rt = self.rt()?;
+        let _permit = match self.gate(g).await? {
+            Gate::Go(p) => p,
+            Gate::NoSlot => return Ok(Called::NoSlot),
+            Gate::Lost => return Ok(Called::Lost),
+        };
+        if let Value::Object(m) = &mut args {
+            m.insert("idem_kid".into(), json!(g.row.idem_kid));
+        }
+        Ok(Called::Done(rt.client.call(op, args).await))
+    }
+
+    async fn call_create(&self, g: &Held<'_>) -> Result<Called<Option<Attempt>>, Fail> {
+        let c = self
+            .p_call(g, "refund.create", json!({"grant": g.row.grant_text}))
+            .await?;
+        Ok(c.map(|c| match c {
             Call::Result(o) => parse_attempt(&o).or(Some(Attempt::Ambiguous { reference: None })),
             Call::Refused(code) => Some(Attempt::Refused {
                 code: format!("p:{code}"),
                 reference: String::new(),
             }),
             Call::NotDelivered(_) | Call::Ambiguous(_) => None,
-        }
+        }))
     }
 
-    async fn call_lookup(&self, op: &str, args: Value) -> Lookup {
-        let Some(rt) = self.payments.as_ref() else {
-            return Lookup::Ambiguous;
-        };
-        let Ok(_p) = rt.calls.acquire().await else {
-            return Lookup::Ambiguous;
-        };
-        match rt.client.call(op, args).await {
+    async fn call_lookup(
+        &self,
+        g: &Held<'_>,
+        op: &str,
+        args: Value,
+    ) -> Result<Called<Lookup>, Fail> {
+        Ok(self.p_call(g, op, args).await?.map(|c| match c {
             Call::Result(o) => parse_lookup(&o).unwrap_or(Lookup::Ambiguous),
             _ => Lookup::Ambiguous,
-        }
+        }))
     }
 
-    async fn call_idem(&self, grant: &str) -> IdemState {
-        let Some(rt) = self.payments.as_ref() else {
-            return IdemState::Ambiguous;
-        };
-        let Ok(_p) = rt.calls.acquire().await else {
-            return IdemState::Ambiguous;
-        };
-        match rt.client.call("idem.status", json!({"grant": grant})).await {
-            Call::Result(o) => parse_idem(&o).unwrap_or(IdemState::Ambiguous),
-            _ => IdemState::Ambiguous,
-        }
+    async fn call_idem(&self, g: &Held<'_>) -> Result<Called<IdemState>, Fail> {
+        Ok(self
+            .p_call(g, "idem.status", json!({"grant": g.row.grant_text}))
+            .await?
+            .map(|c| match c {
+                Call::Result(o) => parse_idem(&o).unwrap_or(IdemState::Ambiguous),
+                _ => IdemState::Ambiguous,
+            }))
     }
 
-    /// `refund.get` of a created/found refund; `Some` only if it is exactly the same refund.
-    async fn confirm(&self, row: &EffectRow, r: &Refund) -> Option<Refund> {
-        if !row.matches(r) {
-            return None;
+    /// `refund.get` of a created/found refund; `Some` only if it is exactly the same refund
+    /// (charge, amount, currency and, once known, the reference; BP-08).
+    async fn confirm(&self, g: &Held<'_>, r: &Refund) -> Result<Called<Option<Refund>>, Fail> {
+        if !g.row.matches(r) {
+            return Ok(Called::Done(None));
         }
-        match self
+        let l = self
             .call_lookup(
+                g,
                 "refund.get",
-                json!({"grant": row.grant_text, "refund_id": r.id}),
+                json!({"grant": g.row.grant_text, "refund_id": r.id}),
             )
-            .await
-        {
-            Lookup::Found(v) if v.len() == 1 && v[0].id == r.id && row.matches(&v[0]) => {
+            .await?;
+        Ok(l.map(|l| match l {
+            Lookup::Found(v)
+                if v.len() == 1
+                    && v[0].id == r.id
+                    && v[0].reference == r.reference
+                    && g.row.matches(&v[0]) =>
+            {
                 Some(v[0].clone())
             }
             _ => None,
-        }
+        }))
     }
 
     /// Applies a transition by CAS from `from`, holding the lease if `lease` (§7.2 T3, §7.4).
@@ -802,6 +909,10 @@ impl Broker {
     /// T2 + T3 for one `RESERVED` row.
     pub async fn dispatch(&self, pid: [u8; 16]) -> Result<PayOutcome, Fail> {
         let rt = self.rt()?;
+        // BP-01: re-learn the adapter's kid before dispatching.
+        if !self.ensure_adapter().await {
+            return Ok(PayOutcome::Skipped);
+        }
         let Some(h) = rt.is_ready() else {
             return Ok(PayOutcome::Skipped);
         };
@@ -810,7 +921,8 @@ impl Broker {
         let me = rt.me;
         let kid = h.idem_kid.clone();
         let conn = self.conn().await?;
-        // T2: RESERVED → DISPATCHED with the dispatch lease, committed before any call.
+        // T2: RESERVED → DISPATCHED with the dispatch lease, committed before any call; only a
+        // row reserved under the adapter's current kid is dispatched.
         let row = Self::run(conn, async move |c: &mut Client| {
             let n = c
                 .execute(
@@ -829,17 +941,25 @@ impl Broker {
         let Some(row) = row else {
             return Ok(PayOutcome::Skipped);
         };
+        let g = Held {
+            row: &row,
+            state: "DISPATCHED",
+            lease_s: lease,
+        };
         let mut first = true;
-        let mut result = None;
+        let mut result: Option<Option<Attempt>> = None;
         for attempt in 0..3u64 {
             if attempt > 0 {
                 tokio::time::sleep(Duration::from_secs(attempt)).await;
-                if !self.take_lease(&pid, "DISPATCHED", lease).await? {
-                    return Ok(PayOutcome::Discarded);
-                }
-                first = false;
             }
-            let a = self.call_create(&row.grant_text).await;
+            let a = match self.call_create(&g).await? {
+                Called::Done(a) => a,
+                Called::Lost => return Ok(PayOutcome::Discarded),
+                // No call was made: on the first attempt nothing was ever sent.
+                Called::NoSlot if attempt == 0 => Some(Attempt::NotSent),
+                Called::NoSlot => break,
+            };
+            first = attempt == 0;
             let busy = matches!(a, Some(Attempt::Busy { .. }));
             result = Some(a);
             if !busy {
@@ -848,49 +968,40 @@ impl Broker {
         }
         let a = result.flatten();
         let (to, reference) = match &a {
-            Some(Attempt::Created { refund, reference }) => {
-                match self.confirm(&row, refund).await {
-                    Some(r) if r.status != RefundStatus::Failed => (
+            Some(Attempt::Created { refund, reference }) => match self.confirm(&g, refund).await? {
+                Called::Lost => return Ok(PayOutcome::Discarded),
+                Called::Done(Some(r)) => {
+                    if r.status == RefundStatus::Failed {
+                        // BP-09: same rule as the reconciler: the refund exists; its settlement
+                        // failed; the amount stays encumbered.
+                        alarm("refund_settlement_failed", &pid, json!({}));
+                    }
+                    (
                         PayTo::Succeeded {
                             refund_id: r.id.clone(),
                             settlement: r.status,
                         },
                         Some(reference.clone()),
-                    ),
-                    _ => (
-                        PayTo::Unknown {
-                            reason: "ambiguous",
-                        },
-                        Some(reference.clone()),
-                    ),
+                    )
                 }
-            }
-            Some(Attempt::NotSent) if first => (PayTo::Failed { reason: "not_sent" }, None),
-            Some(Attempt::Refused { code, reference }) => {
-                let kind = if code.starts_with("p:") {
-                    "grant_refused"
-                } else {
-                    "refused"
-                };
-                alarm(
-                    if kind == "refused" {
-                        "provider_refused_valid_refund"
-                    } else {
-                        "adapter_refused_grant"
-                    },
-                    &pid,
-                    json!({"code": code}),
-                );
-                (
+                Called::Done(None) | Called::NoSlot => (
                     PayTo::Unknown {
-                        reason: if kind == "refused" {
-                            "refused"
-                        } else {
-                            "grant_refused"
-                        },
+                        reason: "ambiguous",
                     },
                     Some(reference.clone()),
-                )
+                ),
+            },
+            Some(Attempt::NotSent) if first => (PayTo::Failed { reason: "not_sent" }, None),
+            Some(Attempt::Refused { code, reference }) => {
+                let (alarm_kind, reason) = if code == "p:idem_kid_mismatch" {
+                    ("adapter_idem_kid_mismatch", "key_mismatch")
+                } else if code.starts_with("p:") {
+                    ("adapter_refused_grant", "grant_refused")
+                } else {
+                    ("provider_refused_valid_refund", "refused")
+                };
+                alarm(alarm_kind, &pid, json!({"code": code}));
+                (PayTo::Unknown { reason }, Some(reference.clone()))
             }
             Some(Attempt::Busy { reference }) => {
                 (PayTo::Unknown { reason: "busy" }, Some(reference.clone()))
@@ -960,6 +1071,10 @@ impl Broker {
     /// One reconciler round for an `UNKNOWN` row (§7.3), lookup first.
     pub async fn reconcile(&self, pid: [u8; 16]) -> Result<PayOutcome, Fail> {
         let rt = self.rt()?;
+        // BP-01: re-learn the adapter's kid before every round.
+        if !self.ensure_adapter().await {
+            return Ok(PayOutcome::Skipped);
+        }
         let Some(h) = rt.is_ready() else {
             return Ok(PayOutcome::Skipped);
         };
@@ -975,32 +1090,51 @@ impl Broker {
         else {
             return Ok(PayOutcome::Skipped);
         };
-        // 1. Lookup.
-        if let Lookup::Found(v) = self
-            .call_lookup("refund.find", json!({"grant": row.grant_text}))
-            .await
-        {
-            if v.len() == 1 {
-                if let Some(r) = self.confirm(&row, &v[0]).await {
-                    let to = PayTo::Succeeded {
-                        refund_id: r.id.clone(),
-                        settlement: r.status,
-                    };
-                    return Ok(if self.apply(&pid, "UNKNOWN", &to, true, None, "").await? {
-                        PayOutcome::Applied(to)
-                    } else {
-                        PayOutcome::Discarded
-                    });
-                }
-            }
-        }
         let now = (self.clock)();
         let rounds = u32::try_from(row.rounds).unwrap_or(u32::MAX);
+        if row.idem_kid != h.idem_kid {
+            // Never call (and never resend) under a key the row was not dispatched under.
+            alarm("idem_kid_mismatch", &pid, json!({}));
+            self.end_round(&row, now + backoff_s(rounds + 1), false, None)
+                .await?;
+            return Ok(PayOutcome::StillUnknown);
+        }
+        let g = Held {
+            row: &row,
+            state: "UNKNOWN",
+            lease_s: lease,
+        };
+        macro_rules! done {
+            ($e:expr) => {
+                match $e {
+                    Called::Done(v) => Some(v),
+                    Called::NoSlot => None,
+                    Called::Lost => return Ok(PayOutcome::Discarded),
+                }
+            };
+        }
+        // 1. Lookup.
+        if let Some(Lookup::Found(v)) = done!(
+            self.call_lookup(&g, "refund.find", json!({"grant": row.grant_text}))
+                .await?
+        ) && v.len() == 1
+            && let Some(Some(r)) = done!(self.confirm(&g, &v[0]).await?)
+        {
+            let to = PayTo::Succeeded {
+                refund_id: r.id.clone(),
+                settlement: r.status,
+            };
+            return Ok(if self.apply(&pid, "UNKNOWN", &to, true, None, "").await? {
+                PayOutcome::Applied(to)
+            } else {
+                PayOutcome::Discarded
+            });
+        }
+        let now = (self.clock)();
         // 2. Resend gate.
         let gate = !row.resend_stopped
             && now < row.resend_deadline
             && u32::try_from(row.resends).unwrap_or(u32::MAX) < rt.cfg.max_resends
-            && row.idem_kid == h.idem_kid
             && h.dedup_documented();
         if !gate {
             // 4. Lookups only, daily for 7 days, then the operator.
@@ -1024,10 +1158,10 @@ impl Broker {
         }
         let mut resend = true;
         if h.has_cap("idem_status") {
-            match self.call_idem(&row.grant_text).await {
-                IdemState::Done => {}
-                IdemState::None if rounds == 0 => {}
-                IdemState::None => {
+            match done!(self.call_idem(&g).await?) {
+                Some(IdemState::Done) => {}
+                Some(IdemState::None) if rounds == 0 => {}
+                Some(IdemState::None) => {
                     alarm(
                         "operator_required",
                         &pid,
@@ -1042,7 +1176,7 @@ impl Broker {
                     .await?;
                     return Ok(PayOutcome::StillUnknown);
                 }
-                IdemState::InProgress | IdemState::Ambiguous => resend = false,
+                Some(IdemState::InProgress | IdemState::Ambiguous) | None => resend = false,
             }
         }
         if !resend {
@@ -1072,9 +1206,9 @@ impl Broker {
             "payments_resend",
             json!({"pending_id": encode_id(&pid), "resend": row.resends + 1}),
         );
-        match self.call_create(&row.grant_text).await {
+        match done!(self.call_create(&g).await?).flatten() {
             Some(Attempt::Created { refund, reference }) => {
-                if let Some(r) = self.confirm(&row, &refund).await {
+                if let Some(Some(r)) = done!(self.confirm(&g, &refund).await?) {
                     let to = PayTo::Succeeded {
                         refund_id: r.id.clone(),
                         settlement: r.status,
@@ -1094,11 +1228,11 @@ impl Broker {
             Some(Attempt::Refused { code, .. })
                 if BUSINESS_REFUSALS.contains(&code.as_str()) && h.has_cap("idem_status") =>
             {
-                let not_found = self
-                    .call_lookup("refund.find", json!({"grant": row.grant_text}))
-                    .await
-                    == Lookup::NotFound;
-                if not_found && self.call_idem(&row.grant_text).await == IdemState::Done {
+                let not_found = done!(
+                    self.call_lookup(&g, "refund.find", json!({"grant": row.grant_text}))
+                        .await?
+                ) == Some(Lookup::NotFound);
+                if not_found && done!(self.call_idem(&g).await?) == Some(IdemState::Done) {
                     alarm("provider_contradicts_facts", &pid, json!({"code": code}));
                     let to = PayTo::Failed {
                         reason: "provider_declined",
@@ -1110,6 +1244,9 @@ impl Broker {
                     });
                 }
             }
+            Some(Attempt::Refused { code, .. }) if code == "p:idem_kid_mismatch" => {
+                alarm("adapter_idem_kid_mismatch", &pid, json!({}));
+            }
             _ => {}
         }
         self.end_round(&row, (self.clock)() + backoff_s(rounds + 1), false, None)
@@ -1120,13 +1257,11 @@ impl Broker {
     /// Settlement polling for `SUCCEEDED` rows with `settlement = pending` (§7.3).
     pub async fn poll_settlement(&self, pid: [u8; 16]) -> Result<PayOutcome, Fail> {
         let rt = self.rt()?;
-        if rt.is_ready().is_none() {
+        let Some(h) = rt.is_ready() else {
             return Ok(PayOutcome::Skipped);
-        }
-        if !self
-            .take_lease(&pid, "SUCCEEDED", rt.cfg.lease_reconcile_s())
-            .await?
-        {
+        };
+        let lease = rt.cfg.lease_reconcile_s();
+        if !self.take_lease(&pid, "SUCCEEDED", lease).await? {
             return Ok(PayOutcome::Skipped);
         }
         let conn = self.conn().await?;
@@ -1143,17 +1278,31 @@ impl Broker {
         let now = (self.clock)();
         let since = row.dispatched_at.unwrap_or(now);
         let rounds = u32::try_from(row.rounds).unwrap_or(u32::MAX);
-        let status = match self
-            .call_lookup(
-                "refund.get",
-                json!({"grant": row.grant_text, "refund_id": id}),
-            )
-            .await
-        {
-            Lookup::Found(v) if v.len() == 1 && v[0].id == id && row.matches(&v[0]) => {
-                Some(v[0].status)
+        let g = Held {
+            row: &row,
+            state: "SUCCEEDED",
+            lease_s: lease,
+        };
+        let status = if row.idem_kid != h.idem_kid {
+            alarm("idem_kid_mismatch", &pid, json!({}));
+            None
+        } else {
+            match self
+                .call_lookup(
+                    &g,
+                    "refund.get",
+                    json!({"grant": row.grant_text, "refund_id": id}),
+                )
+                .await?
+            {
+                Called::Lost => return Ok(PayOutcome::Discarded),
+                Called::Done(Lookup::Found(v))
+                    if v.len() == 1 && v[0].id == id && row.matches(&v[0]) =>
+                {
+                    Some(v[0].status)
+                }
+                _ => None,
             }
-            _ => None,
         };
         let (settlement, next): (Option<&str>, Option<u64>) = match status {
             Some(RefundStatus::Succeeded) => (Some("succeeded"), None),
@@ -1184,8 +1333,12 @@ impl Broker {
         Ok(PayOutcome::StillUnknown)
     }
 
-    /// Recovery, reconciliation and settlement pass (start-up, then every 5 s).
-    pub async fn payments_tick(&self) -> Result<Vec<([u8; 16], PayOutcome)>, Fail> {
+    /// One payments pass (start-up, then every 5 s, in its own task; BP-04): stale `RESERVED`
+    /// → `FAILED/not_dispatched`, expired `DISPATCHED` → `UNKNOWN/lost_response`, then the
+    /// reconciliation and settlement rounds. All scans read one snapshot. Rows are processed at
+    /// most [`ROW_CONCURRENCY`] at a time, and a failure on one row is logged, alarmed and
+    /// backed off without stopping the others (BP-05).
+    pub async fn payments_tick(self: &Arc<Self>) -> Result<Vec<([u8; 16], PayOutcome)>, Fail> {
         if self.payments.is_none() {
             return Ok(vec![]);
         }
@@ -1215,40 +1368,84 @@ impl Broker {
             Ok((stale, lost, due, settle))
         })
         .await?;
-        let mut out = Vec::new();
-        for pid in stale {
-            let to = PayTo::Failed {
-                reason: "not_dispatched",
-            };
-            let extra = format!(" AND reserved_at + {RESERVED_TIMEOUT_S} < {}", to_i64(now));
-            if self
-                .apply(&pid, "RESERVED", &to, false, None, &extra)
-                .await?
-            {
-                out.push((pid, PayOutcome::Applied(to)));
-            }
-        }
-        for pid in lost {
-            let to = PayTo::Unknown {
-                reason: "lost_response",
-            };
-            let extra = format!(" AND lease_until < {}", to_i64(now));
-            if self
-                .apply(&pid, "DISPATCHED", &to, false, None, &extra)
-                .await?
-            {
-                out.push((pid, PayOutcome::Applied(to)));
-            }
-        }
+        let mut work: Vec<([u8; 16], Work)> = Vec::new();
+        work.extend(stale.into_iter().map(|p| (p, Work::Stale(now))));
+        work.extend(lost.into_iter().map(|p| (p, Work::Lost(now))));
         if ready {
-            for pid in due {
-                out.push((pid, self.reconcile(pid).await?));
-            }
-            for pid in settle {
-                out.push((pid, self.poll_settlement(pid).await?));
+            work.extend(due.into_iter().map(|p| (p, Work::Reconcile)));
+            work.extend(settle.into_iter().map(|p| (p, Work::Settle)));
+        }
+        let limit = Arc::new(Semaphore::new(ROW_CONCURRENCY));
+        let mut set = tokio::task::JoinSet::new();
+        for (pid, w) in work {
+            let Ok(permit) = limit.clone().acquire_owned().await else {
+                break;
+            };
+            let me = self.clone();
+            set.spawn(async move {
+                let r = me.row_work(pid, w).await;
+                drop(permit);
+                (pid, r)
+            });
+        }
+        let mut out = Vec::new();
+        while let Some(j) = set.join_next().await {
+            let Ok((pid, r)) = j else { continue };
+            match r {
+                Ok(Some(o)) => out.push((pid, o)),
+                Ok(None) => {}
+                Err(f) => {
+                    alarm("payments_row_error", &pid, json!({"detail": f.detail}));
+                    self.back_off(&pid).await;
+                }
             }
         }
         Ok(out)
+    }
+
+    async fn row_work(&self, pid: [u8; 16], w: Work) -> Result<Option<PayOutcome>, Fail> {
+        match w {
+            Work::Stale(now) => {
+                let to = PayTo::Failed {
+                    reason: "not_dispatched",
+                };
+                let extra = format!(" AND reserved_at + {RESERVED_TIMEOUT_S} < {}", to_i64(now));
+                Ok(self
+                    .apply(&pid, "RESERVED", &to, false, None, &extra)
+                    .await?
+                    .then_some(PayOutcome::Applied(to)))
+            }
+            Work::Lost(now) => {
+                let to = PayTo::Unknown {
+                    reason: "lost_response",
+                };
+                let extra = format!(" AND lease_until < {}", to_i64(now));
+                Ok(self
+                    .apply(&pid, "DISPATCHED", &to, false, None, &extra)
+                    .await?
+                    .then_some(PayOutcome::Applied(to)))
+            }
+            Work::Reconcile => self.reconcile(pid).await.map(Some),
+            Work::Settle => self.poll_settlement(pid).await.map(Some),
+        }
+    }
+
+    /// After a row failed with an error, its next check is pushed back (best effort), so a
+    /// persistent failure on one row is retried slowly instead of every tick.
+    async fn back_off(&self, pid: &[u8; 16]) {
+        let now = (self.clock)();
+        let pid = *pid;
+        let Ok(conn) = self.conn().await else { return };
+        let _ = Self::run(conn, async move |c: &mut Client| {
+            c.execute(
+                "UPDATE nodkey.payment_effect SET next_check_at = $2 WHERE pending_id = $1 \
+                 AND state IN ('UNKNOWN','SUCCEEDED') AND next_check_at IS NOT NULL",
+                &[&pid.as_slice(), &to_i64(now + ROW_ERROR_BACKOFF_S)],
+            )
+            .await
+            .map_err(dbf("back off"))
+        })
+        .await;
     }
 }
 
@@ -1271,6 +1468,7 @@ mod tests {
             assert_eq!(workload_reason(r), Some("not_refundable"));
         }
         assert_eq!(workload_reason("budget"), Some("limit"));
+        assert_eq!(workload_reason("grant"), Some("not_permitted"));
         for r in ["not_dispatched", "not_sent", "provider_declined"] {
             assert_eq!(workload_reason(r), Some("not_executed"));
         }

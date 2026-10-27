@@ -122,9 +122,10 @@ impl PaymentsConfig {
     pub fn call_timeout_ms(&self) -> u64 {
         self.total_ms + 2000
     }
-    /// `L_dispatch = 3 × (total_ms + 2 s) + 3 s + 10 s` (§7.2), in seconds, rounded up.
+    /// `L_dispatch = 4 × (total_ms + 2 s) + 3 s + 10 s` (§7.2: three creates and the
+    /// confirming `refund.get`, BP-10), in seconds, rounded up.
     pub fn lease_dispatch_s(&self) -> u64 {
-        (3 * self.call_timeout_ms() + 13_000).div_ceil(1000)
+        (4 * self.call_timeout_ms() + 13_000).div_ceil(1000)
     }
     /// `L_reconcile = total_ms + 2 s + 10 s` per call, in seconds, rounded up.
     pub fn lease_reconcile_s(&self) -> u64 {

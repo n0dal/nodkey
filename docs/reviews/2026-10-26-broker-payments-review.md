@@ -210,3 +210,22 @@ Both block until they are fixed, and BP-02 until it is tested as `nodkey_shop_op
 findings (BP-03 to BP-06) should be fixed before the Demo P adversarial run (PT-33, PT-39). The rest of
 the T1, state-machine and privilege design matches Draft 3. The PostgreSQL integration suite
 (`pg_payments.rs`) must still be run and its output quoted, since that was NOT TESTED here.
+
+## Resolution (2026-10-26, spec Draft 3.2)
+
+Implementer's dispositions; not yet re-reviewed. Tests are in `broker/tests/pg_payments.rs` (run with
+`broker/tests/run-pg-integration.sh`) unless stated otherwise.
+
+| ID | Disposition | Change | Evidence |
+|---|---|---|---|
+| BP-01 | Fixed (combined with PC-A-01) | Every call on P carries the row's frozen `idem_kid`; the adapter refuses another kid with nothing sent. `ensure_adapter` no longer latches: it re-runs `adapter.hello` before every dispatch, every reconciliation round and every payments tick, clears `ready` on any failure, and refuses payment processing while a non-final row carries another kid. A row is never called for under another kid (reconciler step 0); an `idem_kid_mismatch` answer leaves the row `UNKNOWN/key_mismatch` with an alarm. `r_max_s` is re-checked on every hello as well | `bp01_adapter_restart_with_rotated_key_never_resends` (reviewer scenario: row UNKNOWN under K1, adapter-only restart with K2 → no call for the row, no T1; K1 restored → resolves under K1, ledger 1, every call carried K1); `bp01_dispatch_rechecks_the_kid` (RESERVED under K1 + adapter K2 → not dispatched, `FAILED/not_dispatched`, 0 creates; rotation between hello and create → `UNKNOWN/key_mismatch`, 0 effects); `pt24_pt36_adapter_identity` |
+| BP-02 | Confirmed and fixed | `charge_counters_check` is `SECURITY DEFINER`, `search_path = ''`, `EXECUTE` revoked from PUBLIC, owned by new `NOLOGIN` role `nodkey_payments_checker` with `SELECT` on the two tables only | `bp02_operator_updates_as_operator_role` connects **as `nodkey_shop_operator`** and updates fresh and existing charges (also in an explicit transaction). With the old (non-definer) function the same test fails with `permission denied for table charge_refund_state` (run 2026-10-26). `pt39_counters_and_operator_race` now uses the operator role |
+| BP-03 | Fixed | Every call: bounded wait for a slot (`total_ms + 2 s`), then the lease re-asserted, then the call; lease lost → stop without writing; no slot on a dispatch's first call → `FAILED/not_sent` (nothing sent) | `bp03_lease_rechecked_after_slot_wait` (all slots held, recovery moves the row to UNKNOWN, the dispatcher then sends nothing: 0 creates) |
+| BP-04 | Fixed | `recovery_tick` no longer dispatches; `recovery_loop` spawns dispatches; new `payments_loop` task runs `payments_tick`; rows run at most 4 at a time | `bp04_recovery_tick_does_not_call_the_adapter` |
+| BP-05 | Fixed | Per-row tasks; an error is logged with alarm `payments_row_error` and the row's next check is pushed back 60 s; other rows continue | `bp05_bp08_one_failing_row_does_not_stop_the_tick` |
+| BP-06 | Fixed; race itself NOT TESTED | Both tables read in one statement; the `payment_effect` trigger fires only on `INSERT` or `UPDATE OF state, amount_minor, released` | all PG tests pass with the new function; no deterministic test of the interleaving |
+| BP-07 | Fixed | Charge pattern `8..=61`; refund id stays `8..=64` | `adapter::tests::id_patterns` boundary cases |
+| BP-08 | Fixed | Confirmation also compares `reference` (the created/found refund's and, once known, the row's); unique partial index on `provider_refund_id` | `bp05_bp08_one_failing_row_does_not_stop_the_tick` (a reused refund id cannot confirm a second row; it stays UNKNOWN) |
+| BP-09 | Fixed | The dispatcher now applies the reconciler's rule: an identical confirmed refund is `SUCCEEDED` with its settlement status; `failed` raises the alarm (spec §7.3) | reconciler path: `pt23_late_settlement_failure`; dispatcher path: no dedicated test |
+| BP-10 | Fixed (formula and text) | `L_dispatch = 4 × (total_ms + 2 s) + 13 s`; spec §7.2 states that exclusion rests on the state CAS and that "lost lease" means a changed state or owner. No expiry condition was added to the T3 CAS: the state CAS under the record lock already serializes T3 with recovery | spec §7.2 |
+| BP-11 | Fixed | `grant` → `not_permitted`; spec §8 row added | `payments::tests::reasons_map_to_the_workload_enum` |

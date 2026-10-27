@@ -18,6 +18,10 @@ use crate::json::check_strict;
 use crate::provider::HttpLimits;
 
 pub const FORMAT: &str = "nodkey.payments-adapter.v1";
+/// 2024-01-01T00:00:00Z (§2 clock floor).
+pub const CLOCK_FLOOR: u64 = 1_704_067_200;
+/// Upper bound of the per-request deadline `total_ms`.
+pub const MAX_TOTAL_MS: u64 = 60_000;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,6 +60,7 @@ struct RawProvider {
     ca_file: String,
     key_file: String,
     idem_key_file: String,
+    idem_key_not_before: u64,
     retention_s: u64,
     resend_margin_s: u64,
     caps: Vec<String>,
@@ -107,6 +112,9 @@ pub struct Config {
     pub ca_file: PathBuf,
     pub key_file: PathBuf,
     pub idem_key_file: PathBuf,
+    /// Activation time of the loaded `K_idem` (Unix seconds, set by the operator at every
+    /// rotation; spec §3.3, PC-A-01). `refund.create` is refused for grants with `iat` below it.
+    pub idem_key_not_before: u64,
     pub retention_s: u64,
     pub resend_margin_s: u64,
     pub caps: Vec<Cap>,
@@ -219,8 +227,14 @@ pub fn parse_config(bytes: &[u8]) -> Result<Config, String> {
         }
         caps.push(cap);
     }
+    // 2024-01-01T00:00:00Z: the same floor as the clock check (§2).
+    if p.idem_key_not_before < CLOCK_FLOOR {
+        return Err("config: provider.idem_key_not_before is before 2024-01-01".into());
+    }
     let l = &r.limits;
-    if !(1 <= l.connect_ms && l.connect_ms <= l.total_ms && l.total_ms <= 60_000) {
+    // `total_ms` is the whole per-request deadline from receipt (§1, PC-A-02): the DB phase and
+    // the provider phase both fit inside it, so connect + handshake must leave room for the rest.
+    if !(1 <= l.connect_ms && l.connect_ms < l.total_ms && l.total_ms <= MAX_TOTAL_MS) {
         return Err("config: limits connect_ms/total_ms out of range".into());
     }
     if !(8192..=65_536).contains(&l.max_head)
@@ -255,6 +269,7 @@ pub fn parse_config(bytes: &[u8]) -> Result<Config, String> {
         ca_file: abs(&p.ca_file, "provider.ca_file")?,
         key_file: abs(&p.key_file, "provider.key_file")?,
         idem_key_file: abs(&p.idem_key_file, "provider.idem_key_file")?,
+        idem_key_not_before: p.idem_key_not_before,
         retention_s: p.retention_s,
         resend_margin_s: p.resend_margin_s,
         caps,
@@ -336,23 +351,17 @@ fn open_checked(path: &Path, max: u64) -> Result<(Vec<u8>, std::fs::Metadata), S
     Ok((buf, m))
 }
 
-/// The uids an operator-provisioned file must not belong to.
-#[derive(Debug, Clone, Copy)]
-pub struct Uids {
-    pub own: u32,
-    pub broker: u32,
-}
+/// Owner uid of operator-provisioned files in production: root (§2 file table).
+pub const OPERATOR_UID: u32 = 0;
 
-/// Registry, config and pinned CA (§2): regular file, not a symlink, owner ∉ {broker, adapter},
-/// no group/other write bit on the file or any parent directory, and parents not owned by the
-/// broker or the adapter.
-pub fn read_operator_file(path: &Path, uids: Uids, max: u64) -> Result<Vec<u8>, String> {
+/// Registry, config and pinned CA (§2, PC-A-03): regular file, not a symlink, owned by
+/// `trusted_owner` (root in production, [`OPERATOR_UID`]), no group/other write bit on the file
+/// or any parent directory, and every parent directory owned by root or `trusted_owner`. The
+/// bytes returned are the bytes of the inode that was checked (one read).
+pub fn read_operator_file(path: &Path, trusted_owner: u32, max: u64) -> Result<Vec<u8>, String> {
     let (buf, m) = open_checked(path, max)?;
-    if m.uid() == uids.own || m.uid() == uids.broker {
-        return Err(format!(
-            "{}: owned by the adapter or broker uid",
-            path.display()
-        ));
+    if m.uid() != trusted_owner {
+        return Err(format!("{}: not owned by root", path.display()));
     }
     if m.mode() & 0o022 != 0 {
         return Err(format!("{}: group/other writable", path.display()));
@@ -369,9 +378,9 @@ pub fn read_operator_file(path: &Path, uids: Uids, max: u64) -> Result<Vec<u8>, 
                 d.display()
             ));
         }
-        if dm.uid() == uids.own || dm.uid() == uids.broker {
+        if dm.uid() != OPERATOR_UID && dm.uid() != trusted_owner {
             return Err(format!(
-                "{}: parent {} is owned by the adapter or broker uid",
+                "{}: parent {} is not owned by root",
                 path.display(),
                 d.display()
             ));
@@ -495,7 +504,7 @@ mod tests {
             "provider": {"profile": "simpay", "account": "acct_demomerchant01", "addr": "172.30.30.20:8443",
                 "server_name": "simpay.test", "ca_file": "/etc/nodkey-adapter/ca.crt",
                 "key_file": "/run/secrets/simpay", "idem_key_file": "/run/secrets/kidem",
-                "retention_s": 86400, "resend_margin_s": 7200, "caps": ["idem_status"]},
+                "idem_key_not_before": 1_761_350_400u64, "retention_s": 86400, "resend_margin_s": 7200, "caps": ["idem_status"]},
             "limits": {"connect_ms": 2000, "total_ms": 10000, "max_head": 16384, "max_body": 65536,
                        "max_concurrent": 8}})
     }
@@ -593,6 +602,23 @@ mod tests {
                 Box::new(|v| v["limits"]["connect_ms"] = json!(20000)),
             ),
             ("head", Box::new(|v| v["limits"]["max_head"] = json!(100))),
+            (
+                "connect = total",
+                Box::new(|v| v["limits"]["connect_ms"] = json!(10000)),
+            ),
+            (
+                "not_before floor",
+                Box::new(|v| v["provider"]["idem_key_not_before"] = json!(1_704_067_199u64)),
+            ),
+            (
+                "not_before missing",
+                Box::new(|v| {
+                    v["provider"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("idem_key_not_before");
+                }),
+            ),
         ];
         for (name, f) in cases {
             assert!(with(f).is_err(), "{name} accepted");
@@ -644,45 +670,28 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
         let me = uid_of(&base);
-        let other = Uids {
-            own: me.wrapping_add(1000),
-            broker: me.wrapping_add(1001),
-        };
+        let other = me.wrapping_add(1000);
         let f = base.join("keys.json");
         std::fs::write(&f, b"{}").unwrap();
         std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o444)).unwrap();
-        // The test files are owned by the test user, so "owner ∉ {broker, adapter}" can only pass
-        // with uids that differ from it, and must fail when either equals it.
-        let parents_ok = read_operator_file(&f, other, 1024);
+        // Test files are owned by the test user, so they pass only with `trusted_owner` = that
+        // user, and must fail for any other owner (production: root).
+        let parents_ok = read_operator_file(&f, me, 1024);
         if let Err(e) = &parents_ok {
             // Some ancestor of the checkout may be group/other-writable on a developer machine.
             assert!(e.contains("parent"), "{e}");
         }
         assert!(
-            read_operator_file(
-                &f,
-                Uids {
-                    own: me,
-                    broker: other.broker
-                },
-                1024
-            )
-            .is_err()
+            read_operator_file(&f, other, 1024)
+                .unwrap_err()
+                .contains("not owned by root")
         );
-        assert!(
-            read_operator_file(
-                &f,
-                Uids {
-                    own: other.own,
-                    broker: me
-                },
-                1024
-            )
-            .is_err()
-        );
+        if me != OPERATOR_UID {
+            assert!(read_operator_file(&f, OPERATOR_UID, 1024).is_err());
+        }
         std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o464)).unwrap();
         assert!(
-            read_operator_file(&f, other, 1024)
+            read_operator_file(&f, me, 1024)
                 .unwrap_err()
                 .contains("writable")
         );
@@ -690,13 +699,13 @@ mod tests {
         let link = base.join("link.json");
         std::os::unix::fs::symlink(&f, &link).unwrap();
         assert!(
-            read_operator_file(&link, other, 1024)
+            read_operator_file(&link, me, 1024)
                 .unwrap_err()
                 .contains("symlink")
         );
         assert!(read_secret_file(&link, me).unwrap_err().contains("symlink"));
         assert!(
-            read_operator_file(&f, other, 1)
+            read_operator_file(&f, me, 1)
                 .unwrap_err()
                 .contains("too large")
         );

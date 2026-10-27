@@ -234,6 +234,45 @@ async fn orders_view_over_real_postgres() {
         assert!(c.simple_query(sql).await.is_err(), "allowed: {sql}");
     }
 
+    // PC-A-06: with the role's search_path setting removed, the connector's own start-up
+    // parameters still give the session an empty search_path.
+    let r = docker(&[
+        "exec",
+        &pg.name,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        "ledger",
+        "-h",
+        "127.0.0.1",
+        "-c",
+        "ALTER ROLE nodkey_payments_adapter RESET search_path",
+    ]);
+    assert!(r.status.success());
+    let s = tokio::net::UnixStream::connect(dir.join(PG_SOCKET_NAME))
+        .await
+        .unwrap();
+    let (c2, conn) = v
+        .startup_config()
+        .connect_raw(s, tokio_postgres::NoTls)
+        .await
+        .unwrap();
+    tokio::spawn(conn);
+    let sp = c2.simple_query("SHOW search_path").await.unwrap();
+    let sp = sp
+        .iter()
+        .find_map(|m| match m {
+            tokio_postgres::SimpleQueryMessage::Row(r) => r.get(0).map(str::to_owned),
+            _ => None,
+        })
+        .unwrap();
+    assert!(sp.is_empty() || sp == "\"\"", "search_path = {sp:?}");
+    assert_eq!(
+        check_order(&v, &rg(4711, "user:u-17", CH_USD, "USD")).await,
+        Ok(())
+    );
+
     // End to end: socket P → order view in PostgreSQL → simpay over TLS.
     let s = Simpay::start(Tls::Good);
     let mut o = Opts::new(s.api);

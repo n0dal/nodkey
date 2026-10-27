@@ -1771,11 +1771,10 @@ impl Broker {
         })
         .await?;
         let mut out = Vec::with_capacity(approved.len());
+        // A `Reserved` result is dispatched by the caller in its own task (BP-04): payment calls
+        // never run inside this loop.
         for pid in approved {
             let r = self.execute(pid, "recovery").await;
-            if r == Ok(Execution::Reserved) {
-                let _ = self.dispatch(pid).await;
-            }
             out.push((pid, r));
         }
         if expired > 0 || !out.is_empty() {

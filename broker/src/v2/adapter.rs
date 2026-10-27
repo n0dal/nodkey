@@ -83,6 +83,9 @@ pub struct Hello {
     pub caps: Vec<String>,
     pub idem_kid: String,
     pub r_max_s: u64,
+    /// The adapter's per-request deadline from receipt (PC-A-02); must be below the broker's
+    /// wait for a response.
+    pub deadline_ms: u64,
 }
 
 impl Hello {
@@ -152,18 +155,20 @@ fn s<'a>(o: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     o.get(k).and_then(Value::as_str)
 }
 
-fn pattern_id(v: &str, prefix: &str) -> bool {
+fn pattern_id(v: &str, prefix: &str, max: usize) -> bool {
     v.strip_prefix(prefix).is_some_and(|r| {
-        (8..=64).contains(&r.len()) && r.bytes().all(|c| c.is_ascii_alphanumeric())
+        (8..=max).contains(&r.len()) && r.bytes().all(|c| c.is_ascii_alphanumeric())
     })
 }
 
+/// `^ch_[A-Za-z0-9]{8,61}$` (spec §3.1, PA-19; BP-07).
 pub fn is_charge_id(v: &str) -> bool {
-    pattern_id(v, "ch_")
+    pattern_id(v, "ch_", 61)
 }
 
+/// `^re_[A-Za-z0-9]{8,64}$` (spec §5).
 pub fn is_refund_id(v: &str) -> bool {
-    pattern_id(v, "re_")
+    pattern_id(v, "re_", 64)
 }
 
 fn is_reference(v: &str) -> bool {
@@ -303,7 +308,17 @@ pub fn parse_idem(o: &Map<String, Value>) -> Option<IdemState> {
 }
 
 pub fn parse_hello(o: &Map<String, Value>) -> Option<Hello> {
-    if !exact(o, &["format", "profile", "caps", "idem_kid", "r_max_s"]) || s(o, "format")? != FORMAT
+    if !exact(
+        o,
+        &[
+            "format",
+            "profile",
+            "caps",
+            "idem_kid",
+            "r_max_s",
+            "deadline_ms",
+        ],
+    ) || s(o, "format")? != FORMAT
     {
         return None;
     }
@@ -325,11 +340,15 @@ pub fn parse_hello(o: &Map<String, Value>) -> Option<Hello> {
                 .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
     })?;
     let r_max_s = o["r_max_s"].as_u64().filter(|_| o["r_max_s"].is_u64())?;
+    let deadline_ms = o["deadline_ms"]
+        .as_u64()
+        .filter(|n| o["deadline_ms"].is_u64() && *n >= 1)?;
     Some(Hello {
         profile: profile.into(),
         caps,
         idem_kid: kid.into(),
         r_max_s,
+        deadline_ms,
     })
 }
 
@@ -509,12 +528,15 @@ mod tests {
         );
         assert_eq!(parse_idem(&obj(json!({"state":"done"}))), None);
         let h = obj(
-            json!({"format":FORMAT,"profile":"simpay","caps":["idem_status"],"idem_kid":"0123456789abcdef","r_max_s":180}),
+            json!({"format":FORMAT,"profile":"simpay","caps":["idem_status"],"idem_kid":"0123456789abcdef","r_max_s":180,"deadline_ms":400}),
         );
         let h = parse_hello(&h).unwrap();
         assert!(h.has_cap("idem_status") && h.dedup_documented());
-        assert!(parse_hello(&obj(json!({"format":FORMAT,"profile":"simpay","caps":["x"],"idem_kid":"0123456789abcdef","r_max_s":180}))).is_none());
-        assert!(parse_hello(&obj(json!({"format":FORMAT,"profile":"simpay","caps":[],"idem_kid":"0123456789ABCDEF","r_max_s":180}))).is_none());
+        assert_eq!(h.deadline_ms, 400);
+        assert!(parse_hello(&obj(json!({"format":FORMAT,"profile":"simpay","caps":["x"],"idem_kid":"0123456789abcdef","r_max_s":180,"deadline_ms":400}))).is_none());
+        assert!(parse_hello(&obj(json!({"format":FORMAT,"profile":"simpay","caps":[],"idem_kid":"0123456789ABCDEF","r_max_s":180,"deadline_ms":400}))).is_none());
+        // Draft 3 hello without deadline_ms is refused.
+        assert!(parse_hello(&obj(json!({"format":FORMAT,"profile":"simpay","caps":[],"idem_kid":"0123456789abcdef","r_max_s":180}))).is_none());
     }
 
     #[test]
@@ -546,5 +568,11 @@ mod tests {
         ] {
             assert!(!is_charge_id(bad), "{bad}");
         }
+        // BP-07: 8..=61 characters after the prefix.
+        assert!(is_charge_id(&format!("ch_{}", "a".repeat(61))));
+        assert!(!is_charge_id(&format!("ch_{}", "a".repeat(62))));
+        assert!(!is_charge_id("ch_abcdefg"));
+        assert!(is_refund_id(&format!("re_{}", "a".repeat(64))));
+        assert!(!is_refund_id(&format!("re_{}", "a".repeat(65))));
     }
 }

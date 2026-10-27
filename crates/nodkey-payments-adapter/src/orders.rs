@@ -92,6 +92,18 @@ impl std::fmt::Debug for PgUnixView {
 }
 
 impl PgUnixView {
+    /// Start-up parameters. The session's `search_path` is pinned to empty here as well as by
+    /// the role setting (PC-A-06), so a role-level misconfiguration cannot reopen PA-17.
+    pub fn startup_config(&self) -> tokio_postgres::Config {
+        let mut cfg = tokio_postgres::Config::new();
+        cfg.user(&self.user)
+            .dbname(&self.dbname)
+            .password(&self.password[..])
+            .application_name("nodkey-payments-adapter")
+            .options("-c search_path=");
+        cfg
+    }
+
     async fn connect(&self) -> Result<tokio_postgres::Client, &'static str> {
         let path = self.socket_dir.join(PG_SOCKET_NAME);
         let stream = match timeout(self.timeout, UnixStream::connect(&path)).await {
@@ -111,11 +123,7 @@ impl PgUnixView {
             }
             Err(_) => return Err("db_peer_cred"),
         }
-        let mut cfg = tokio_postgres::Config::new();
-        cfg.user(&self.user)
-            .dbname(&self.dbname)
-            .password(&self.password[..])
-            .application_name("nodkey-payments-adapter");
+        let cfg = self.startup_config();
         let (client, conn) =
             match timeout(self.timeout, cfg.connect_raw(stream, tokio_postgres::NoTls)).await {
                 Ok(Ok(v)) => v,

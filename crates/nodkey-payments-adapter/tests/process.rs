@@ -1,5 +1,5 @@
 //! PT-24 (process level): the binary refuses to start (exit 2, `refuse_start` log line) when an
-//! operator file is owned by the adapter's own uid, when the config is invalid, or when it is
+//! operator file is not owned by root (here: owned by the adapter's own uid), when the config is invalid, or when it is
 //! missing. Test files are necessarily owned by the test user, which is the adapter's uid here, so
 //! the success path of `load` cannot run unprivileged; the individual checks are unit-tested in
 //! `src/config.rs` with explicit uids.
@@ -50,10 +50,7 @@ fn config_owned_by_adapter_uid_is_refused() {
     std::fs::set_permissions(&cfg, std::fs::Permissions::from_mode(0o444)).unwrap();
     let (code, lines) = run(&["--config", cfg.to_str().unwrap()]);
     assert_eq!(code, 2);
-    assert!(
-        refusal(&lines).contains("owned by the adapter or broker uid"),
-        "{lines:?}"
-    );
+    assert!(refusal(&lines).contains("not owned by root"), "{lines:?}");
     // A symlinked config is refused before anything else.
     let link = d.join("link.json");
     std::os::unix::fs::symlink(&cfg, &link).unwrap();

@@ -103,14 +103,52 @@ async fn content_type_must_be_exact_and_single() {
     }
 }
 
+const STALL_HEAD: &str =
+    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 300\r\n\r\n{";
+
+/// PC-A-08: the timer covers only the request (setup excluded) and asserts the `total_ms` bound.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stall_after_head_times_out() {
-    let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 300\r\n\r\n{"
-        .to_string();
+    let f = FakeServer::start(Script::Respond(vec![(STALL_HEAD.into(), 10_000)]), false).await;
+    let mut o = Opts::new(f.addr);
+    o.total_ms = 1200;
+    o.connect_ms = 1000;
+    let p = start_p(o).await;
+    let g = sign(&refund_grant(5, "USD", CH_USD, now()), SEED);
     let t = std::time::Instant::now();
-    let v = run(vec![(head, 10_000)], 1200).await;
+    let v = p.create(&g).await;
+    let took = t.elapsed();
     assert_eq!(result_class(&v), ("ambiguous", "timeout"));
-    assert!(t.elapsed() < std::time::Duration::from_secs(3));
+    assert!(
+        took < std::time::Duration::from_millis(1200 + 500),
+        "{took:?}"
+    );
+}
+
+/// PC-A-05: a timed-out exchange releases its TLS connection (the hyper connection task is
+/// aborted), so a stalling provider cannot accumulate open sockets.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stalled_exchanges_release_their_connections() {
+    let f = FakeServer::start(Script::StallUntilClosed(STALL_HEAD.into()), false).await;
+    let mut o = Opts::new(f.addr);
+    o.total_ms = 600;
+    o.connect_ms = 500;
+    let p = start_p(o).await;
+    const N: usize = 6;
+    for _ in 0..N {
+        let v = p
+            .create(&sign(&refund_grant(5, "USD", CH_USD, now()), SEED))
+            .await;
+        assert_eq!(result_class(&v), ("ambiguous", "timeout"));
+    }
+    let closed = || f.closed.load(std::sync::atomic::Ordering::SeqCst);
+    for _ in 0..50 {
+        if closed() == N {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(closed(), N, "connections left open after the deadline");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -271,6 +271,7 @@ fn run_v2(raw: RawV2Config, mounts_verified_externally: bool) -> ExitCode {
             tasks.push(tokio::spawn(v2server::serve(l, ch.clone(), *uid, srv.clone())));
         }
         tasks.push(tokio::spawn(v2server::recovery_loop(srv.clone())));
+        tasks.push(tokio::spawn(v2server::payments_loop(srv.clone())));
         if let Err(e) = wait_for_signal().await {
             return fatal(&e);
         }

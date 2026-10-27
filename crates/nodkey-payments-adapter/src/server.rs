@@ -30,6 +30,8 @@ pub const MAX_LINE: usize = 8192;
 /// Idle timeout for the request line (§1).
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(2);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Budget of the order check inside the request deadline (§3.2, PC-A-02).
+pub const DB_BUDGET: Duration = Duration::from_secs(2);
 
 /// Error codes on socket P.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +43,7 @@ pub enum Code {
     GrantRefused,
     Unavailable,
     InvalidArgument,
+    IdemKidMismatch,
 }
 
 impl Code {
@@ -53,6 +56,7 @@ impl Code {
             Code::GrantRefused => "grant_refused",
             Code::Unavailable => "unavailable",
             Code::InvalidArgument => "invalid_argument",
+            Code::IdemKidMismatch => "idem_kid_mismatch",
         }
     }
     /// Static per code (uniform errors): never derived from input or provider data.
@@ -65,6 +69,7 @@ impl Code {
             Code::GrantRefused => "grant refused; nothing was sent",
             Code::Unavailable => "unavailable; nothing was sent",
             Code::InvalidArgument => "invalid argument; nothing was sent",
+            Code::IdemKidMismatch => "idem_kid is not the loaded key; nothing was sent",
         }
     }
 }
@@ -179,25 +184,40 @@ impl Adapter {
     pub fn hello(&self) -> Value {
         let caps: Vec<&str> = self.cfg.caps.iter().map(|c| c.as_str()).collect();
         json!({"format": crate::config::FORMAT, "profile": "simpay", "caps": caps,
-               "idem_kid": self.idem.kid(), "r_max_s": self.cfg.r_max_s})
+               "idem_kid": self.idem.kid(), "r_max_s": self.cfg.r_max_s,
+               "deadline_ms": self.cfg.limits.total_ms})
     }
 
     /// `refund.create`: verify (with age), order check, then one provider request built only
     /// from the grant.
-    async fn create(&self, grant_text: &str, a: &mut Audit) -> Handled {
+    async fn create(&self, grant_text: &str, deadline: Instant, a: &mut Audit) -> Handled {
         let g = grant::verify_create(&self.grants, grant_text, now_s()).map_err(|r| {
             a.detail = Some(r.0);
             Code::GrantRefused
         })?;
         a.jti = Some(g.jti_hex());
-        match check_order(self.orders.as_ref(), &g).await {
-            Ok(()) => {}
-            Err(OrderCheck::Mismatch) => {
+        // §3.3 (PC-A-01): a grant issued before the loaded K_idem became active may already have
+        // been executed under an earlier key; a create under this key could repeat it.
+        if g.iat < self.cfg.idem_key_not_before {
+            a.detail = Some("iat_before_idem_key");
+            return Err(Code::GrantRefused);
+        }
+        let db_deadline = deadline.min(Instant::now() + DB_BUDGET);
+        let checked =
+            tokio::time::timeout_at(db_deadline.into(), check_order(self.orders.as_ref(), &g))
+                .await;
+        match checked {
+            Ok(Ok(())) => {}
+            Ok(Err(OrderCheck::Mismatch)) => {
                 a.detail = Some("order_mismatch");
                 return Err(Code::GrantRefused);
             }
-            Err(OrderCheck::Unavailable(d)) => {
+            Ok(Err(OrderCheck::Unavailable(d))) => {
                 a.detail = Some(d);
+                return Err(Code::Unavailable);
+            }
+            Err(_) => {
+                a.detail = Some("db_deadline");
                 return Err(Code::Unavailable);
             }
         }
@@ -216,7 +236,7 @@ impl Adapter {
             idem_key: d.idem_key.clone(),
             form: form(&pairs),
         };
-        let x = self.provider.exchange(&call).await;
+        let x = self.provider.exchange_by(&call, deadline.into()).await;
         note_exchange(a, &x);
         let att = classify_create(&x, &self.expected(&g, &d));
         a.class = Some(att.class());
@@ -233,6 +253,7 @@ impl Adapter {
         op: &str,
         grant_text: &str,
         refund_id: Option<&str>,
+        deadline: Instant,
         a: &mut Audit,
     ) -> Handled {
         if let Some(id) = refund_id
@@ -262,7 +283,7 @@ impl Adapter {
         };
         let x = self
             .provider
-            .exchange(&Call::Get { path_and_query: pq })
+            .exchange_by(&Call::Get { path_and_query: pq }, deadline.into())
             .await;
         note_exchange(a, &x);
         if let Exchange::NotSent(_) = x {
@@ -288,8 +309,30 @@ impl Adapter {
         Ok(v)
     }
 
-    /// Dispatches one request line; returns the response object.
+    /// Dispatches one request line received now; returns the response object.
     pub async fn handle_line(&self, line: &[u8]) -> Value {
+        self.handle_line_by(line, self.deadline_from(Instant::now()))
+            .await
+    }
+
+    /// The request deadline (§1, PC-A-02): `total_ms` after receipt. The broker waits strictly
+    /// longer (it checks `deadline_ms` from `adapter.hello` at start-up).
+    pub fn deadline_from(&self, received: Instant) -> Instant {
+        received + Duration::from_millis(self.cfg.limits.total_ms)
+    }
+
+    /// The `idem_kid` the broker expects must be the loaded key's (§3.3, PC-A-01, BP-01).
+    fn kid_matches(&self, kid: &str, a: &mut Audit) -> Result<(), Code> {
+        if kid == self.idem.kid() {
+            Ok(())
+        } else {
+            a.detail = Some("idem_kid_mismatch");
+            Err(Code::IdemKidMismatch)
+        }
+    }
+
+    /// Dispatches one request line; every provider exchange finishes by `deadline`.
+    pub async fn handle_line_by(&self, line: &[u8], deadline: Instant) -> Value {
         let cid = self.ids.next();
         let started = Instant::now();
         let (id, op, args) = match parse_envelope(line) {
@@ -314,22 +357,45 @@ impl Adapter {
                     Err(Code::MalformedRequest)
                 }
             }
-            "refund.create" => match exact_args(&args, &["grant"]) {
-                Ok(v) => self.create(v[0], &mut a).await,
+            "refund.create" => match exact_args(&args, &["grant", "idem_kid"]) {
+                Ok(v) => match self.kid_matches(v[1], &mut a) {
+                    Ok(()) => self.create(v[0], deadline, &mut a).await,
+                    Err(c) => Err(c),
+                },
                 Err(c) => Err(c),
             },
-            "refund.find" => match exact_args(&args, &["grant"]) {
-                Ok(v) => self.lookup("refund.find", v[0], None, &mut a).await,
+            "refund.find" => match exact_args(&args, &["grant", "idem_kid"]) {
+                Ok(v) => match self.kid_matches(v[1], &mut a) {
+                    Ok(()) => {
+                        self.lookup("refund.find", v[0], None, deadline, &mut a)
+                            .await
+                    }
+                    Err(c) => Err(c),
+                },
                 Err(c) => Err(c),
             },
-            "refund.get" => match exact_args(&args, &["grant", "refund_id"]) {
-                Ok(v) => self.lookup("refund.get", v[0], Some(v[1]), &mut a).await,
+            "refund.get" => match exact_args(&args, &["grant", "refund_id", "idem_kid"]) {
+                Ok(v) => match self.kid_matches(v[2], &mut a) {
+                    Ok(()) => {
+                        self.lookup("refund.get", v[0], Some(v[1]), deadline, &mut a)
+                            .await
+                    }
+                    Err(c) => Err(c),
+                },
                 Err(c) => Err(c),
             },
-            "idem.status" if self.cfg.has(Cap::IdemStatus) => match exact_args(&args, &["grant"]) {
-                Ok(v) => self.lookup("idem.status", v[0], None, &mut a).await,
-                Err(c) => Err(c),
-            },
+            "idem.status" if self.cfg.has(Cap::IdemStatus) => {
+                match exact_args(&args, &["grant", "idem_kid"]) {
+                    Ok(v) => match self.kid_matches(v[1], &mut a) {
+                        Ok(()) => {
+                            self.lookup("idem.status", v[0], None, deadline, &mut a)
+                                .await
+                        }
+                        Err(c) => Err(c),
+                    },
+                    Err(c) => Err(c),
+                }
+            }
             _ => Err(Code::UnknownOperation),
         };
         let outcome = match &result {
@@ -342,10 +408,10 @@ impl Adapter {
                    "detail": a.detail, "class": a.class, "cause": a.cause, "http": a.http,
                    "provider_request_started": a.sent, "elapsed_ms": started.elapsed().as_millis() as u64}),
         );
-        if matches!(result, Err(Code::GrantRefused)) {
+        if matches!(result, Err(Code::GrantRefused | Code::IdemKidMismatch)) {
             event(
                 "alarm",
-                json!({"alarm": "grant_refused", "correlation_id": cid, "detail": a.detail}),
+                json!({"alarm": outcome, "correlation_id": cid, "detail": a.detail}),
             );
         }
         match result {
@@ -404,6 +470,8 @@ async fn write_value(w: &mut (impl AsyncWriteExt + Unpin), v: &Value) {
 }
 
 async fn handle_connection(stream: UnixStream, adapter: Arc<Adapter>) {
+    // The request deadline starts at receipt of the connection (PC-A-02).
+    let deadline = adapter.deadline_from(Instant::now());
     let uid = match stream.peer_cred() {
         Ok(c) => c.uid(),
         Err(_) => {
@@ -437,7 +505,7 @@ async fn handle_connection(stream: UnixStream, adapter: Arc<Adapter>) {
             );
             err_response(None, &cid, code)
         }
-        Ok(Ok(true)) => adapter.handle_line(&buf).await,
+        Ok(Ok(true)) => adapter.handle_line_by(&buf, deadline).await,
     };
     write_value(&mut w, &resp).await;
 }

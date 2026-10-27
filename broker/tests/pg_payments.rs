@@ -57,7 +57,12 @@ fn config(db: &str, sock: &str, adapter_uid: u32) -> String {
 
 fn my_uid() -> u32 {
     use std::os::unix::fs::MetadataExt;
-    let p = std::env::temp_dir().join(format!("gp-uid-{}", std::process::id()));
+    // Unique per call: tests run concurrently in one process.
+    let p = std::env::temp_dir().join(format!(
+        "gp-uid-{}-{}",
+        std::process::id(),
+        hex(&random16().unwrap())
+    ));
     std::fs::write(&p, b"").unwrap();
     let u = std::fs::metadata(&p).unwrap().uid();
     let _ = std::fs::remove_file(&p);
@@ -114,13 +119,18 @@ struct FakeState {
     in_progress: HashSet<String>,
     settlement: HashMap<String, &'static str>,
     ops: Vec<String>,
+    /// `idem_kid` of every non-hello call, in order.
+    kids: Vec<String>,
 }
 
 struct Fake {
     state: Mutex<FakeState>,
     creates: AtomicUsize,
     su: tokio_postgres::Client,
-    kid: String,
+    /// The adapter's current `idem_kid` (changes when the "adapter" restarts with another key).
+    kid: Mutex<String>,
+    /// Test hook: switch to this kid right after answering the next hello.
+    rotate_after_hello: Mutex<Option<String>>,
     r_max: u64,
 }
 
@@ -165,15 +175,35 @@ impl Fake {
     }
 
     /// Returns `None` to close the connection without a response.
+    fn kid(&self) -> String {
+        self.kid.lock().unwrap().clone()
+    }
+    fn set_kid(&self, k: &str) {
+        *self.kid.lock().unwrap() = k.to_owned();
+    }
+
     async fn handle(&self, op: &str, args: &Value) -> Option<Result<Value, &'static str>> {
         self.state.lock().unwrap().ops.push(op.to_owned());
+        // Like the adapter (PC-A-01, BP-01): every grant-carrying call must name the loaded
+        // key's kid, else it is refused and nothing is sent.
+        if op != "adapter.hello" {
+            let k = args["idem_kid"].as_str().unwrap_or_default().to_owned();
+            self.state.lock().unwrap().kids.push(k.clone());
+            if k != self.kid() {
+                return Some(Err("idem_kid_mismatch"));
+            }
+        }
         let grant = args["grant"].as_str().unwrap_or_default().to_owned();
         let amb = |cause: &str| json!({"class":"ambiguous","cause":cause,"reference":"ref-fake-1","anomalies":[]});
         match op {
-            "adapter.hello" => Some(Ok(
-                json!({"format":"nodkey.payments-adapter.v1","profile":"simpay",
-                "caps":["idem_status"],"idem_kid":self.kid,"r_max_s":self.r_max}),
-            )),
+            "adapter.hello" => {
+                let v = json!({"format":"nodkey.payments-adapter.v1","profile":"simpay",
+                "caps":["idem_status"],"idem_kid":self.kid(),"r_max_s":self.r_max,"deadline_ms":400});
+                if let Some(k) = self.rotate_after_hello.lock().unwrap().take() {
+                    self.set_kid(&k);
+                }
+                Some(Ok(v))
+            }
             "refund.create" => {
                 self.creates.fetch_add(1, Ordering::SeqCst);
                 let p = self.params_of(&grant).await?;
@@ -272,7 +302,8 @@ async fn start_fake(db: &str, sock: &std::path::Path) -> Arc<Fake> {
         state: Mutex::new(FakeState::default()),
         creates: AtomicUsize::new(0),
         su: connect(pg_config(db, "postgres", &e.super_pw)).await,
-        kid: KID.into(),
+        kid: Mutex::new(KID.into()),
+        rotate_after_hello: Mutex::new(None),
         r_max: 180,
     });
     let l = nodkey_broker::v2::server::bind_socket(sock).unwrap();
@@ -1162,7 +1193,8 @@ async fn pt24_pt36_adapter_identity() {
         state: Mutex::new(FakeState::default()),
         creates: AtomicUsize::new(0),
         su: connect(pg_config(&p.h.db, "postgres", &e.super_pw)).await,
-        kid: "ffffffffffffffff".into(),
+        kid: Mutex::new("ffffffffffffffff".into()),
+        rotate_after_hello: Mutex::new(None),
         r_max: 180,
     });
     {
@@ -1246,6 +1278,41 @@ async fn pt37_get_order_refunded() {
     assert_eq!(v["refunded_minor"], 990, "UNKNOWN excluded");
 }
 
+/// A session as `nodkey_shop_operator` (the real operator role; BP-02). The role is given a
+/// login and the per-run test password, and `CONNECT` on the test database.
+async fn operator(p: &P) -> tokio_postgres::Client {
+    static LOGIN: tokio::sync::Mutex<bool> = tokio::sync::Mutex::const_new(false);
+    let e = pg_env();
+    {
+        let mut done = LOGIN.lock().await;
+        if !*done {
+            p.h.su
+                .batch_execute(&format!(
+                    "ALTER ROLE nodkey_shop_operator LOGIN PASSWORD '{}'",
+                    e.broker_pw
+                ))
+                .await
+                .unwrap();
+            *done = true;
+        }
+    }
+    p.h.su
+        .batch_execute(&format!(
+            "GRANT CONNECT ON DATABASE {} TO nodkey_shop_operator",
+            p.h.db
+        ))
+        .await
+        .unwrap();
+    let c = connect(pg_config(&p.h.db, "nodkey_shop_operator", &e.broker_pw)).await;
+    let who: String = c
+        .query_one("SELECT current_user::text", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(who, "nodkey_shop_operator");
+    c
+}
+
 /// PT-39: counters forced out of step are rejected at commit; an operator owner change racing
 /// T1 serializes on the charge lock and T1 sees it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1256,9 +1323,9 @@ async fn pt39_counters_and_operator_race() {
     let _ = a;
     let e = p.h.su.execute("UPDATE nodkey.charge_refund_state SET inflight_minor = 0 WHERE charge_id = 'ch_order1005ee'", &[]).await.unwrap_err();
     assert!(format!("{e:?}").contains("out of step"), "{e:?}");
-    // Operator transaction holds the charge lock while it changes the owner.
-    let e2 = pg_env();
-    let mut op = connect(pg_config(&p.h.db, "postgres", &e2.super_pw)).await;
+    // Operator transaction (as nodkey_shop_operator, BP-02) holds the charge lock while it
+    // changes the owner.
+    let mut op = operator(&p).await;
     let pid = p.propose(1001, 10, "USD", CUST).await.unwrap();
     assert_eq!(p.approve(&pid).await, Delivery::Accepted);
     let tx = op.transaction().await.unwrap();
@@ -1362,7 +1429,14 @@ async fn pt04_concurrent_delivery() {
                 let _ = b.dispatch(id).await;
             }
             if i % 10 == 0 {
-                let _ = b.recovery_tick().await;
+                // Like the recovery loop: a reserved refund is dispatched by the caller.
+                if let Ok(out) = b.recovery_tick().await {
+                    for (pid, r) in out {
+                        if r == Ok(Execution::Reserved) {
+                            let _ = b.dispatch(pid).await;
+                        }
+                    }
+                }
                 let _ = b.payments_tick().await;
             }
         }));
@@ -1420,4 +1494,285 @@ async fn pt23_late_settlement_failure() {
     );
     assert_eq!(p.h.state(&a).await, "SUCCEEDED");
     let _ = encode_id(&[0; 16]);
+}
+
+/// BP-02: operator updates of the trusted facts, made AS `nodkey_shop_operator` (not the
+/// superuser), commit — on a charge that has no `charge_refund_state` row yet (the trigger
+/// creates it; the deferred counter check then runs at the operator's COMMIT) and on one that
+/// has. The operator still cannot touch the broker-owned tables.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn bp02_operator_updates_as_operator_role() {
+    let p = setup().await;
+    let op = operator(&p).await;
+    let rows: i64 = p
+        .h
+        .su
+        .query_one(
+            "SELECT count(*) FROM nodkey.charge_refund_state WHERE charge_id = 'ch_order1002bb'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(rows, 0, "fresh charge");
+    for sql in [
+        "UPDATE nodkey.orders SET status = 'disputed' WHERE order_id = 1002",
+        "UPDATE nodkey.orders SET owner_sub = 'user:carol' WHERE order_id = 1002",
+        "UPDATE nodkey.orders SET external_refunded_minor = 100 WHERE order_id = 1004",
+    ] {
+        op.batch_execute(sql)
+            .await
+            .unwrap_or_else(|e| panic!("{sql}: {e:?}"));
+    }
+    // Explicit transaction: the deferred check runs at this COMMIT.
+    op.batch_execute(
+        "BEGIN; UPDATE nodkey.orders SET status = 'canceled' WHERE order_id = 1006; COMMIT",
+    )
+    .await
+    .unwrap();
+    let st: String =
+        p.h.su
+            .query_one(
+                "SELECT status FROM nodkey.orders WHERE order_id = 1002",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(st, "disputed");
+    // A charge with an existing state row and an open effect.
+    let a = p.reserve(1005, 100, "USD").await;
+    op.batch_execute(
+        "UPDATE nodkey.orders SET external_refunded_minor = 50 WHERE order_id = 1005",
+    )
+    .await
+    .unwrap();
+    p.h.b.dispatch(decode_id(&a).unwrap()).await.unwrap();
+    assert_eq!(p.h.state(&a).await, "SUCCEEDED");
+    op.batch_execute(
+        "UPDATE nodkey.orders SET status = 'partially_refunded' WHERE order_id = 1005",
+    )
+    .await
+    .unwrap();
+    // The trusted facts are what T1 sees next: 1002 is disputed.
+    let pid = p.propose(1001, 10, "USD", CUST).await.unwrap();
+    let _ = pid;
+    // The operator has no path to the broker-owned state.
+    for sql in [
+        "UPDATE nodkey.charge_refund_state SET inflight_minor = 0",
+        "INSERT INTO nodkey.charge_refund_state (charge_id) VALUES ('ch_operator0001')",
+        "SELECT * FROM nodkey.payment_effect",
+        "UPDATE nodkey.payment_effect SET state = 'FAILED'",
+        "SELECT nodkey.charge_counters_check()",
+        "UPDATE nodkey.orders SET captured_minor = 1 WHERE order_id = 1001",
+    ] {
+        assert!(
+            op.batch_execute(sql).await.is_err(),
+            "operator allowed: {sql}"
+        );
+    }
+    assert_eq!(p.counters("ch_order1005ee").await, (100, 0, 0));
+}
+
+/// BP-01 (reviewer scenario): a row is UNKNOWN under K1; the adapter alone restarts with a
+/// rotated K_idem (K2) while the broker keeps running. The broker re-learns the kid before the
+/// round, refuses payment processing (alarm) and makes no call for the row: no lookup under K2,
+/// no resend. When the operator restores K1, the row is reconciled under K1 (the kid it was
+/// dispatched with) and resolves with exactly one refund.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn bp01_adapter_restart_with_rotated_key_never_resends() {
+    let p = setup().await;
+    p.fake.push(Mode::FailBeforeCommit);
+    let a = p.reserve(1001, 200, "USD").await;
+    p.h.b.dispatch(decode_id(&a).unwrap()).await.unwrap();
+    assert_eq!(p.pay_state(&a).await.unwrap().0, "UNKNOWN");
+    assert_eq!((p.fake.creates(), p.fake.effects()), (1, 0));
+    let calls_before = p.fake.state.lock().unwrap().kids.len();
+    // Adapter-only restart with K2.
+    p.fake.set_kid("ffffffffffffffff");
+    let out = p.tick_after(11).await;
+    assert!(out.is_empty(), "{out:?}");
+    assert!(
+        !p.h.b.ensure_adapter().await,
+        "not ready while a K1 row is open"
+    );
+    assert_eq!(
+        p.h.b.reconcile(decode_id(&a).unwrap()).await.unwrap(),
+        PayOutcome::Skipped
+    );
+    assert_eq!(
+        p.fake.state.lock().unwrap().kids.len(),
+        calls_before,
+        "no call for the row under K2"
+    );
+    assert_eq!((p.fake.creates(), p.fake.effects()), (1, 0));
+    // New refunds are not executed meanwhile.
+    let pid = p.propose(1005, 10, "USD", CUST).await.unwrap();
+    assert_eq!(p.approve(&pid).await, Delivery::Accepted);
+    assert_eq!(
+        p.h.b.execute(decode_id(&pid).unwrap(), "t").await.unwrap(),
+        Execution::Unverified("payments_not_ready")
+    );
+    // The operator restores K1: the row resolves under K1 with one refund.
+    p.fake.set_kid(KID);
+    let out = p.tick_after(11).await;
+    assert!(
+        out.iter()
+            .any(|(_, o)| matches!(o, PayOutcome::Applied(PayTo::Succeeded { .. }))),
+        "{out:?}"
+    );
+    assert_eq!(p.h.state(&a).await, "SUCCEEDED");
+    assert_eq!(p.fake.effects(), 1);
+    let kids = p.fake.state.lock().unwrap().kids.clone();
+    assert!(kids.iter().all(|k| k == KID), "{kids:?}");
+}
+
+/// BP-01: a row reserved under K1 is not dispatched when the adapter now reports K2 (the
+/// broker re-runs hello before the dispatch); nothing is sent and the row fails as never
+/// dispatched. A call that names a stale kid is refused by the adapter (nothing sent) and the
+/// row stays UNKNOWN with an alarm, never FAILED.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn bp01_dispatch_rechecks_the_kid() {
+    let p = setup().await;
+    let a = p.reserve(1001, 100, "USD").await;
+    p.fake.set_kid("ffffffffffffffff");
+    assert_eq!(
+        p.h.b.dispatch(decode_id(&a).unwrap()).await.unwrap(),
+        PayOutcome::Skipped
+    );
+    assert_eq!(p.fake.creates(), 0);
+    let out = p.tick_after(31).await;
+    assert!(
+        out.iter().any(|(_, o)| *o
+            == PayOutcome::Applied(PayTo::Failed {
+                reason: "not_dispatched"
+            })),
+        "{out:?}"
+    );
+    assert_eq!(p.fake.creates(), 0);
+    // Key restored; then the adapter rotates between hello and the create: refused, UNKNOWN.
+    p.fake.set_kid(KID);
+    assert!(p.h.b.ensure_adapter().await);
+    let b = p.reserve(1005, 100, "USD").await;
+    let id = decode_id(&b).unwrap();
+    // The fake rotates right after it has answered the dispatcher's hello.
+    *p.fake.rotate_after_hello.lock().unwrap() = Some("eeeeeeeeeeeeeeee".into());
+    let out = p.h.b.dispatch(id).await.unwrap();
+    assert_eq!(
+        out,
+        PayOutcome::Applied(PayTo::Unknown {
+            reason: "key_mismatch"
+        })
+    );
+    assert_eq!(p.fake.effects(), 0);
+    assert_eq!(p.h.state(&b).await, "UNKNOWN");
+}
+
+/// BP-03: a dispatcher that waits for a call slot past its lease re-checks the lease after
+/// the wait and sends nothing once recovery has moved the row on (at most one call in flight
+/// per row).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn bp03_lease_rechecked_after_slot_wait() {
+    let p = setup().await;
+    let a = p.reserve(1001, 100, "USD").await;
+    let id = decode_id(&a).unwrap();
+    let rt = p.h.b.payments.as_ref().unwrap();
+    let held = rt.calls.acquire_many(8).await.unwrap();
+    let b = p.h.b.clone();
+    let d = tokio::spawn(async move { b.dispatch(id).await });
+    // The dispatcher has committed T2 and now waits for a slot.
+    for _ in 0..100 {
+        if p.pay_state(&a).await.unwrap().0 == "DISPATCHED" {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let lease = p.h.b.cfg.payments.as_ref().unwrap().lease_dispatch_s();
+    let out = p.tick_after(lease + 1).await;
+    assert!(out.iter().any(|(_, o)| *o
+        == PayOutcome::Applied(PayTo::Unknown {
+            reason: "lost_response"
+        })));
+    drop(held);
+    assert_eq!(d.await.unwrap().unwrap(), PayOutcome::Discarded);
+    assert_eq!(p.fake.creates(), 0, "the late dispatcher sent nothing");
+}
+
+/// BP-04: Phase 3 recovery never waits for the adapter: with a slow adapter, `recovery_tick`
+/// executes an approved refund (T1) and returns without any adapter call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn bp04_recovery_tick_does_not_call_the_adapter() {
+    let p = setup().await;
+    p.fake.push(Mode::Slow(5000));
+    let pid = p.propose(1001, 100, "USD", CUST).await.unwrap();
+    assert_eq!(p.approve(&pid).await, Delivery::Accepted);
+    let t = std::time::Instant::now();
+    let out = p.h.b.recovery_tick().await.unwrap();
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    assert!(out.iter().any(|(_, r)| *r == Ok(Execution::Reserved)));
+    assert_eq!(p.fake.creates(), 0);
+}
+
+/// BP-05 + BP-08: one row whose transition fails (the provider "confirms" it with a refund id
+/// that already confirmed another row; the UNIQUE index rejects it) does not stop the tick: the
+/// other row resolves, the failing row stays UNKNOWN and is backed off.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn bp05_bp08_one_failing_row_does_not_stop_the_tick() {
+    let p = setup().await;
+    let a = p.reserve(1001, 100, "USD").await;
+    p.h.b.dispatch(decode_id(&a).unwrap()).await.unwrap();
+    assert_eq!(p.h.state(&a).await, "SUCCEEDED");
+    let ra: String =
+        p.h.su
+            .query_one(
+                "SELECT provider_refund_id FROM nodkey.payment_effect WHERE pending_id = $1",
+                &[&decode_id(&a).unwrap().as_slice()],
+            )
+            .await
+            .unwrap()
+            .get(0);
+    p.fake.push(Mode::FailBeforeCommit);
+    let b = p.reserve(1005, 100, "USD").await;
+    p.h.b.dispatch(decode_id(&b).unwrap()).await.unwrap();
+    p.fake.push(Mode::CommitThenDrop);
+    let c = p.reserve(1006, 100, "JPY").await;
+    p.h.b.dispatch(decode_id(&c).unwrap()).await.unwrap();
+    // The provider reports row B as refunded with row A's refund id.
+    let grant_b: Vec<u8> =
+        p.h.su
+            .query_one(
+                "SELECT grant_bytes FROM public.pending_effect WHERE pending_id = $1",
+                &[&decode_id(&b).unwrap().as_slice()],
+            )
+            .await
+            .unwrap()
+            .get(0);
+    let params_b = p.fake.params_of(&encode_transport(&grant_b)).await.unwrap();
+    let mut fake_b = Fake::refund(&params_b, 0);
+    fake_b["id"] = json!(ra);
+    p.fake
+        .state
+        .lock()
+        .unwrap()
+        .ledger
+        .insert(encode_transport(&grant_b), fake_b);
+    let out = p.tick_after(11).await;
+    assert_eq!(p.h.state(&c).await, "SUCCEEDED", "{out:?}");
+    assert_eq!(p.h.state(&b).await, "UNKNOWN");
+    let next: Option<i64> =
+        p.h.su
+            .query_one(
+                "SELECT next_check_at FROM nodkey.payment_effect WHERE pending_id = $1",
+                &[&decode_id(&b).unwrap().as_slice()],
+            )
+            .await
+            .unwrap()
+            .get(0);
+    assert!(next.unwrap() >= (p.h.now() + 60) as i64, "backed off");
 }

@@ -61,7 +61,7 @@ runs only with an explicit `"profile": "demo1"` in its configuration.
 - `config.digest` requires `authority_workloads_path`: the authority's `nodkey.workloads.v1`
   file, which must describe exactly this broker's workloads.
 
-## Payments (Demo P, `docs/specs/payments-adapter-v1.md` Draft 3)
+## Payments (Demo P, `docs/specs/payments-adapter-v1.md` Draft 3.2)
 
 Enabled by a `payments` section in the v2 configuration:
 
@@ -84,7 +84,14 @@ It also needs the effect-protocol-v2 Draft 3.1 `payments.refund` declaration, wh
   transaction.
 - T2/T3: `refund.create` on socket P under a row lease, followed by a confirming `refund.get`.
 - The reconciler looks up first. It resends with the same key only inside the gate, and only the
-  lease holder calls the adapter.
+  lease holder calls the adapter. Before every call the broker waits (bounded) for a call slot and
+  then re-asserts the row's lease.
+- Every call on P carries the row's `idem_kid`. `adapter.hello` is re-run before every dispatch,
+  reconciliation round and payments tick; payment processing is refused while a non-final row
+  carries another kid, or while the adapter's `deadline_ms` is not below `adapter_total_ms + 2 s`.
+- Payments recovery and reconciliation run in their own loop (`v2::server::payments_loop`), at most
+  4 rows at a time, with per-row error isolation; the effect-protocol-v2 recovery loop never waits
+  for the adapter.
 - Workloads see only the §8 reason enum.
 
 The pg_hba lines for the adapter role (§1) belong to the deployment; they are not set here.

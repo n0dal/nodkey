@@ -544,3 +544,105 @@ async fn request_bytes_are_fixed_and_grant_derived() {
     assert!(!v.to_string().contains(&idem));
     assert!(!logs().join("\n").contains(&idem));
 }
+
+/// PC-A-01 / BP-01: every grant-carrying call must name the loaded key's `idem_kid`; any other
+/// value (or none) is refused with nothing sent, on every op.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn idem_kid_must_match_the_loaded_key() {
+    let e = env().await;
+    let g = sign(&base(), SEED);
+    let other = "0000000000000000";
+    assert_ne!(e.p.adapter.idem.kid(), other);
+    for (op, args) in [
+        ("refund.create", json!({"grant": g, "idem_kid": other})),
+        ("refund.find", json!({"grant": g, "idem_kid": other})),
+        (
+            "refund.get",
+            json!({"grant": g, "refund_id": "re_ABCDEFGH1234", "idem_kid": other}),
+        ),
+        ("idem.status", json!({"grant": g, "idem_kid": other})),
+    ] {
+        let v = e.p.call(op, args).await;
+        assert_eq!(err_code(&v), "idem_kid_mismatch", "{op}: {v}");
+        assert_eq!(
+            v["error"]["message"],
+            json!("idem_kid is not the loaded key; nothing was sent")
+        );
+    }
+    // Without the member the request is malformed.
+    let line = json!({"v":2,"id":"k1","op":"refund.create","args":{"grant": g}}).to_string() + "\n";
+    assert_eq!(
+        err_code(&e.p.raw(line.as_bytes()).await.unwrap()),
+        "malformed_request"
+    );
+    assert_eq!(e.sent(), 0);
+    // Control: the loaded kid is served.
+    e.created(&g, "matching kid").await;
+}
+
+/// PC-A-01: a grant issued before `idem_key_not_before` is refused for `refund.create`, nothing
+/// sent; lookups are unaffected. A not-before time in the future refuses start-up.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn grants_older_than_the_key_are_not_created() {
+    let t = now();
+    let e = env_with(|o| o.idem_key_not_before = t - 60).await;
+    e.refused(
+        &sign(&refund_grant(500, "USD", CH_USD, t - 61), SEED),
+        "iat before not_before",
+    )
+    .await;
+    let v =
+        e.p.call(
+            "refund.find",
+            json!({"grant": sign(&refund_grant(500, "USD", CH_USD, t - 61), SEED)}),
+        )
+        .await;
+    assert_eq!(v["ok"], json!(true), "{v}");
+    e.created(
+        &sign(&refund_grant(500, "USD", CH_USD, t - 60), SEED),
+        "iat = not_before",
+    )
+    .await;
+    let mut o = Opts::new(e.f.addr);
+    o.idem_key_not_before = now() + 3600;
+    let err = try_build_adapter(&o, &sockdir().join("x.sock")).unwrap_err();
+    assert!(err.contains("future"), "{err}");
+}
+
+/// An order view that never answers in time.
+struct SlowOrders;
+impl nodkey_payments_adapter::orders::OrderView for SlowOrders {
+    fn fetch(
+        &self,
+        _id: u64,
+    ) -> nodkey_payments_adapter::orders::BoxFut<
+        '_,
+        Result<Option<nodkey_payments_adapter::orders::OrderRow>, &'static str>,
+    > {
+        Box::pin(async {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            Err("db_query")
+        })
+    }
+}
+
+/// PC-A-02: one deadline per request from receipt. A slow order view is cut at its share of the
+/// deadline; the answer is `unavailable` (nothing sent) well within `total_ms`, so within the
+/// broker's wait (`total_ms + 2 s`); `adapter.hello` publishes the deadline.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn slow_order_view_is_bounded_by_the_request_deadline() {
+    let e = env_with(|o| {
+        o.orders = std::sync::Arc::new(SlowOrders);
+        o.total_ms = 1500;
+        o.connect_ms = 1000;
+    })
+    .await;
+    let hello = e.p.call("adapter.hello", json!({})).await;
+    assert_eq!(hello["result"]["deadline_ms"], json!(1500));
+    let t = std::time::Instant::now();
+    let v = e.p.create(&sign(&base(), SEED)).await;
+    let took = t.elapsed();
+    assert_eq!(err_code(&v), "unavailable", "{v}");
+    assert!(took < Duration::from_millis(1500 + 300), "{took:?}");
+    assert_eq!(e.sent(), 0);
+}

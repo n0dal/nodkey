@@ -245,12 +245,34 @@ pub async fn serve(listener: UnixListener, ch: Channel, expected_uid: u32, serve
     }
 }
 
-/// The recovery loop (§4.4): at start-up, then every 5 s.
+/// The recovery loop (§4.4): at start-up, then every 5 s. Refunds it reserves are dispatched in
+/// their own tasks, so a slow adapter or provider never delays Phase 3 recovery (BP-04).
 pub async fn recovery_loop(server: Arc<Server>) {
     loop {
-        if let Err(f) = server.broker.recovery_tick().await {
-            log_event("v2_recovery_error", json!({"detail": f.detail}));
+        match server.broker.recovery_tick().await {
+            Ok(out) => {
+                for (pid, r) in out {
+                    if r == Ok(super::service::Execution::Reserved) {
+                        let b = server.broker.clone();
+                        tokio::spawn(async move {
+                            let _ = b.dispatch(pid).await;
+                        });
+                    }
+                }
+            }
+            Err(f) => log_event("v2_recovery_error", json!({"detail": f.detail})),
         }
+        tokio::time::sleep(RECOVERY_PERIOD).await;
+    }
+}
+
+/// The payments loop (payments-adapter-v1 §7.2 recovery, §7.3): its own task, at start-up and
+/// then every 5 s (BP-04).
+pub async fn payments_loop(server: Arc<Server>) {
+    if server.broker.payments.is_none() {
+        return;
+    }
+    loop {
         if let Err(f) = server.broker.payments_tick().await {
             log_event("v2_payments_recovery_error", json!({"detail": f.detail}));
         }

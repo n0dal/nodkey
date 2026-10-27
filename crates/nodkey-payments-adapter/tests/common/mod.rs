@@ -438,6 +438,8 @@ pub struct Opts {
     pub orders: Arc<dyn OrderView>,
     pub max_concurrent: usize,
     pub key: &'static str,
+    pub kidem: [u8; 32],
+    pub idem_key_not_before: u64,
 }
 
 impl Opts {
@@ -454,6 +456,8 @@ impl Opts {
             orders: FakeOrders::standard(),
             max_concurrent: 8,
             key: RK,
+            kidem: KIDEM,
+            idem_key_not_before: 1_704_067_200,
         }
     }
 }
@@ -484,23 +488,26 @@ pub fn adapter_config(o: &Opts, sock: &Path) -> Value {
         "provider": {"profile": "simpay", "account": ACCT, "addr": o.addr.to_string(),
             "server_name": SERVER_NAME, "ca_file": "/etc/nodkey-adapter/ca.crt",
             "key_file": "/run/secrets/simpay", "idem_key_file": "/run/secrets/kidem",
-            "retention_s": 86400, "resend_margin_s": 7200, "caps": o.caps},
+            "idem_key_not_before": o.idem_key_not_before, "retention_s": 86400, "resend_margin_s": 7200, "caps": o.caps},
         "limits": {"connect_ms": o.connect_ms, "total_ms": o.total_ms, "max_head": 16384,
                    "max_body": 65536, "max_concurrent": o.max_concurrent}})
 }
 
 pub fn build_adapter(o: &Opts, sock: &Path) -> Adapter {
-    let cfg = parse_config(adapter_config(o, sock).to_string().as_bytes()).expect("config");
+    try_build_adapter(o, sock).expect("build adapter")
+}
+
+pub fn try_build_adapter(o: &Opts, sock: &Path) -> Result<Adapter, String> {
+    let cfg = parse_config(adapter_config(o, sock).to_string().as_bytes())?;
     let ca = nodkey_payments_adapter::config::parse_ca(&std::fs::read(&o.ca).unwrap()).unwrap();
     nodkey_payments_adapter::build(
         cfg,
         registry(),
         ca,
         ApiKey::new(zeroize::Zeroizing::new(o.key.to_string())),
-        IdemKey::new(KIDEM),
+        IdemKey::new(o.kidem),
         o.orders.clone(),
     )
-    .expect("build adapter")
 }
 
 pub async fn start_p(o: Opts) -> P {
@@ -533,7 +540,15 @@ impl P {
         }
     }
 
-    pub async fn call(&self, op: &str, args: Value) -> Value {
+    /// Sends one request. Like the broker, every call that carries a grant also carries the
+    /// adapter's current `idem_kid` unless the test sets one itself.
+    pub async fn call(&self, op: &str, mut args: Value) -> Value {
+        if let Some(o) = args.as_object_mut()
+            && o.contains_key("grant")
+            && !o.contains_key("idem_kid")
+        {
+            o.insert("idem_kid".into(), json!(self.adapter.idem.kid()));
+        }
         let id = format!("r{}", uniq());
         let line = json!({"v": 2, "id": id, "op": op, "args": args}).to_string() + "\n";
         let v = self.raw(line.as_bytes()).await.expect("response");
@@ -573,12 +588,17 @@ pub enum Script {
     Respond(Vec<(String, u64)>),
     /// Accept TCP but never answer the TLS handshake.
     StallHandshake,
+    /// Write this text, then never write again; count the connection in `closed` once the
+    /// client closes it (EOF or error on read).
+    StallUntilClosed(String),
 }
 
 pub struct FakeServer {
     pub addr: SocketAddr,
     pub tcp_accepts: Arc<AtomicUsize>,
     pub requests: Arc<AtomicUsize>,
+    /// Connections the client closed (only for [`Script::StallUntilClosed`]).
+    pub closed: Arc<AtomicUsize>,
 }
 
 pub fn tls_server_config(v12_only: bool) -> rustls::ServerConfig {
@@ -673,14 +693,16 @@ impl FakeServer {
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_server_config(v12_only)));
         let tcp_accepts = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(AtomicUsize::new(0));
-        let (ta, rq) = (tcp_accepts.clone(), requests.clone());
+        let closed = Arc::new(AtomicUsize::new(0));
+        let (ta, rq, cl) = (tcp_accepts.clone(), requests.clone(), closed.clone());
         tokio::spawn(async move {
             loop {
                 let Ok((tcp, _)) = l.accept().await else {
                     return;
                 };
                 ta.fetch_add(1, Ordering::SeqCst);
-                let (acceptor, script, rq) = (acceptor.clone(), script.clone(), rq.clone());
+                let (acceptor, script, rq, cl) =
+                    (acceptor.clone(), script.clone(), rq.clone(), cl.clone());
                 tokio::spawn(async move {
                     match script {
                         Script::StallHandshake => {
@@ -707,6 +729,25 @@ impl FakeServer {
                             }
                             let _ = tls.shutdown().await;
                         }
+                        Script::StallUntilClosed(text) => {
+                            let Ok(mut tls) = acceptor.accept(tcp).await else {
+                                return;
+                            };
+                            let Some(req) = read_request(&mut tls).await else {
+                                return;
+                            };
+                            rq.fetch_add(1, Ordering::SeqCst);
+                            let _ = tls.write_all(subst(&text, &req).as_bytes()).await;
+                            let _ = tls.flush().await;
+                            let mut tmp = [0u8; 256];
+                            loop {
+                                match tls.read(&mut tmp).await {
+                                    Ok(0) | Err(_) => break,
+                                    Ok(_) => {}
+                                }
+                            }
+                            cl.fetch_add(1, Ordering::SeqCst);
+                        }
                     }
                 });
             }
@@ -715,6 +756,7 @@ impl FakeServer {
             addr,
             tcp_accepts,
             requests,
+            closed,
         }
     }
 }

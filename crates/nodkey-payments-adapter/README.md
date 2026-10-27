@@ -4,7 +4,7 @@
 > **simulated** payment provider.
 
 The payments adapter of Demo P. It implements
-[`docs/specs/payments-adapter-v1.md`](../../docs/specs/payments-adapter-v1.md) **Draft 3**
+[`docs/specs/payments-adapter-v1.md`](../../docs/specs/payments-adapter-v1.md) **Draft 3.2**
 (ADR-0012 rev. 2, ADR-0006 Amendment 2).
 
 It is a stateless process with its own uid. It alone holds the simpay key and `K_idem`, and it
@@ -25,10 +25,12 @@ nodkey-payments-adapter --config /etc/nodkey-adapter/config.json
 
 | Area | Spec | Implementation |
 |---|---|---|
-| Start-up inputs | §2, §9 | Config, registry and pinned CA are operator files. Each must be a regular file and not a symlink (the opened inode must equal the checked path). The owner must not be the broker or adapter uid. No group/other write bit is allowed on the file or any parent directory, and no parent may be owned by the broker or adapter. Secrets (simpay key, `K_idem`, DB password) must be owned by the adapter uid with mode exactly `0400`. Socket P's directory must be owned by the adapter with mode exactly `2750`. Refusals: uid 0, or a uid equal to `broker_uid` or `db_uid`; empty `tenants`; `addr` not an IP literal; `server_name` not a DNS name; the `R_max` rule; unknown or duplicate caps; P's directory nested with `db.socket_dir`; a CA file with anything other than exactly one certificate; a key that is not a restricted `rk_sim_` key. Config is strict JSON (no duplicate keys, `deny_unknown_fields`, integers only). Nothing is re-read at runtime. |
+| Start-up inputs | §2, §9 | Config, registry and pinned CA are operator files. Each must be a regular file and not a symlink (the opened inode must equal the checked path), owned by root, with every parent directory owned by root and no group/other write bit on the file or any parent; the config is read once and the checked bytes are parsed. Secrets (simpay key, `K_idem`, DB password) must be owned by the adapter uid with mode exactly `0400`. Socket P's directory must be owned by the adapter with mode exactly `2750`. Refusals: uid 0, or a uid equal to `broker_uid` or `db_uid`; empty `tenants`; `addr` not an IP literal; `server_name` not a DNS name; the `R_max` rule; unknown or duplicate caps; P's directory nested with `db.socket_dir`; a CA file with anything other than exactly one certificate; a key that is not a restricted `rk_sim_` key; `idem_key_not_before` before 2024-01-01 or in the future; not `connect_ms < total_ms`. Config is strict JSON (no duplicate keys, `deny_unknown_fields`, integers only). Nothing is re-read at runtime. |
 | Grant check, creates | §3.1 | `nodkey_grant::verify_retransmission`: clock floor, steps 1–7 (4c revoked key, 4d window at `iat`), 8a–8d, no 8e, age `now − iat ≤ R_max`, 9a–9c (with 9c against the configured `tenants`, RX-1), kind, `cfm`, `op`/`opv`, and the exact `res`/`con` shape. The declaration is compiled in. Then the adapter rules (step 6): `amount_minor ≥ 1` (RX-3) and ≤ 999 999 999 999; con2 matches `^ch_[A-Za-z0-9]{8,61}$`; `currency` is in the ISO 4217 table, which is the same table as the broker's. |
 | Grant check, lookups | §3.1, PA-18 | `nodkey_grant::verify_binding`: the same checks without the age rule, then the same adapter rules (con2 pattern on every op, PA-19). There is no order check, because lookups cannot cause an effect. |
 | Order view | §2, §3.2, PA-16 | `PgUnixView` connects `<socket_dir>/.s.PGSQL.5432` itself and requires the server's `SO_PEERCRED` uid to equal `db_uid` before it sends any byte. Only then does it run `tokio-postgres` `connect_raw` (SCRAM, no TLS on a Unix socket). It sends one schema-qualified statement. Row mismatch → `grant_refused`; DB failure → `unavailable`. |
+| Key binding | §3.3 (PC-A-01, BP-01) | Every grant-carrying op takes `idem_kid`; another value → `ok:false idem_kid_mismatch`, checked before the grant, nothing sent. `refund.create` is refused (`grant_refused`) for `iat < provider.idem_key_not_before`. |
+| Deadline | §1 (PC-A-02) | One deadline per request, `total_ms` after the connection is accepted; the order check gets at most `min(2 s, time left)`; the provider exchange ends by the same deadline. `adapter.hello` reports it as `deadline_ms`. The DB session also pins `search_path` to empty in its start-up options (PC-A-06). |
 | Derivation | §3.3 | HMAC-SHA256 (`hmac`/`sha2`) over the length-prefixed `D`; b64url unpadded (43 characters); `idem_kid` = first 8 bytes of `HMAC(K_idem, "kid")` as hex. Vectors were computed independently with Python. |
 | TLS | §5 | rustls/ring, TLS 1.3 only, with the pinned CA as the only root. SNI and the name check use `server_name`. Resumption is disabled (no tickets, no early data); there is no client certificate; ALPN is `http/1.1`. The destination is the configured IP:port: no DNS, no proxy. |
 | HTTP | §5 | hyper 1.x `http1` client, one request per connection. Options: `max_headers(64)`, `max_header_size` = `max_head`, obsolete line folding rejected, invalid headers not ignored, no HTTP/0.9. Header values must be visible ASCII, SP or HTAB. Body cap is `max_body` (`Limited`); connect + handshake must finish within `connect_ms`; the whole exchange within `total_ms`. Redirects are never followed. Headers are fixed (`Host`, `Authorization`, `Idempotency-Key`, `Content-Type`, `User-Agent: nodkey-payments-adapter/1`, `Content-Length`). The body is form-encoded and built from the grant only. |
@@ -43,7 +45,7 @@ nodkey-payments-adapter --config /etc/nodkey-adapter/config.json
   grant-derived values, not only the charge (§4 says "a found refund must match the grant's charge").
   A mismatch is `ambiguous/echo_mismatch` + `contradicts_request`. Every request for one grant
   derives from that grant, so any other value is an inconsistent answer.
-- **`crlf_injection`.** simpay's variant smuggles syntactically *valid* extra header lines
+- **`crlf_injection`** (now spec PT-18, Draft 3.2). simpay's variant smuggles syntactically *valid* extra header lines
   (`Set-Cookie`, `Location`) into an otherwise exact 200. Those headers are never read or forwarded,
   so the result is `created`. The ledger confirms the refund really happened. The broker
   still confirms by `refund.get` before `SUCCEEDED`.

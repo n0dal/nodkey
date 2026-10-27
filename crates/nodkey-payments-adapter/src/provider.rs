@@ -106,13 +106,40 @@ impl std::fmt::Debug for Provider {
     }
 }
 
-/// A request the adapter builds; every value is grant-derived or fixed.
-#[derive(Debug, Clone)]
+/// A request the adapter builds; every value is grant-derived or fixed. `Debug` redacts the
+/// `Idempotency-Key` (PC-A-04).
+#[derive(Clone)]
 pub enum Call {
     /// `POST /v1/refunds` with `Idempotency-Key` and a form body.
     Create { idem_key: String, form: String },
     /// `GET <path_and_query>`.
     Get { path_and_query: String },
+}
+
+impl std::fmt::Debug for Call {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Call::Create { form, .. } => f
+                .debug_struct("Create")
+                .field("idem_key", &"<redacted>")
+                .field("form", form)
+                .finish(),
+            Call::Get { path_and_query } => f
+                .debug_struct("Get")
+                .field("path_and_query", path_and_query)
+                .finish(),
+        }
+    }
+}
+
+/// Aborts the hyper connection task when the exchange ends for any reason, including the
+/// deadline dropping the exchange future (PC-A-05).
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl Provider {
@@ -181,15 +208,22 @@ impl Provider {
         b.body(Full::new(body)).ok()
     }
 
-    /// Performs one exchange under the §5 limits.
+    /// Performs one exchange under the §5 limits, with its own `total_ms` deadline.
     pub async fn exchange(&self, call: &Call) -> Exchange {
+        let deadline = Instant::now() + Duration::from_millis(self.limits.total_ms);
+        self.exchange_by(call, deadline).await
+    }
+
+    /// Performs one exchange that must finish by `deadline` (the request's deadline, PC-A-02).
+    /// Connect + handshake are bounded by `connect_ms` and by the deadline.
+    pub async fn exchange_by(&self, call: &Call, deadline: Instant) -> Exchange {
         let Some(req) = self.build(call) else {
             // Nothing was written; the values are pattern-checked, so this does not happen.
             return Exchange::NotSent(NotSentCause::Connect);
         };
         let start = Instant::now();
-        let deadline = start + Duration::from_millis(self.limits.total_ms);
-        let connect_budget = Duration::from_millis(self.limits.connect_ms);
+        let connect_budget = Duration::from_millis(self.limits.connect_ms)
+            .min(deadline.saturating_duration_since(start));
 
         // Phase 1: TCP connect and TLS handshake. No request byte exists on the wire yet.
         let tcp = match timeout(connect_budget, TcpStream::connect(self.addr)).await {
@@ -218,12 +252,10 @@ impl Provider {
                 Ok(v) => v,
                 Err(_) => return Exchange::Failed(AmbCause::ResetAfterSend),
             };
-            let driver = tokio::spawn(async move {
+            let _driver = AbortOnDrop(tokio::spawn(async move {
                 let _ = conn.await;
-            });
-            let out = run(&mut sender, req, self.limits.max_body).await;
-            driver.abort();
-            out
+            }));
+            run(&mut sender, req, self.limits.max_body).await
         };
         match timeout_at(deadline, work).await {
             Ok(x) => x,
@@ -336,6 +368,16 @@ mod tests {
         assert!(headers_clean(&h));
         h.insert("y", HeaderValue::from_bytes(b"caf\xc3\xa9").unwrap());
         assert!(!headers_clean(&h));
+    }
+
+    #[test]
+    fn call_debug_redacts_idempotency_key() {
+        let c = Call::Create {
+            idem_key: "SECRETKEY".into(),
+            form: "charge=ch_x".into(),
+        };
+        let d = format!("{c:?}");
+        assert!(!d.contains("SECRETKEY") && d.contains("redacted"), "{d}");
     }
 
     #[test]
