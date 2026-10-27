@@ -459,6 +459,60 @@
    "captured_minor": 5000,
    "charge_id": "ch_demop0001030",
    "tag": "rce_bob_target"
+  },
+  {
+   "order_id": 1031,
+   "ten": "acme",
+   "owner_sub": "user:c30",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001031",
+   "tag": "f_unknown_deadline"
+  },
+  {
+   "order_id": 1032,
+   "ten": "acme",
+   "owner_sub": "user:c30",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001032",
+   "tag": "status_change"
+  },
+  {
+   "order_id": 1033,
+   "ten": "acme",
+   "owner_sub": "user:c30",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001033",
+   "tag": "late_refund_failed"
+  },
+  {
+   "order_id": 1034,
+   "ten": "acme",
+   "owner_sub": "user:c08",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001034",
+   "tag": "tls_wrong_ca"
+  },
+  {
+   "order_id": 1035,
+   "ten": "acme",
+   "owner_sub": "user:c03",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001035",
+   "tag": "tls_wrong_san"
+  },
+  {
+   "order_id": 1036,
+   "ten": "acme",
+   "owner_sub": "user:c13",
+   "currency": "USD",
+   "captured_minor": 5000,
+   "charge_id": "ch_demop0001036",
+   "tag": "revoked_key"
   }
  ]
 }
