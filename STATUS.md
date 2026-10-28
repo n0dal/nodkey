@@ -7,8 +7,8 @@
 **Focus:** authority control for apps and AI agents performing consequential external actions,
 with user-confirmed intent ([ADR-0010](docs/decisions/0010-project-focus.md)).
 
-**Active milestone:** Phase 4 — External effects (Demo P): **complete, verified locally**.
-Next: Phase 5 — AI agents (Demo A). Phases 2–3 complete. Next: Phase 4 — Demo P (payments).
+**Active milestone:** Phase 5 — AI agents (Demo A): **complete, verified locally**. Next: feature
+freeze, consolidation, and mechanical verification (fuzzing, mutation testing, formal model). Phases 2–4 complete. Next: Phase 4 — Demo P (payments).
 Phase 2 (Demo 1, containment) complete.
 
 ## Verified functionality
@@ -62,10 +62,23 @@ P-03, F-01, F-03) rest on direct observation only.
 | Rows needing crafted signed grants, clock control, restore drills, key-rotation drills, exact crash points, or HTTP edge cases the simulator cannot emit | 17 rows | **NOT TESTED** |
 | A provider that lies consistently | spec §10 residual | not detectable by design |
 
+### Phase 5 — AI agent with delegated mandates (Demo A, `examples/agent-support/`)
+
+| Capability | Evidence | Status |
+|---|---|---|
+| Agent tool calls are proposals; nothing consequential executes without human approval or an active mandate | S0–S13, AT rows | PASS (local) |
+| Prompt-injected large refund to another order and card-data email do not execute | S6, S10 | PASS |
+| Within-mandate refunds execute without per-call confirmation; bounds, counters, expiry, revocation enforced by the broker | AT rows | PASS |
+| Agent cannot choose, widen, or reuse another principal's mandate | AT rows | PASS |
+| MCP front holds no secrets; malformed MCP rejected | AT-04 and front tests | PASS |
+| 14 rows needing crafted grants, clock control, exact crash points, or real models | listed in suite output | **NOT TESTED** |
+| Misuse of a mandate within its bounds; exfiltration via allowed channels | spec residuals R-A1..R-A10 | not preventable by design |
+
 ## Test evidence
 
 | Test / suite | Invariants | Last run | Result | Evidence |
 |---|---|---|---|---|
+| `tests/demoa/run.sh` | SI-05, SI-06, SI-09, SI-16, SI-19, SI-20 | 2026-10-28 | 75 PASS / 0 FAIL / 14 NOT TESTED | `var/demoa/results.json` |
 | `tests/demop/run.sh` | SI-01, SI-02, SI-09, SI-10, SI-11, SI-15, SI-16, SI-20 | 2026-10-28 | 92 PASS / 0 FAIL / 17 NOT TESTED | `var/demop/results.json` |
 | `crates/nodkey-payments-adapter` (incl. PostgreSQL test) | SI-02, SI-09, SI-16 | 2026-10-27 | 85 passed | local |
 | `broker` unit + PostgreSQL (incl. payments) | SI-09, SI-10, SI-11, SI-15 | 2026-10-28 | 73 unit; 28 + 30 PG | local + Docker |
@@ -89,6 +102,14 @@ Docker default seccomp); Docker 29.5.2; Compose 5.6.1; Rust 1.99.1; PHP 8.4 (ima
 broker resistance to resource exhaustion and per-workload fairness (D1-07); the idempotency unique-violation branch under real DB concurrency (the broker currently serializes on one connection); durable audit of denials (D1-04); business-level limits (D1-06, Phase 3/4); anything in Phases 3+.
 
 ## Checkpoints
+
+### 2026-10-28 — Phase 5 complete (Demo A)
+- ADR-0013 rev. 1 (MCP front, mandates); invariants v0.5; grant-v1 Draft 4 (mandate grants, vectors
+  regenerated — generator and verifier updated by one author, readings D4-1..5 flagged for review).
+- Built: mandate support (broker, authority, gateway, adapter), nodkey-mcp-front + shim, mailsink,
+  demo-agent, Demo A. Regression after mandates: Demo 1 65 PASS, Demo 2 29/29, Demo P 92/0.
+- Owner decision: no human reviewers available; after Demo A, freeze features and substitute mechanical
+  verification and diverse AI self-review, disclosed as such.
 
 ### 2026-10-28 — Phase 4 complete (Demo P)
 - **Decisions:** ADR-0012 rev. 2 (separate grant-verifying payments adapter; broker-owned refund
