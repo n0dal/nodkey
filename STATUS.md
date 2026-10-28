@@ -7,8 +7,8 @@
 **Focus:** authority control for apps and AI agents performing consequential external actions,
 with user-confirmed intent ([ADR-0010](docs/decisions/0010-project-focus.md)).
 
-**Active milestone:** Phase 3 — Signed grants and confirmed intent: **implementation complete and
-verified locally** (Demo 2); specs aligned (Draft 3). Next: Phase 4 — Demo P (payments).
+**Active milestone:** Phase 4 — External effects (Demo P): **complete, verified locally**.
+Next: Phase 5 — AI agents (Demo A). Phases 2–3 complete. Next: Phase 4 — Demo P (payments).
 Phase 2 (Demo 1, containment) complete.
 
 ## Verified functionality
@@ -49,10 +49,26 @@ P-03, F-01, F-03) rest on direct observation only.
 | Credential entry never on the app origin (SI-18) | test login only | **NOT TESTED** |
 | Approve-button click-hijacking defences (GW-R-01) | gateway unit tests (inert period, typed amount); no real-browser popup test (T13) | PASS (unit) / NOT TESTED (browser) |
 
+### Phase 4 — confirmed refunds via a simulated payment provider (Demo P, `examples/confirmed-refund/`)
+
+| Capability | Evidence | Status |
+|---|---|---|
+| The shop app never holds the provider key; only the payments adapter can reach the provider (TLS 1.3, pinned test CA) | Demo P containment + network rows | PASS (local) |
+| A refund executes only for the intended customer's own order, with the exact amount, currency, and charge they confirmed | L-01..L-06, PT rows on ownership and binding | PASS |
+| No double refund under any simulated ambiguous provider outcome, crash, replay, or key rotation | PT fault/crash/replay rows, PT-43 | PASS |
+| Remaining-refundable amount and per-customer daily budgets hold under concurrency | PT rows on races and budgets | PASS |
+| A compromised broker cannot obtain a refund the authority did not sign (adapter verifies grants) | adapter tests + PT rows | PASS |
+| A refund reversed at the provider after success is detected and alarmed | PT-23 | PASS |
+| Rows needing crafted signed grants, clock control, restore drills, key-rotation drills, exact crash points, or HTTP edge cases the simulator cannot emit | 17 rows | **NOT TESTED** |
+| A provider that lies consistently | spec §10 residual | not detectable by design |
+
 ## Test evidence
 
 | Test / suite | Invariants | Last run | Result | Evidence |
 |---|---|---|---|---|
+| `tests/demop/run.sh` | SI-01, SI-02, SI-09, SI-10, SI-11, SI-15, SI-16, SI-20 | 2026-10-28 | 92 PASS / 0 FAIL / 17 NOT TESTED | `var/demop/results.json` |
+| `crates/nodkey-payments-adapter` (incl. PostgreSQL test) | SI-02, SI-09, SI-16 | 2026-10-27 | 85 passed | local |
+| `broker` unit + PostgreSQL (incl. payments) | SI-09, SI-10, SI-11, SI-15 | 2026-10-28 | 73 unit; 28 + 30 PG | local + Docker |
 | `crates/nodkey-grant` conformance + robustness | SI-05..SI-09 | 2026-10-25 | 27 tests; all vector categories 0 failures; 1.7 M mutated inputs, no panic, no false accept | local |
 | `crates/nodkey-authority` | SI-05, SI-09, SI-20 | 2026-10-25 | 51 passed (incl. crash/restart exactly-once) | local, macOS |
 | `crates/nodkey-gateway` (default / features) | SI-18, SI-20, SI-21 | 2026-10-25 | 40 / 54 passed | local, macOS |
@@ -73,6 +89,18 @@ Docker default seccomp); Docker 29.5.2; Compose 5.6.1; Rust 1.99.1; PHP 8.4 (ima
 broker resistance to resource exhaustion and per-workload fairness (D1-07); the idempotency unique-violation branch under real DB concurrency (the broker currently serializes on one connection); durable audit of denials (D1-04); business-level limits (D1-06, Phase 3/4); anything in Phases 3+.
 
 ## Checkpoints
+
+### 2026-10-28 — Phase 4 complete (Demo P)
+- **Decisions:** ADR-0012 rev. 2 (separate grant-verifying payments adapter; broker-owned refund
+  state; adapter-only provider egress and database channel). Specs: payments-adapter-v1 Draft 3.3,
+  effect-protocol-v2 Draft 3.1 (charge_id).
+- **Reviews:** design review + re-check; code reviews of adapter and broker payments found three
+  High issues (key-rotation double refund ×2, operator-role permission) — all fixed and tested.
+- **Integration:** Demo P suite 109 rows; six failures found and resolved (one real broker defect:
+  post-success reversal not detected; one spec overclaim; four test-plan rows corrected to the spec).
+- **Process:** a safety classifier stopped two agents writing attack tests; the owner chose a fresh
+  agent with a narrow conformance brief, which completed the suite.
+- **Next:** Phase 5 — Demo A (AI agent; MCP tool interface; mandates).
 
 ### 2026-10-25 — Phase 3 implementation verified
 - **Decisions:** ADR-0010 (refocus on external consequential actions, owner decision), ADR-0011
