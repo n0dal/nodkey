@@ -103,6 +103,15 @@ broker resistance to resource exhaustion and per-workload fairness (D1-07); the 
 
 ## Checkpoints
 
+### 2026-10-28 — Option B "small finish" complete
+- Public docs: README (research prototype; AI-performed reviews only; no human audit), QUICKSTART
+  (Demo A), LIMITATIONS, SECURITY (contact placeholder — owner must set before publication), CONTRIBUTING (DCO).
+- Supply chain: cargo-audit on 11 lockfiles — RUSTSEC-2026-0385 fixed (ctutils 0.4.6), RUSTSEC-2026-0009
+  unreachable; 166 third-party packages, all permissive (`docs/supply-chain.md`).
+- Fuzzing (short pass): 4 targets, ~68 M executions, 0 crashes. Not a guarantee.
+- Owner to decide whether to proceed with the full verification plan (mutation testing, formal model,
+  diverse AI self-review).
+
 ### 2026-10-28 — Phase 5 complete (Demo A)
 - ADR-0013 rev. 1 (MCP front, mandates); invariants v0.5; grant-v1 Draft 4 (mandate grants, vectors
   regenerated — generator and verifier updated by one author, readings D4-1..5 flagged for review).
