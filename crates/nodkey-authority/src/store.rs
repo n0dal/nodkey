@@ -19,6 +19,12 @@
 //! - After any failed write the store is poisoned: every later call fails until restart, because
 //!   the file tail is then unknown.
 //! - An exclusive `flock` on the log file prevents two authority processes from sharing it.
+//! - **Mandates** (agent-interface-v1 §4.2 step 3, §4.4; ADR-0006 Amendment 3): an `issue` record may
+//!   carry one extra member. `mandate` (the template's issuance row) holds the mandate terms,
+//!   window and `cfg`; `mandated` (a `cfm = 2` row) holds the `mid`, the refund amount it
+//!   consumes and the params key for C6. The refund counters of a mandate are the count and sum of
+//!   its `mandated` refund rows, so they become durable in the **same** fsync'd line as the grant
+//!   and never release. A `mandate_revoke` record marks a mandate revoked (idempotent).
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -84,6 +90,97 @@ pub struct Issuance {
     pub status: Status,
 }
 
+/// The terms of a mandate, recorded in the template's issuance row (AI §4.2 step 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandateTerms {
+    pub customer_sub: String,
+    pub customer_email: String,
+    pub currency: String,
+    pub refund_max_count: u64,
+    pub refund_max_per_call_minor: u64,
+    pub refund_max_total_minor: u64,
+    pub message_max_count: u64,
+    pub nbf: u64,
+    pub exp: u64,
+    /// `config.digest` at signing; the mandate is active only while it is current.
+    pub cfg: [u8; 32],
+}
+
+/// What a `cfm = 2` row consumed (AI §4.4 step 4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandatedUse {
+    pub mid: PendingId,
+    /// `Some(amount)` for refunds (counted); `None` for messages (no authority counter, R-A9).
+    pub refund_minor: Option<u64>,
+    /// SHA-256 over op and params (C6: identical repeats).
+    pub pkey: [u8; 32],
+}
+
+/// The optional extra member of an `issue` record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Extra {
+    Mandate(MandateTerms),
+    Mandated(MandatedUse),
+}
+
+fn extra_json(e: &Extra) -> (&'static str, Value) {
+    match e {
+        Extra::Mandate(m) => (
+            "mandate",
+            json!({"customer_sub": m.customer_sub, "customer_email": m.customer_email,
+                   "currency": m.currency, "refund_max_count": m.refund_max_count,
+                   "refund_max_per_call_minor": m.refund_max_per_call_minor,
+                   "refund_max_total_minor": m.refund_max_total_minor,
+                   "message_max_count": m.message_max_count, "nbf": m.nbf, "exp": m.exp,
+                   "cfg": hex(&m.cfg)}),
+        ),
+        Extra::Mandated(u) => (
+            "mandated",
+            json!({"mid": u.mid.to_text(), "refund_minor": u.refund_minor, "pkey": hex(&u.pkey)}),
+        ),
+    }
+}
+
+fn parse_extra(v: &Value) -> Result<Option<Extra>, String> {
+    let exact = |o: &Value, n: usize| o.as_object().is_some_and(|m| m.len() == n);
+    match (v.get("mandate"), v.get("mandated")) {
+        (None, None) => Ok(None),
+        (Some(m), None) => {
+            if !exact(m, 10) {
+                return Err("mandate member set".into());
+            }
+            Ok(Some(Extra::Mandate(MandateTerms {
+                customer_sub: s(m, "customer_sub")?,
+                customer_email: s(m, "customer_email")?,
+                currency: s(m, "currency")?,
+                refund_max_count: u(m, "refund_max_count")?,
+                refund_max_per_call_minor: u(m, "refund_max_per_call_minor")?,
+                refund_max_total_minor: u(m, "refund_max_total_minor")?,
+                message_max_count: u(m, "message_max_count")?,
+                nbf: u(m, "nbf")?,
+                exp: u(m, "exp")?,
+                cfg: parse_hex_digest(&s(m, "cfg")?).map_err(|e| e.0.to_string())?,
+            })))
+        }
+        (None, Some(m)) => {
+            if !exact(m, 3) {
+                return Err("mandated member set".into());
+            }
+            let refund_minor = match m.get("refund_minor") {
+                Some(Value::Null) => None,
+                Some(x) => Some(x.as_u64().ok_or("refund_minor")?),
+                None => return Err("refund_minor".into()),
+            };
+            Ok(Some(Extra::Mandated(MandatedUse {
+                mid: PendingId::parse(&s(m, "mid")?).map_err(|e| e.0.to_string())?,
+                refund_minor,
+                pkey: parse_hex_digest(&s(m, "pkey")?).map_err(|e| e.0.to_string())?,
+            })))
+        }
+        (Some(_), Some(_)) => Err("both mandate and mandated".into()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreError {
     /// A row for this `jti` already exists (nothing written).
@@ -103,6 +200,12 @@ pub struct Store {
     path: PathBuf,
     file: File,
     index: HashMap<PendingId, Issuance>,
+    extras: HashMap<PendingId, Extra>,
+    /// Refund count and total per mandate (derived from `mandated` rows; never decrease).
+    counters: HashMap<PendingId, (u64, u64)>,
+    /// `(mid, pkey)` of every `mandated` row (C6).
+    uses: std::collections::HashSet<(PendingId, [u8; 32])>,
+    revoked: std::collections::HashSet<PendingId>,
     poisoned: bool,
     /// Current file size in bytes.
     size: u64,
@@ -127,7 +230,9 @@ fn u(v: &Value, k: &str) -> Result<u64, String> {
 
 fn parse_issue(v: &Value) -> Result<Issuance, String> {
     let obj = v.as_object().ok_or("not an object")?;
-    if obj.len() != 10 {
+    let extra =
+        usize::from(obj.contains_key("mandate")) + usize::from(obj.contains_key("mandated"));
+    if obj.len() != 10 + extra {
         return Err("member set".into());
     }
     Ok(Issuance {
@@ -255,6 +360,8 @@ impl Store {
         }
 
         let mut index: HashMap<PendingId, Issuance> = HashMap::new();
+        let mut extras: HashMap<PendingId, Extra> = HashMap::new();
+        let mut revoked = std::collections::HashSet::new();
         // `data[..complete]` is empty or ends with '\n': drop the empty slice after the final
         // newline. Any other empty line is corrupt (it fails the format check below).
         let mut lines: Vec<&[u8]> = data[..complete].split(|&b| b == b'\n').collect();
@@ -273,7 +380,26 @@ impl Store {
                     if index.contains_key(&row.jti) {
                         return Err(corrupt("duplicate jti"));
                     }
+                    if let Some(x) = parse_extra(&v).map_err(|e| corrupt(&e))? {
+                        if let Extra::Mandated(u) = &x
+                            && !matches!(extras.get(&u.mid), Some(Extra::Mandate(_)))
+                        {
+                            return Err(corrupt("mandated row for an unknown mandate"));
+                        }
+                        extras.insert(row.jti, x);
+                    }
                     index.insert(row.jti, row);
+                }
+                Some("mandate_revoke") => {
+                    if v.as_object().map(|o| o.len()) != Some(2) {
+                        return Err(corrupt("member set"));
+                    }
+                    let mid = PendingId::parse(&s(&v, "mid").map_err(|e| corrupt(&e))?)
+                        .map_err(|_| corrupt("mid"))?;
+                    if !matches!(extras.get(&mid), Some(Extra::Mandate(_))) || !revoked.insert(mid)
+                    {
+                        return Err(corrupt("revocation of an unknown or revoked mandate"));
+                    }
                 }
                 Some("status") => {
                     if v.as_object().map(|o| o.len()) != Some(3) {
@@ -294,10 +420,25 @@ impl Store {
                 _ => return Err(corrupt("kind")),
             }
         }
+        let mut counters: HashMap<PendingId, (u64, u64)> = HashMap::new();
+        let mut uses = std::collections::HashSet::new();
+        for x in extras.values() {
+            if let Extra::Mandated(u) = x {
+                uses.insert((u.mid, u.pkey));
+                if let Some(a) = u.refund_minor {
+                    let c = counters.entry(u.mid).or_default();
+                    *c = (c.0 + 1, c.1.saturating_add(a));
+                }
+            }
+        }
         Ok(Store {
             path: path.to_owned(),
             file,
             index,
+            extras,
+            counters,
+            uses,
+            revoked,
             poisoned: false,
             size: complete as u64,
         })
@@ -366,13 +507,63 @@ impl Store {
 
     /// Durably inserts a new `signed` row. Fails with `Exists` (nothing written) if `jti` exists.
     pub fn insert(&mut self, row: Issuance) -> Result<(), StoreError> {
+        self.insert_with(row, None)
+    }
+
+    /// The extra member of `jti`'s row, if any.
+    pub fn extra(&self, jti: &PendingId) -> Option<&Extra> {
+        self.extras.get(jti)
+    }
+
+    /// Every mandate row with its issuance row (for the active-mandate lookup).
+    pub fn mandates(&self) -> impl Iterator<Item = (&Issuance, &MandateTerms)> {
+        self.extras.iter().filter_map(|(jti, x)| match x {
+            Extra::Mandate(m) => self.index.get(jti).map(|r| (r, m)),
+            Extra::Mandated(_) => None,
+        })
+    }
+
+    /// Refund count and total signed under `mid` (ADR-0006 Amendment 3; never released).
+    pub fn refund_counters(&self, mid: &PendingId) -> (u64, u64) {
+        self.counters.get(mid).copied().unwrap_or((0, 0))
+    }
+
+    /// C6: a `cfm = 2` row with this params key exists under `mid`.
+    pub fn used(&self, mid: &PendingId, pkey: &[u8; 32]) -> bool {
+        self.uses.contains(&(*mid, *pkey))
+    }
+
+    pub fn is_revoked(&self, mid: &PendingId) -> bool {
+        self.revoked.contains(mid)
+    }
+
+    /// Durably marks a mandate revoked. Idempotent; `Unknown` if `mid` is not a mandate.
+    pub fn revoke_mandate(&mut self, mid: &PendingId) -> Result<(), StoreError> {
+        if !matches!(self.extras.get(mid), Some(Extra::Mandate(_))) {
+            return Err(StoreError::Unknown);
+        }
+        if self.revoked.contains(mid) {
+            return Ok(());
+        }
+        self.append(&json!({"k": "mandate_revoke", "mid": mid.to_text()}))?;
+        self.revoked.insert(*mid);
+        Ok(())
+    }
+
+    /// [`Store::insert`] with an optional mandate extra, in the same durable line.
+    pub fn insert_with(&mut self, row: Issuance, extra: Option<Extra>) -> Result<(), StoreError> {
         if self.index.contains_key(&row.jti) {
             return Err(StoreError::Exists);
+        }
+        if let Some(Extra::Mandated(u)) = &extra
+            && !matches!(self.extras.get(&u.mid), Some(Extra::Mandate(_)))
+        {
+            return Err(StoreError::Io("mandated row for an unknown mandate".into()));
         }
         if row.status != Status::Signed {
             return Err(StoreError::Io("insert requires status signed".into()));
         }
-        let body = json!({
+        let mut body = json!({
             "k": "issue",
             "jti": row.jti.to_text(),
             "digest": hex(&row.digest),
@@ -384,7 +575,21 @@ impl Store {
             "exp": row.exp,
             "grant": encode_transport(&row.grant),
         });
+        if let (Some(x), Some(o)) = (&extra, body.as_object_mut()) {
+            let (k, v) = extra_json(x);
+            o.insert(k.into(), v);
+        }
         self.append(&body)?;
+        if let Some(x) = extra {
+            if let Extra::Mandated(u) = &x {
+                self.uses.insert((u.mid, u.pkey));
+                if let Some(a) = u.refund_minor {
+                    let c = self.counters.entry(u.mid).or_default();
+                    *c = (c.0 + 1, c.1.saturating_add(a));
+                }
+            }
+            self.extras.insert(row.jti, x);
+        }
         self.index.insert(row.jti, row);
         Ok(())
     }

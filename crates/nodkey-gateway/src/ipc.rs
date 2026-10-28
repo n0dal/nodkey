@@ -212,6 +212,119 @@ pub async fn approve(
     .map(|_| ())
 }
 
+/// `pending.list` item (effect-protocol-v2 §12.3).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PendingItem {
+    pub pending_id: String,
+    pub op: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PendingList {
+    pending: Vec<PendingItem>,
+}
+
+/// Mandate terms as listed by the broker (`mandate.list`, §12.3; member names: spec gap MD-6).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MandateTerms {
+    pub customer_sub: String,
+    pub customer_email: String,
+    pub currency: String,
+    pub refund_max_count: u64,
+    pub refund_max_per_call_minor: u64,
+    pub refund_max_total_minor: u64,
+    pub message_max_count: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MandateCounters {
+    pub refund_count: u64,
+    pub refund_total_minor: u64,
+    pub message_count: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MandateItem {
+    pub mid: String,
+    pub workload_display_name: String,
+    pub terms: MandateTerms,
+    pub counters: MandateCounters,
+    pub nbf: u64,
+    pub exp: u64,
+    pub state: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MandateList {
+    mandates: Vec<MandateItem>,
+}
+
+/// Bounds and grammar of broker-supplied list text (escaped anyway).
+fn printable(s: &str, max: usize) -> bool {
+    s.len() <= max && s.bytes().all(|c| (0x20..=0x7e).contains(&c))
+}
+
+/// `pending.list{subject}` on socket G.
+pub async fn pending_list(broker: &Peer, s: Subject<'_>) -> Result<Vec<PendingItem>, IpcError> {
+    let r: PendingList = call(
+        broker,
+        "pending.list",
+        json!({"subject": {"ten": s.ten, "sub": s.sub}}),
+    )
+    .await?;
+    let ok = r.pending.len() <= 64
+        && r.pending.iter().all(|p| {
+            crate::util::decode_pending_id(&p.pending_id).is_some() && printable(&p.op, 64)
+        });
+    if !ok {
+        return Err(IpcError::Transport("pending.list schema"));
+    }
+    Ok(r.pending)
+}
+
+/// `mandate.list{subject}` on socket G.
+pub async fn mandate_list(broker: &Peer, s: Subject<'_>) -> Result<Vec<MandateItem>, IpcError> {
+    let r: MandateList = call(
+        broker,
+        "mandate.list",
+        json!({"subject": {"ten": s.ten, "sub": s.sub}}),
+    )
+    .await?;
+    let ok = r.mandates.len() <= 64
+        && r.mandates.iter().all(|m| {
+            crate::util::decode_pending_id(&m.mid).is_some()
+                && printable(&m.workload_display_name, 128)
+                && printable(&m.terms.customer_sub, 64)
+                && printable(&m.terms.customer_email, 256)
+                && m.terms.currency.len() == 3
+                && m.terms.currency.bytes().all(|c| c.is_ascii_uppercase())
+                && matches!(m.state.as_str(), "active" | "revoked" | "expired")
+        });
+    if !ok {
+        return Err(IpcError::Transport("mandate.list schema"));
+    }
+    Ok(r.mandates)
+}
+
+/// `mandate.revoke{mid, subject}`: the same message on socket G (broker) and socket I (authority).
+pub async fn mandate_revoke(peer: &Peer, mid: &str, s: Subject<'_>) -> Result<(), IpcError> {
+    call::<Empty>(
+        peer,
+        "mandate.revoke",
+        json!({"mid": mid, "subject": {"ten": s.ten, "sub": s.sub}}),
+    )
+    .await
+    .map(|_| ())
+}
+
 /// Requests a read grant; returns its transport text (canonical base64url, ≤ 2731 chars).
 pub async fn read_grant(
     authority: &Peer,

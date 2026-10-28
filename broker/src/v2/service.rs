@@ -24,7 +24,7 @@ use nodkey_grant::{
 use serde_json::{Map, Value, json};
 use tokio_postgres::{Client, GenericClient, Row};
 
-use super::config::{ApproverSource, V2Config, WorkloadReg};
+use super::config::{ApproverSource, MandateCfg, V2Config, WorkloadReg};
 use super::db::{Conn, Pool};
 use super::decls::{self, Executor, LEDGER_TRANSFER};
 use super::digest::{DisplayValue, PendingFields, json_uint, typed_params};
@@ -270,7 +270,10 @@ pub(crate) async fn select_record(
     row.as_ref().map(record_from_row).transpose()
 }
 
-async fn revocations(c: &impl GenericClient, ten: &str) -> Result<Vec<RevokedBefore>, Fail> {
+pub(crate) async fn revocations(
+    c: &impl GenericClient,
+    ten: &str,
+) -> Result<Vec<RevokedBefore>, Fail> {
     let rows = c
         .query(
             "SELECT wid, sub, before FROM public.revoked_before WHERE ten = $1",
@@ -486,6 +489,8 @@ pub struct Broker {
     reads: RateLimiter,
     workload_gate: ConcurrencyGate,
     unverifiable_alarmed: std::sync::Mutex<std::collections::HashSet<[u8; 16]>>,
+    /// Mandates (agent-interface-v1 §3–§4), from the workloads file; `None` = disabled.
+    pub(crate) mandate_cfg: Option<MandateCfg>,
 }
 
 /// Wait for a per-workload DB slot before answering `limit_exceeded`.
@@ -539,7 +544,20 @@ impl Broker {
             reads,
             workload_gate,
             unverifiable_alarmed: std::sync::Mutex::new(std::collections::HashSet::new()),
+            mandate_cfg: None,
         }
+    }
+
+    /// Enables mandates and the agent operations with the configuration that
+    /// `config::check_authority_workloads` returned (needs `04-mandates.sh`).
+    pub fn with_mandates(mut self, m: Option<MandateCfg>) -> Broker {
+        self.mandate_cfg = m;
+        self
+    }
+
+    /// The current `config.digest` (a mandate is active only while it equals the mandate's `cfg`).
+    pub(crate) fn config_digest_bytes(&self) -> &[u8; 32] {
+        &self.config_digest
     }
 
     fn skew(&self) -> u64 {
@@ -567,7 +585,7 @@ impl Broker {
     }
 
     /// Workload-lane connection for socket W: first a per-workload slot, then a pool slot.
-    async fn wl_conn(
+    pub(crate) async fn wl_conn(
         &self,
         wid: &str,
     ) -> Result<(tokio::sync::OwnedSemaphorePermit, Conn<'_>), Fail> {
@@ -689,6 +707,44 @@ impl Broker {
         .await
     }
 
+    /// Resolves `(charge_id, owner_sub)` of an order by `(ten, order_id)` only (AI §3).
+    async fn resolve_order(
+        &self,
+        wid: &str,
+        ten: &str,
+        order_id: u64,
+    ) -> Result<Option<(String, String)>, Fail> {
+        let (_slot, conn) = self.wl_conn(wid).await?;
+        let ten = ten.to_owned();
+        Self::run(conn, async move |c: &mut Client| {
+            let row = c
+                .query_opt(
+                    "SELECT charge_id, owner_sub FROM nodkey.orders WHERE ten = $1 AND order_id = $2",
+                    &[&ten, &to_i64(order_id)],
+                )
+                .await
+                .map_err(dbf("resolve order"))?;
+            row.map(|r| {
+                Ok((
+                    r.try_get(0).map_err(unavailable)?,
+                    r.try_get(1).map_err(unavailable)?,
+                ))
+            })
+            .transpose()
+        })
+        .await
+    }
+
+    /// Resolves a customer's email by `(ten, sub)` only (AI §3, §4.1).
+    async fn resolve_email(&self, wid: &str, ten: &str, sub: &str) -> Result<Option<String>, Fail> {
+        let (_slot, conn) = self.wl_conn(wid).await?;
+        let (ten, sub) = (ten.to_owned(), sub.to_owned());
+        Self::run(conn, async move |c: &mut Client| {
+            super::mandate::customer_email(&*c, &ten, &sub).await
+        })
+        .await
+    }
+
     /// `effect.propose` (§2.3): syntax, types and registration only; never trusted state.
     pub async fn propose(
         &self,
@@ -756,6 +812,76 @@ impl Broker {
                 nodkey_grant::ParamValue::Text(charge),
             );
         }
+        // Agent operations (AI §3, §4.1): syntax and ceilings first, then resolution by
+        // `(ten, resource)` only; the reserved value is " " (one space).
+        let space = || nodkey_grant::ParamValue::Text(decls::UNRESOLVED_SPACE.to_owned());
+        let text = |s: String| nodkey_grant::ParamValue::Text(s);
+        match exec {
+            Some(Executor::SupportRefund) => {
+                let currency = text_param(&params, "currency")?.to_owned();
+                if uint_param(&params, "amount_minor")? < 1
+                    || decls::iso4217_exponent(&currency).is_none()
+                {
+                    return Err(inv(
+                        "amount_minor < 1 or currency not in the ISO 4217 table",
+                    ));
+                }
+                let order_id = uint_param(&params, "order_id")?;
+                let (charge, owner) = match self.resolve_order(&wl.wid, &ten, order_id).await? {
+                    Some((c, o)) => (text(c), text(o)),
+                    None => (space(), space()),
+                };
+                params.insert(decls::CHARGE_ID.to_owned(), charge);
+                params.insert(decls::CUSTOMER_SUB.to_owned(), owner);
+            }
+            Some(Executor::MessageSend) => {
+                let cs = text_param(&params, decls::CUSTOMER_SUB)?.to_owned();
+                if !is_id(&cs, 64) {
+                    return Err(inv("customer_sub is not an ID"));
+                }
+                let to = match self.resolve_email(&wl.wid, &ten, &cs).await? {
+                    Some(e) => text(e),
+                    None => space(),
+                };
+                params.insert(decls::TO.to_owned(), to);
+            }
+            Some(Executor::MandateTemplate) => {
+                let t = self
+                    .mandate_cfg
+                    .as_ref()
+                    .and_then(|m| m.template.as_ref())
+                    .ok_or_else(|| inv("no mandate template configured"))?;
+                let cs = text_param(&params, decls::CUSTOMER_SUB)?.to_owned();
+                let currency = text_param(&params, "currency")?.to_owned();
+                let u = |k: &str| uint_param(&params, k);
+                let (n, per_call, total, msgs, valid) = (
+                    u("refund_max_count")?,
+                    u("refund_max_per_call_minor")?,
+                    u("refund_max_total_minor")?,
+                    u("message_max_count")?,
+                    u("valid_for_s")?,
+                );
+                let ok = is_id(&cs, 64)
+                    && decls::iso4217_exponent(&currency).is_some()
+                    && n <= t.max_refund_count
+                    && msgs <= t.max_message_count
+                    && per_call <= total
+                    && t.max_refund_total_minor
+                        .get(&currency)
+                        .is_some_and(|c| total <= *c)
+                    && (super::config::MANDATE_MIN_S..=super::config::MANDATE_MAX_S)
+                        .contains(&valid);
+                if !ok {
+                    return Err(inv("mandate terms outside the template ceilings"));
+                }
+                let email = match self.resolve_email(&wl.wid, &ten, &cs).await? {
+                    Some(e) => text(e),
+                    None => space(),
+                };
+                params.insert(decls::CUSTOMER_EMAIL.to_owned(), email);
+            }
+            _ => {}
+        }
         // Grammar check through the same parser the grant verifier uses.
         self.ops
             .parse_request(op, params.clone())
@@ -776,7 +902,10 @@ impl Broker {
             }
         }
         let display = match exec {
-            Some(Executor::PaymentsRefund) => {
+            Some(Executor::MessageSend) => BTreeMap::new(),
+            Some(
+                Executor::PaymentsRefund | Executor::SupportRefund | Executor::MandateTemplate,
+            ) => {
                 let currency = text_param(&params, "currency")?.to_owned();
                 let exp = decls::iso4217_exponent(&currency).ok_or_else(|| inv("currency"))?;
                 BTreeMap::from([
@@ -823,6 +952,7 @@ impl Broker {
         let limits = self.cfg.limits;
         let (_slot, conn) = self.wl_conn(&wl.wid).await?;
         let f2 = fields.clone();
+        let me = self;
         Self::run(conn, async move |c: &mut Client| {
             let tx = c.transaction().await.map_err(dbf("begin"))?;
             // Serializes proposals of one workload so the outstanding counts are exact.
@@ -842,28 +972,37 @@ impl Broker {
             if per_wid >= limits.pending_per_wid || per_approver >= limits.pending_per_approver {
                 return Err(Fail::new(Code::LimitExceeded, "outstanding pending records"));
             }
-            tx.execute(
+            // effect-protocol-v2 §12.1: `awaiting` from the read-only coverage check (AI §4.3),
+            // only when mandates are configured (the column exists only then).
+            let awaiting: Option<&str> = match me.mandates() {
+                None => None,
+                Some(_) if me.coverage(&tx, &f2, now).await? => Some("mandate"),
+                Some(_) => Some("confirmation"),
+            };
+            let sql = if awaiting.is_some() {
+                "INSERT INTO public.pending_effect (pending_id, broker_id, wid, ten, approver_sub, op, opv, \
+                 params, param_types, display, created_at, expires_at, digest, state, state_changed_at, awaiting) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'PENDING',$11,$14)"
+            } else {
                 "INSERT INTO public.pending_effect (pending_id, broker_id, wid, ten, approver_sub, op, opv, \
                  params, param_types, display, created_at, expires_at, digest, state, state_changed_at) \
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'PENDING',$11)",
-                &[
-                    &f2.pending_id.as_slice(),
-                    &f2.broker_id,
-                    &f2.wid,
-                    &f2.ten,
-                    &f2.approver_sub,
-                    &f2.op,
-                    &(f2.opv as i32),
-                    &f2.params_json().to_string(),
-                    &f2.param_types_json().to_string(),
-                    &f2.display_json().to_string(),
-                    &to_i64(f2.created_at),
-                    &to_i64(f2.expires_at),
-                    &digest.as_slice(),
-                ],
-            )
-            .await
-            .map_err(dbf("insert pending"))?;
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'PENDING',$11)"
+            };
+            let (pid_b, opv_i) = (f2.pending_id.as_slice(), f2.opv as i32);
+            let (pj, tj, dj) = (
+                f2.params_json().to_string(),
+                f2.param_types_json().to_string(),
+                f2.display_json().to_string(),
+            );
+            let (ca, ea, dg) = (to_i64(f2.created_at), to_i64(f2.expires_at), digest.as_slice());
+            let mut ins: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![
+                &pid_b, &f2.broker_id, &f2.wid, &f2.ten, &f2.approver_sub, &f2.op, &opv_i, &pj,
+                &tj, &dj, &ca, &ea, &dg,
+            ];
+            if let Some(a) = &awaiting {
+                ins.push(a);
+            }
+            tx.execute(sql, &ins).await.map_err(dbf("insert pending"))?;
             tx.commit().await.map_err(dbf("commit"))?;
             Ok(())
         })
@@ -895,6 +1034,7 @@ impl Broker {
         let skew = self.skew();
         let wid = wl.wid.clone();
         let (_slot, conn) = self.wl_conn(&wl.wid).await?;
+        let mandates_on = self.mandates().is_some();
         let rec = Self::run(conn, async move |c: &mut Client| {
             let sql = format!(
                 "SELECT {RECORD_COLS} FROM public.pending_effect WHERE pending_id = $1 AND wid = $2"
@@ -915,17 +1055,33 @@ impl Broker {
                 }
             }
             // payments-adapter-v1 §8: refunds carry the workload-facing reason enum.
-            let reason = if rec.fields.op == decls::PAYMENTS_REFUND && rec.state.is_final() {
+            let is_refund =
+                rec.fields.op == decls::PAYMENTS_REFUND || rec.fields.op == decls::SUPPORT_REFUND;
+            let reason = if is_refund && rec.state.is_final() {
                 Some(super::payments::status_reason(&*c, &pid).await?)
-            } else if rec.fields.op == decls::PAYMENTS_REFUND {
+            } else if is_refund {
                 Some(None)
             } else {
                 None
             };
-            Ok(Some((rec, reason)))
+            // effect-protocol-v2 §12.2: `awaiting` only while PENDING.
+            let awaiting: Option<String> = match rec.state {
+                State::Pending if mandates_on => c
+                    .query_one(
+                        "SELECT awaiting FROM public.pending_effect WHERE pending_id = $1",
+                        &[&pid.as_slice()],
+                    )
+                    .await
+                    .map_err(dbf("awaiting"))?
+                    .try_get(0)
+                    .map_err(unavailable)?,
+                State::Pending => Some("confirmation".to_owned()),
+                _ => None,
+            };
+            Ok(Some((rec, reason, awaiting)))
         })
         .await?;
-        let Some((rec, reason)) = rec else {
+        let Some((rec, reason, awaiting)) = rec else {
             return Err(Fail::new(
                 Code::NotFound,
                 "no such record for this workload",
@@ -940,6 +1096,7 @@ impl Broker {
             "state": rec.state.as_str(),
             "expires_at": rec.fields.expires_at,
             "outcome": outcome,
+            "awaiting": awaiting,
         }))
     }
 
@@ -968,6 +1125,10 @@ impl Broker {
         }
         if !wl.allowed_ops.contains(op) {
             return Err(Fail::new(Code::OperationNotPermitted, "op not allowed"));
+        }
+        if exec == Executor::SupportGetOrder {
+            // AI §4.6: grantless, mandate-scoped.
+            return self.mandate_read(wl, op, args).await;
         }
         let decl = self.ops.get(op).ok_or_else(|| unavailable("decl"))?;
         if decl.kind != OpKind::Read
@@ -1105,13 +1266,36 @@ impl Broker {
             let Some(wl) = me.cfg.workload(&rec.fields.wid) else {
                 return Ok(None);
             };
-            if decls::executor_of(&me.ops, &rec.fields.op) == Some(Executor::PaymentsRefund) {
+            let exec = decls::executor_of(&me.ops, &rec.fields.op);
+            if matches!(exec, Some(Executor::MessageSend | Executor::MandateTemplate)) {
+                let Some(facts) = me.agent_render_facts(&tx, &rec, now).await? else {
+                    return Ok(None);
+                };
+                let ctx = me.render_context(&tx, &rec, wl, now).await?;
+                tx.commit().await.map_err(dbf("commit"))?;
+                return Ok(Some(json!({
+                    "record": rec.fields.to_json(),
+                    "digest": hex(&rec.digest),
+                    "state": rec.state.as_str(),
+                    "facts": facts,
+                    "context": ctx,
+                })));
+            }
+            if matches!(exec, Some(Executor::PaymentsRefund | Executor::SupportRefund)) {
                 let Some(pc) = me.cfg.payments.as_ref() else {
                     return Ok(None);
                 };
-                let Some(facts) = super::payments::render_facts(&tx, &rec, pc, now).await? else {
+                let Some(mut facts) = super::payments::render_facts(&tx, &rec, pc, now).await? else {
                     return Ok(None);
                 };
+                if exec == Some(Executor::SupportRefund) {
+                    let Some(extra) = me.support_refund_facts(&tx, &rec, now).await? else {
+                        return Ok(None);
+                    };
+                    if let Value::Array(a) = &mut facts {
+                        a.extend(extra);
+                    }
+                }
                 let ctx = me.render_context(&tx, &rec, wl, now).await?;
                 tx.commit().await.map_err(dbf("commit"))?;
                 return Ok(Some(json!({
@@ -1192,9 +1376,15 @@ impl Broker {
             )
             .await
             .map_err(dbf("recent"))?;
-        // The resource parameter: `from` for transfers, `order_id` for refunds.
+        // The resource parameter: `from` for transfers, `order_id` for refunds, `customer_sub`
+        // for messages and mandate templates.
         let (key, resource) = if f.op == LEDGER_TRANSFER {
             ("from", text_param(&f.params, "from")?.to_owned())
+        } else if f.op == decls::MESSAGES_SEND || f.op == decls::MANDATE_TEMPLATE {
+            (
+                decls::CUSTOMER_SUB,
+                text_param(&f.params, decls::CUSTOMER_SUB)?.to_owned(),
+            )
         } else {
             ("order_id", uint_param(&f.params, "order_id")?.to_string())
         };
@@ -1402,13 +1592,22 @@ impl Broker {
                 return Ok(Delivery::Rejected("jti/ten/sub differ from the record".into()));
             }
             let grant_exp = id.exp;
+            // grant-v1 Draft 4: `cfm = 2` carries the mandate id (W11d checked by `decide`).
+            let mid = w.mandate_id();
             let rows = revocations(&tx, &rec.fields.ten).await?;
-            // W11–W13 against the record's own params: op, opv, cfm = 1, res/con equality.
+            // W11–W13 against the record's own params: op, opv, cfm, res/con equality.
             if let Err(e) = w.decide(&rows) {
                 if is_grant_mismatch(e) {
                     alarm("delivered_grant_mismatch", e.as_str());
                 }
                 return Ok(Delivery::Rejected(e.as_str().into()));
+            }
+            // effect-protocol-v2 §12.4 / AI §4.5: a `cfm = 2` grant also needs the broker's own
+            // mandate row (locked first: record → mandate → payments locks) to permit it.
+            if let Some(mid) = &mid
+                && !me.deliver_mandate_ok(&tx, &rec, mid, now).await?
+            {
+                return Ok(Delivery::Rejected("mandate check".into()));
             }
             // Approval checks of §5 under lock.
             let p = &rec.fields.params;
@@ -1416,6 +1615,18 @@ impl Broker {
                 Some(Executor::PaymentsRefund) => {
                     if !super::payments::deliver_checks(&tx, &rec).await? {
                         return Ok(Delivery::Rejected("approval check: order".into()));
+                    }
+                }
+                Some(Executor::SupportRefund) => {
+                    if !me.agent_checks(&tx, &rec, now).await?
+                        || !super::payments::deliver_checks(&tx, &rec).await?
+                    {
+                        return Ok(Delivery::Rejected("approval check: support refund".into()));
+                    }
+                }
+                Some(Executor::MessageSend | Executor::MandateTemplate) => {
+                    if !me.agent_checks(&tx, &rec, now).await? {
+                        return Ok(Delivery::Rejected("approval check: agent operation".into()));
                     }
                 }
                 Some(Executor::LedgerTransfer) => {
@@ -1446,6 +1657,15 @@ impl Broker {
                 .map_err(dbf("approve"))?;
             if n != 1 {
                 return Err(unavailable("approve CAS touched no row"));
+            }
+            if let Some(mid) = &mid {
+                // C6 and the page line (AI §4.3, effect-protocol-v2 §12.6).
+                tx.execute(
+                    "INSERT INTO public.mandate_use (pending_id, mid, op, params) VALUES ($1, $2, $3, $4)",
+                    &[&pid.as_slice(), &mid.as_slice(), &rec.fields.op, &rec.fields.params_json().to_string()],
+                )
+                .await
+                .map_err(dbf("mandate use"))?;
             }
             tx.commit().await.map_err(dbf("commit"))?;
             Ok(Delivery::Accepted)
@@ -1492,10 +1712,12 @@ impl Broker {
             }
             let exec = decls::executor_of(&me.ops, &rec.fields.op);
             let refund_kid = match exec {
-                Some(Executor::LedgerTransfer) => None,
+                Some(
+                    Executor::LedgerTransfer | Executor::MessageSend | Executor::MandateTemplate,
+                ) => None,
                 // payments-adapter-v1 §9: without a successful `adapter.hello` (and a consistent
                 // idem_kid), refunds are not executed; the record stays APPROVED and expires.
-                Some(Executor::PaymentsRefund) => match me.payments_kid() {
+                Some(Executor::PaymentsRefund | Executor::SupportRefund) => match me.payments_kid() {
                     Some(k) => Some(k),
                     None => return Ok(Execution::Unverified("payments_not_ready")),
                 },
@@ -1542,32 +1764,58 @@ impl Broker {
             tx.batch_execute("SAVEPOINT decision").await.map_err(dbf("savepoint"))?;
             let rows = revocations(&tx, &rec.fields.ten).await?;
             let iat = w.identity().iat;
+            let mid = w.mandate_id();
             let mut refund_reason: Option<&'static str> = None;
             let decision: Result<(), String> = match w.decide(&rows) {
                 Err(e) => {
                     refund_reason = Some("grant");
                     Err(e.as_str().to_owned())
                 }
-                Ok(a) if refund_kid.is_some() => {
-                    // payments-adapter-v1 §7.2 T1, W14 steps 0–7 and the reservation.
-                    let pc = me.cfg.payments.as_ref().ok_or_else(|| unavailable("payments config"))?;
-                    let kid = refund_kid.as_deref().unwrap_or_default();
-                    match super::payments::refund_t1(&tx, &rec, a.params(), pc, kid, iat, now).await? {
-                        Ok(()) => Ok(()),
-                        Err(r) => {
-                            refund_reason = Some(r);
-                            Err(r.to_owned())
-                        }
-                    }
-                }
                 Ok(a) => {
-                    // W14: approval checks again under lock, then the effect, reading values
-                    // only from the authorized params.
-                    let p = a.params();
-                    let from = text_param(p, "from")?;
-                    let to = text_param(p, "to")?;
-                    let amount = uint_param(p, "amount_minor")?;
-                    me.transfer_effect(&tx, &rec, from, to, amount, &cid).await?
+                    // AI §4.5: a `cfm = 2` grant first locks and re-checks the broker's mandate
+                    // row against current trusted state and increments its counters (lock order
+                    // record → mandate → payments locks). A denial rolls back to the savepoint,
+                    // counters included.
+                    let mandate = match &mid {
+                        Some(m) => me.execute_mandate(&tx, &rec, a.params(), m, now).await?,
+                        None => Ok(()),
+                    };
+                    if let Err(r) = mandate {
+                        log_event(
+                            "v2_mandate_denied",
+                            json!({"pending_id": encode_id(&pid), "detail": r}),
+                        );
+                        refund_reason = Some("grant");
+                        Err("mandate".to_owned())
+                    } else if exec == Some(Executor::SupportRefund)
+                        && !me.agent_checks(&tx, &rec, now).await?
+                    {
+                        refund_reason = Some("grant");
+                        Err("approval check: support principal".to_owned())
+                    } else if exec == Some(Executor::MessageSend) {
+                        me.send_message(&tx, &rec, a.params(), now).await?
+                    } else if exec == Some(Executor::MandateTemplate) {
+                        me.activate_mandate(&tx, &rec, a.params(), iat, now).await?
+                    } else if refund_kid.is_some() {
+                        // payments-adapter-v1 §7.2 T1, W14 steps 0–7 and the reservation.
+                        let pc = me.cfg.payments.as_ref().ok_or_else(|| unavailable("payments config"))?;
+                        let kid = refund_kid.as_deref().unwrap_or_default();
+                        match super::payments::refund_t1(&tx, &rec, a.params(), pc, kid, iat, now).await? {
+                            Ok(()) => Ok(()),
+                            Err(r) => {
+                                refund_reason = Some(r);
+                                Err(r.to_owned())
+                            }
+                        }
+                    } else {
+                        // W14: approval checks again under lock, then the effect, reading values
+                        // only from the authorized params.
+                        let p = a.params();
+                        let from = text_param(p, "from")?;
+                        let to = text_param(p, "to")?;
+                        let amount = uint_param(p, "amount_minor")?;
+                        me.transfer_effect(&tx, &rec, from, to, amount, &cid).await?
+                    }
                 }
             };
             let result = match decision {

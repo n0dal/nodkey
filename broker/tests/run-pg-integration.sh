@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs the broker's PostgreSQL integration tests (tests/pg_integration.rs, marked #[ignore]).
 # Starts a throwaway PostgreSQL (image pinned by digest) on 127.0.0.1, initialized with the demo's
-# own initdb scripts (01-ledger.sh, 02-effects-v2.sh), runs the ignored tests, removes it.
+# own initdb scripts (01-ledger.sh … 04-mandates.sh), runs the ignored tests, removes it.
 # Test-only passwords are random per run.
 set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +14,8 @@ super_pw="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 broker_pw="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 printf '%s' "$broker_pw" > "$work/db_broker_password"
 chmod 0644 "$work/db_broker_password"
-cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; rm -rf "$work"; }
+# -v: also remove the image's anonymous PGDATA volume (otherwise every run leaks one).
+cleanup() { docker rm -f -v "$name" >/dev/null 2>&1 || true; rm -rf "$work"; }
 trap cleanup EXIT INT TERM
 docker run -d --name "$name" -e POSTGRES_PASSWORD="$super_pw" \
   -v "$initdb:/docker-entrypoint-initdb.d:ro" \
@@ -33,4 +34,4 @@ done
 cd "$here/.."
 NODKEY_PG_HOST=127.0.0.1 NODKEY_PG_PORT="$port" \
 NODKEY_PG_SUPER_PASSWORD="$super_pw" NODKEY_PG_BROKER_PASSWORD="$broker_pw" \
-  cargo test --offline --test pg_integration --test pg_payments -- --ignored --test-threads=4 "$@"
+  cargo test --offline --test pg_integration --test pg_payments --test pg_mandates -- --ignored --test-threads=4 "$@"

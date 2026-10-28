@@ -101,6 +101,44 @@ It also needs the effect-protocol-v2 Draft 3.1 `payments.refund` declaration, wh
 
 The pg_hba lines for the adapter role (§1) belong to the deployment; they are not set here.
 
+## Mandates (Phase 5, agent-interface-v1 Draft 2, effect-protocol-v2 Draft 4 §12)
+
+Enabled only when the authority workloads file carries `support_principals` (and, for mandates,
+`mandate_template`); then the database needs `examples/php-ledger/docker/postgres/initdb/04-mandates.sh`.
+Without them nothing below runs and no new table or column is touched (Demo 1/2/P unchanged, except
+that `effect.status` now always has `awaiting`, §12.2).
+
+- Operations (`src/v2/decls.rs`): `payments.support_refund` (resolved `charge_id`, `customer_sub` =
+  `orders.owner_sub`), `payments.support_get_order` (grantless read), `messages.send` (resolved `to` =
+  `customers.email`; internal effect: one `outbox` row), `mandate.support_ticket` (resolved
+  `customer_email`; internal effect: activates a mandate). Unresolved values are `" "`. Loader
+  refusals (AI §3) in `config::check_authority_workloads`.
+- `src/v2/mandate.rs`: read-only coverage C1–C6 at propose (sets `awaiting`); `cfm = 2` delivery and
+  execution re-check C1–C5 under `SELECT … FOR UPDATE` of the mandate row (lock order record → mandate
+  → payments locks), execution also against current `orders.owner_sub` and `customers.email`, counters
+  incremented after the decision savepoint (a denial increments nothing; counters never decrease,
+  trigger); activation under a per-`(wid, ten, sub)` advisory lock plus a unique partial index (no
+  replacement); revocation (G `mandate.revoke`), `mandate.list`, `pending.list`; A `mandate.candidates`,
+  `mandate.declined`.
+- Support refunds reuse T1 with ownership and the daily budget keyed by con3 (payments-adapter-v1 §16.4,
+  §16.5); `payment_effect.sub` keeps the grant's `sub`.
+
+Spec gaps (recorded, readings used):
+
+| # | Gap | Reading used |
+|---|---|---|
+| MD-1 | Where `support_principals` and the template configuration live "in `config.digest`" | Optional top-level members of the `nodkey.workloads.v1` file (both sides hash and parse the same bytes) |
+| MD-2 | Member names of `"ceilings":{…}` | `refund_max_count`, `message_max_count`, `refund_max_total_minor` per currency; per-call ceiling = total ceiling |
+| MD-3 | `customers` table undefined | `nodkey.customers(ten, sub, email)`, operator-written, email in ID grammar |
+| MD-4 | Reserved value: AI §3 `" "` vs effect-protocol-v2 Draft 3.1 `unresolved` | `" "` for the agent operations (incl. `support_refund.charge_id`); `unresolved` kept for `payments.refund` |
+| MD-5 | C6 "signed under this `mid`": the broker sees only accepted deliveries | `mandate_use` row written when a `cfm = 2` delivery is accepted |
+| MD-6 | `mandate.list` item shape | `{mid, workload_display_name, terms{…}, counters{…}, nbf, exp, state}`; `state` effective |
+| MD-9 | `awaiting` without mandates configured | `"confirmation"` while `PENDING`, no column read |
+| MD-10 | `mandate.declined{final:true}` conditions | `PENDING` and unexpired (as `pending.deny` minus digest/subject); `awaiting` not required |
+| MD-11 | State of an `active` row ended by `cfg` change or `revoked_before` | Set to `expired` when the key is next activated |
+| MD-12 | Execution-time email check for refunds (§4.5 parenthetical) | Applied to refunds and messages |
+| MD-13 | A customer email change is not lock-serialized with message execution (orders have a lock trigger) | Point-in-time read in the execution transaction |
+
 ## Build and test
 
 ```sh

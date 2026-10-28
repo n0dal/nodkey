@@ -33,6 +33,8 @@ pub struct Gateway {
     pub authority_approve: Peer,
     pub app_conns: Arc<Semaphore>,
     pub auth_conns: Arc<Semaphore>,
+    /// Background retry interval of an unacknowledged mandate revocation (§12.6: 5 s).
+    pub revoke_retry: Duration,
 }
 
 impl Gateway {
@@ -49,6 +51,7 @@ impl Gateway {
                 expected_uid: Some(cfg.cfg.expected_broker_uid),
                 timeout: ipc_timeout,
             },
+            revoke_retry: crate::auth::REVOKE_RETRY,
             app_conns: Arc::new(Semaphore::new(cfg.cfg.limits.app_connections)),
             auth_conns: Arc::new(Semaphore::new(cfg.cfg.limits.auth_connections)),
             authority_approve: Peer {

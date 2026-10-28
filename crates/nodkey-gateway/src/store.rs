@@ -41,6 +41,21 @@ pub struct Token {
     pub amounts: Vec<(String, String)>,
 }
 
+/// A `/mandates` revoke-form token (effect-protocol-v2 §12.6): bound to the session, the
+/// mandate id and the action; single-use.
+#[derive(Debug, Clone)]
+pub struct RevokeToken {
+    pub session_id: String,
+    /// Canonical mandate id text.
+    pub mid: String,
+    /// The mandate's `exp` (background retries stop there).
+    pub mandate_exp: u64,
+    pub expires: u64,
+}
+
+/// The only action a revoke token authorizes.
+pub const REVOKE_ACTION: &str = "mandate.revoke";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Return {
     Home,
@@ -84,6 +99,7 @@ pub struct Store {
     token_index: HashMap<(String, [u8; 16]), String>,
     preauth: HashMap<String, Preauth>,
     codes: HashMap<String, Code>,
+    revoke_tokens: HashMap<String, RevokeToken>,
     preauth_per_client: usize,
     seq: u64,
 }
@@ -116,6 +132,7 @@ impl Store {
             token_index: HashMap::new(),
             preauth: HashMap::new(),
             codes: HashMap::new(),
+            revoke_tokens: HashMap::new(),
             preauth_per_client: 8,
             seq: 0,
         }
@@ -138,6 +155,36 @@ impl Store {
         self.token_index.retain(|_, tok| tokens.contains_key(tok));
         self.preauth.retain(|_, p| now < p.expires);
         self.codes.retain(|_, c| now < c.expires);
+        let sessions = &self.sessions;
+        self.revoke_tokens
+            .retain(|_, t| now < t.expires && sessions.contains_key(&t.session_id));
+    }
+
+    /// Mints a single-use revoke token for `(session, mid)` (§12.6).
+    pub fn mint_revoke_token(
+        &mut self,
+        session_id: &str,
+        mid: &str,
+        mandate_exp: u64,
+        now: u64,
+    ) -> Result<String, StoreError> {
+        self.room(|s| s.revoke_tokens.len(), now)?;
+        let tok = new_id()?;
+        self.revoke_tokens.insert(
+            tok.clone(),
+            RevokeToken {
+                session_id: session_id.to_owned(),
+                mid: mid.to_owned(),
+                mandate_exp,
+                expires: now + TOKEN_TTL,
+            },
+        );
+        Ok(tok)
+    }
+
+    /// Removes a revoke token at its first presentation (checks are the caller's).
+    pub fn take_revoke_token(&mut self, tok: &str) -> Option<RevokeToken> {
+        self.revoke_tokens.remove(tok)
     }
 
     fn room(&mut self, len: impl Fn(&Store) -> usize, now: u64) -> Result<(), StoreError> {

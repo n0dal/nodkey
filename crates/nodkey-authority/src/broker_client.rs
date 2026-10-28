@@ -248,6 +248,39 @@ impl BrokerClient {
         })
     }
 
+    /// The authority's own `config.digest` (a mandate is active only while it equals its `cfg`).
+    pub fn config_digest(&self) -> [u8; 32] {
+        self.config_digest
+    }
+
+    /// `mandate.candidates{}` (effect-protocol-v2 §12.3): at most 16 pending ids.
+    pub async fn mandate_candidates(&self) -> Result<Vec<PendingId>, CallError> {
+        let res = self.call("mandate.candidates", json!({})).await?;
+        exact_members(&res, &["pending_ids"], &[]).map_err(CallError::Unavailable)?;
+        let ids = res["pending_ids"]
+            .as_array()
+            .filter(|a| a.len() <= 16)
+            .ok_or(CallError::Unavailable("pending_ids"))?;
+        ids.iter()
+            .map(|v| {
+                v.as_str()
+                    .and_then(|s| PendingId::parse(s).ok())
+                    .ok_or(CallError::Unavailable("pending_ids entry"))
+            })
+            .collect()
+    }
+
+    /// `mandate.declined{pending_id, final}` (effect-protocol-v2 §12.3).
+    pub async fn mandate_declined(&self, pid: &PendingId, fin: bool) -> Result<(), CallError> {
+        let res = self
+            .call(
+                "mandate.declined",
+                json!({"pending_id": pid.to_text(), "final": fin}),
+            )
+            .await?;
+        exact_members(&res, &[], &[]).map_err(CallError::Unavailable)
+    }
+
     /// `grant.deliver{pending_id, grant}`.
     pub async fn deliver(&self, pid: &PendingId, grant: &[u8]) -> Result<DeliverResult, CallError> {
         let res = self

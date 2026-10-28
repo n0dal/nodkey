@@ -123,7 +123,145 @@ struct RawWorkload {
 struct RawWorkloads {
     format: String,
     workloads: Vec<RawWorkload>,
+    /// agent-interface-v1 §3 (in `config.digest`; same file and members as the broker reads).
+    #[serde(default)]
+    support_principals: Option<BTreeMap<String, Vec<String>>>,
+    /// agent-interface-v1 §4.1 template configuration.
+    #[serde(default)]
+    mandate_template: Option<RawTemplate>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTemplate {
+    template: String,
+    refund_op: String,
+    read_ops: Vec<String>,
+    message_op: String,
+    ceilings: RawCeilings,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCeilings {
+    refund_max_count: u64,
+    message_max_count: u64,
+    refund_max_total_minor: BTreeMap<String, u64>,
+}
+
+/// The template operation and the operations it covers (agent-interface-v1 §4.1).
+pub const MANDATE_TEMPLATE: &str = "mandate.support_ticket";
+pub const SUPPORT_REFUND: &str = "payments.support_refund";
+pub const SUPPORT_GET_ORDER: &str = "payments.support_get_order";
+pub const MESSAGES_SEND: &str = "messages.send";
+
+/// Operations only an enrolled support principal's workload may hold (AI §3).
+pub fn is_support_op(op: &str) -> bool {
+    matches!(
+        op,
+        SUPPORT_REFUND | SUPPORT_GET_ORDER | MESSAGES_SEND | MANDATE_TEMPLATE
+    )
+}
+
+/// Mandate configuration (agent-interface-v1 §3, §4.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandateCfg {
+    pub support_principals: BTreeMap<String, BTreeSet<String>>,
+    pub template: Option<TemplateCfg>,
+}
+
+impl MandateCfg {
+    pub fn is_support_principal(&self, ten: &str, sub: &str) -> bool {
+        self.support_principals
+            .get(ten)
+            .is_some_and(|s| s.contains(sub))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateCfg {
+    pub refund_op: String,
+    pub message_op: String,
+    pub read_ops: Vec<String>,
+    pub max_refund_count: u64,
+    pub max_message_count: u64,
+    pub max_refund_total_minor: BTreeMap<String, u64>,
+}
+
+fn mandate_cfg(
+    sp: Option<BTreeMap<String, Vec<String>>>,
+    tpl: Option<RawTemplate>,
+    ops: &Operations,
+) -> Result<Option<MandateCfg>, String> {
+    let Some(sp) = sp else {
+        return match tpl {
+            Some(_) => Err("workloads: mandate_template requires support_principals".into()),
+            None => Ok(None),
+        };
+    };
+    let mut principals = BTreeMap::new();
+    for (ten, subs) in sp {
+        let set: BTreeSet<String> = subs.iter().cloned().collect();
+        if !is_id(&ten, 128)
+            || set.is_empty()
+            || set.len() != subs.len()
+            || set.iter().any(|s| !is_id(s, 256))
+        {
+            return Err(
+                "workloads: support_principals must map tenant IDs to non-empty ID sets".into(),
+            );
+        }
+        principals.insert(ten, set);
+    }
+    let template = match tpl {
+        None => None,
+        Some(t) => {
+            let d = |op: &str| ops.get(op);
+            let tpl_ok = t.template == MANDATE_TEMPLATE
+                && d(&t.template).is_some_and(|x| x.kind == OpKind::Write && !x.mandate_eligible);
+            // AI-08: covered ops are mandate_eligible writes, never the template itself.
+            let covered_ok = [&t.refund_op, &t.message_op].iter().all(|op| {
+                op.as_str() != MANDATE_TEMPLATE
+                    && d(op).is_some_and(|x| x.kind == OpKind::Write && x.mandate_eligible)
+            });
+            if !tpl_ok
+                || !covered_ok
+                || t.refund_op != SUPPORT_REFUND
+                || t.message_op != MESSAGES_SEND
+                || t.read_ops != [SUPPORT_GET_ORDER]
+                || d(SUPPORT_GET_ORDER).map(|x| x.kind) != Some(OpKind::Read)
+            {
+                return Err(
+                    "workloads: mandate_template differs from agent-interface-v1 §4.1".into(),
+                );
+            }
+            let c = t.ceilings;
+            if c.refund_max_count > MAX_UINT
+                || c.message_max_count > MAX_UINT
+                || c.refund_max_total_minor
+                    .iter()
+                    .any(|(cur, v)| crate::server::iso4217_exponent(cur).is_none() || *v > MAX_UINT)
+            {
+                return Err("workloads: mandate_template ceilings invalid".into());
+            }
+            Some(TemplateCfg {
+                refund_op: t.refund_op,
+                message_op: t.message_op,
+                read_ops: t.read_ops,
+                max_refund_count: c.refund_max_count,
+                max_message_count: c.message_max_count,
+                max_refund_total_minor: c.refund_max_total_minor,
+            })
+        }
+    };
+    Ok(Some(MandateCfg {
+        support_principals: principals,
+        template,
+    }))
+}
+
+/// 2^53 − 1 (grant-v1 integer bound).
+const MAX_UINT: u64 = (1 << 53) - 1;
 
 /// One registered workload (the authority's copy of the broker's registration).
 #[derive(Debug, Clone)]
@@ -138,6 +276,8 @@ pub struct Workload {
 #[derive(Debug, Clone)]
 pub struct Workloads {
     by_wid: BTreeMap<String, Workload>,
+    /// `None` = mandates and agent operations disabled.
+    pub mandates: Option<MandateCfg>,
 }
 
 impl Workloads {
@@ -155,6 +295,7 @@ impl Workloads {
         if raw.format != "nodkey.workloads.v1" {
             return Err("workloads: format".into());
         }
+        let mandates = mandate_cfg(raw.support_principals, raw.mandate_template, ops)?;
         let mut by_wid = BTreeMap::new();
         for w in raw.workloads {
             let e = |m: &str| format!("workload {:?}: {m}", w.wid);
@@ -204,6 +345,29 @@ impl Workloads {
                     return Err(e("read_ops entry is not a read operation"));
                 }
             }
+            // AI §3 loader refusals (AI-02, AI-08).
+            for op in write_ops.iter().chain(read_ops.iter()) {
+                if !is_support_op(op) {
+                    continue;
+                }
+                let ok = match (&w.approver_source, &mandates) {
+                    (ApproverSource::Enrolled { ten, sub }, Some(m)) => {
+                        m.is_support_principal(ten, sub)
+                    }
+                    _ => false,
+                };
+                if !ok {
+                    return Err(e("agent operation requires an enrolled support principal"));
+                }
+                if op == MANDATE_TEMPLATE
+                    && mandates
+                        .as_ref()
+                        .and_then(|m| m.template.as_ref())
+                        .is_none()
+                {
+                    return Err(e("template operation without mandate_template"));
+                }
+            }
             let wl = Workload {
                 wid: w.wid.clone(),
                 tenants,
@@ -218,7 +382,7 @@ impl Workloads {
         if by_wid.is_empty() {
             return Err("workloads: empty".into());
         }
-        Ok(Workloads { by_wid })
+        Ok(Workloads { by_wid, mandates })
     }
 }
 

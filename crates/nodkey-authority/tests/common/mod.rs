@@ -39,6 +39,27 @@ pub const OPERATIONS: &str = r#"{"format":"nodkey.operations.v1","operations":[
 {"op":"test.note","kind":"write","opv":1,"requires_confirmation":true,"params":[
  {"name":"order_id","in":"res","key":0,"class":"exact","type":"uint","destination":false},
  {"name":"note","in":"con","key":null,"class":"free","type":"text64","destination":false,"justification":"test-only free text"}]},
+{"op":"payments.support_refund","kind":"write","opv":1,"requires_confirmation":true,"mandate_eligible":true,"params":[
+ {"name":"order_id","in":"res","key":0,"class":"exact","type":"uint","destination":false},
+ {"name":"amount_minor","in":"con","key":0,"class":"exact","type":"uint","destination":false},
+ {"name":"currency","in":"con","key":1,"class":"exact","type":"currency","destination":false},
+ {"name":"charge_id","in":"con","key":2,"class":"exact","type":"text64","destination":false},
+ {"name":"customer_sub","in":"con","key":3,"class":"exact","type":"text64","destination":false}]},
+{"op":"payments.support_get_order","kind":"read","opv":1,"requires_confirmation":false,"params":[
+ {"name":"order_id","in":"request","key":null,"class":"owner_scoped","type":"uint","destination":false}]},
+{"op":"messages.send","kind":"write","opv":1,"requires_confirmation":true,"mandate_eligible":true,"params":[
+ {"name":"customer_sub","in":"res","key":0,"class":"exact","type":"text64","destination":false},
+ {"name":"to","in":"con","key":0,"class":"exact","type":"text256","destination":true},
+ {"name":"body","in":"con","key":null,"class":"free","type":"text256","destination":false,"justification":"message content"}]},
+{"op":"mandate.support_ticket","kind":"write","opv":1,"requires_confirmation":true,"params":[
+ {"name":"customer_sub","in":"res","key":0,"class":"exact","type":"text64","destination":false},
+ {"name":"currency","in":"con","key":0,"class":"exact","type":"currency","destination":false},
+ {"name":"refund_max_count","in":"con","key":1,"class":"exact","type":"uint","destination":false},
+ {"name":"refund_max_per_call_minor","in":"con","key":2,"class":"exact","type":"uint","destination":false},
+ {"name":"refund_max_total_minor","in":"con","key":3,"class":"exact","type":"uint","destination":false},
+ {"name":"message_max_count","in":"con","key":4,"class":"exact","type":"uint","destination":false},
+ {"name":"valid_for_s","in":"con","key":5,"class":"exact","type":"uint","destination":false},
+ {"name":"customer_email","in":"con","key":6,"class":"exact","type":"text256","destination":false}]},
 {"op":"payments.get_order","kind":"read","opv":1,"requires_confirmation":false,"params":[
  {"name":"order_id","in":"request","key":null,"class":"owner_scoped","type":"uint","destination":false}]},
 {"op":"ledger.get_balance","kind":"read","opv":1,"requires_confirmation":false,"params":[
@@ -49,8 +70,16 @@ pub const WORKLOADS: &str = r#"{"format":"nodkey.workloads.v1","workloads":[
 {"wid":"spiffe://nodkey.test/workload/shop","tenants":["acme","globex"],"approver_source":"named",
  "write_ops":["payments.refund","test.note"],"read_ops":["payments.get_order"]},
 {"wid":"spiffe://nodkey.test/workload/agent","tenants":["acme"],"approver_source":{"enrolled":{"ten":"acme","sub":"user:u-17"}},
- "write_ops":["ledger.transfer"],"read_ops":["ledger.get_balance"]}
-]}"#;
+ "write_ops":["ledger.transfer"],"read_ops":["ledger.get_balance"]},
+{"wid":"spiffe://nodkey.test/workload/support","tenants":["shop1"],"approver_source":{"enrolled":{"ten":"shop1","sub":"op_ana"}},
+ "write_ops":["payments.support_refund","messages.send","mandate.support_ticket"],"read_ops":["payments.support_get_order"]}
+],
+"support_principals":{"shop1":["op_ana"]},
+"mandate_template":{"template":"mandate.support_ticket","refund_op":"payments.support_refund",
+ "read_ops":["payments.support_get_order"],"message_op":"messages.send",
+ "ceilings":{"refund_max_count":5,"message_max_count":10,"refund_max_total_minor":{"EUR":10000}}}}"#;
+
+pub const SUPPORT: &str = "spiffe://nodkey.test/workload/support";
 
 pub fn tmpdir(name: &str) -> PathBuf {
     let mut b = [0u8; 6];
@@ -149,6 +178,14 @@ pub struct FakeBrokerState {
     pub connections: usize,
     /// Close the connection on every `pending.get` without answering.
     pub drop_pending_get: bool,
+    /// `mandate.candidates` answer.
+    pub candidates: Vec<String>,
+    /// `mandate.declined` calls received: (pending_id, final).
+    pub declined: Vec<(String, bool)>,
+    /// Reject every delivery of a `cfm = 2` grant (a broker-side revocation).
+    pub reject_mandated: bool,
+    /// Verified `cfm = 2` deliveries: (pending_id, mid).
+    pub mandated: Vec<(String, [u8; 16])>,
 }
 
 pub type Shared = Arc<StdMutex<FakeBrokerState>>;
@@ -176,6 +213,10 @@ impl FakeBroker {
             idle_close: None,
             connections: 0,
             drop_pending_get: false,
+            candidates: vec![],
+            declined: vec![],
+            reject_mandated: false,
+            mandated: vec![],
         }));
         let st = state.clone();
         tokio::spawn(async move {
@@ -228,6 +269,26 @@ fn reply(id: &Value, result: Result<Value, &str>) -> Value {
 
 /// Broker-side verification of a delivered grant (what the real broker does in §4.3 step 3).
 fn broker_verify(st: &FakeBrokerState, rec: &Map<String, Value>, grant: &[u8]) -> bool {
+    broker_check(st, rec, grant).0
+}
+
+/// The `mid` of a delivered grant that verifies with `cfm = 2`.
+fn broker_verify_mid(
+    st: &FakeBrokerState,
+    rec: &Map<String, Value>,
+    grant: &[u8],
+) -> Option<[u8; 16]> {
+    match broker_check(st, rec, grant) {
+        (true, m) => m,
+        _ => None,
+    }
+}
+
+fn broker_check(
+    st: &FakeBrokerState,
+    rec: &Map<String, Value>,
+    grant: &[u8],
+) -> (bool, Option<[u8; 16]>) {
     let registry = Registry::load(&st.registry_json).unwrap();
     let ops = Operations::load(OPERATIONS).unwrap();
     let broker_id = BrokerId::new(BROKER_ID).unwrap();
@@ -236,12 +297,12 @@ fn broker_verify(st: &FakeBrokerState, rec: &Map<String, Value>, grant: &[u8]) -
         let pv = match v {
             Value::Number(n) => ParamValue::Uint(n.as_u64().unwrap()),
             Value::String(s) => ParamValue::Text(s.clone()),
-            _ => return false,
+            _ => return (false, None),
         };
         params.insert(k.clone(), pv);
     }
     let Ok(request) = ops.parse_request(rec["op"].as_str().unwrap(), params) else {
-        return false;
+        return (false, None);
     };
     let wid = rec["wid"].as_str().unwrap();
     let tenants = vec![rec["ten"].as_str().unwrap().to_owned()];
@@ -257,12 +318,13 @@ fn broker_verify(st: &FakeBrokerState, rec: &Map<String, Value>, grant: &[u8]) -
     match verify(grant, &registry, &ctx) {
         Ok(Verified::Write(w)) => {
             let id = w.identity().clone();
+            let mid = w.mandate_id();
             let jti_ok =
                 nodkey_grant::encode_transport(&id.jti) == rec["pending_id"].as_str().unwrap();
             let sub_ok = id.sub == rec["approver_sub"].as_str().unwrap();
-            jti_ok && sub_ok && w.decide(&[]).is_ok()
+            (jti_ok && sub_ok && w.decide(&[]).is_ok(), mid)
         }
-        _ => false,
+        _ => (false, None),
     }
 }
 
@@ -292,10 +354,36 @@ fn handle_broker(st: &mut FakeBrokerState, req: &Map<String, Value>) -> Option<(
             res.insert("digest".into(), json!(digest));
             Some((reply(&id, Ok(Value::Object(res))), false))
         }
+        "mandate.candidates" => {
+            Some((reply(&id, Ok(json!({"pending_ids": st.candidates}))), false))
+        }
+        "mandate.declined" => {
+            let pid = args["pending_id"].as_str().unwrap().to_owned();
+            st.declined
+                .push((pid.clone(), args["final"].as_bool().unwrap()));
+            if args["final"] == true
+                && let Some(r) = st.records.get_mut(&pid)
+                && r.state == "PENDING"
+            {
+                r.state = "DENIED".into();
+            }
+            Some((reply(&id, Ok(json!({}))), false))
+        }
         "grant.deliver" => {
             let pid = args["pending_id"].as_str().unwrap().to_owned();
             let grant = decode_transport(args["grant"].as_str()).unwrap();
             st.deliveries.push((pid.clone(), grant.clone()));
+            let mid = st
+                .records
+                .get(&pid)
+                .and_then(|r| broker_verify_mid(st, &r.json, &grant));
+            if let Some(m) = mid {
+                st.mandated.push((pid.clone(), m));
+            }
+            if st.reject_mandated && mid.is_some() {
+                st.results.push("rejected".into());
+                return Some((reply(&id, Ok(json!({"status": "rejected"}))), false));
+            }
             if st.fail_first > 0 {
                 st.fail_first -= 1;
                 return Some((reply(&id, Err("unavailable")), false));

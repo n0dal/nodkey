@@ -204,9 +204,10 @@ fn run_v2(raw: RawV2Config, mounts_verified_externally: bool) -> ExitCode {
             Ok(c) => c,
             Err(e) => return fatal(&e),
         };
-        if let Err(e) = v2config::check_authority_workloads(&wl_bytes, &cfg, &ops) {
-            return fatal(&e);
-        }
+        let mandates = match v2config::check_authority_workloads(&wl_bytes, &cfg, &ops) {
+            Ok(m) => m,
+            Err(e) => return fatal(&e),
+        };
         let config_digest = v2config::config_digest(ops_text.as_bytes(), &wl_bytes);
         let registry_text = match read_limited(&cfg.registry_path, MAX_CONFIG_BYTES)
             .and_then(|b| String::from_utf8(b).map_err(|e| e.to_string()))
@@ -230,7 +231,7 @@ fn run_v2(raw: RawV2Config, mounts_verified_externally: bool) -> ExitCode {
         let control_pool = db::Pool::new(&cfg.db, password, cfg.db_control_pool_size);
         let broker = Arc::new(service::Broker::new(
             cfg, registry, ops, names, (pool, control_pool), config_digest, service::system_clock(),
-        ));
+        ).with_mandates(mandates));
         let mut started = Err(String::new());
         for _ in 0..15 {
             started = broker.startup_checks().await;

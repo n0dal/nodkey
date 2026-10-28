@@ -130,6 +130,12 @@ pub struct World {
     pub broker_calls: Vec<Call>,
     pub authority_calls: Vec<Call>,
     pub records: HashMap<String, Rec>,
+    /// `mandate.list` answer per subject `"ten/sub"` (effect-protocol-v2 §12.3).
+    pub mandates: HashMap<String, Vec<Value>>,
+    /// While true, the fake broker closes `mandate.revoke` connections without answering.
+    pub broker_revoke_down: bool,
+    /// `"G:<op>"` / `"I:<op>"` in arrival order (revoke ordering, §12.6).
+    pub order: Vec<String>,
 }
 
 pub type Shared = Arc<Mutex<World>>;
@@ -285,6 +291,9 @@ async fn serve_lines(l: UnixListener, world: Shared, f: fn(&Shared, &str, &Value
             let req: Value = serde_json::from_str(line.trim_end()).unwrap();
             let op = req["op"].as_str().unwrap().to_owned();
             let out = f(&world, &op, &req["args"]);
+            if out.get("__drop").is_some() {
+                return; // close without a response (peer down / lost answer)
+            }
             let mut env = json!({"v": 2, "id": req["id"], "correlation_id": "c-1"});
             match out.get("__error") {
                 Some(code) => {
@@ -310,6 +319,45 @@ fn broker(world: &Shared, op: &str, args: &Value) -> Value {
         args: args.clone(),
     });
     let na = json!({"__error": "not_available"});
+    let subject = format!(
+        "{}/{}",
+        args["subject"]["ten"].as_str().unwrap_or(""),
+        args["subject"]["sub"].as_str().unwrap_or("")
+    );
+    match op {
+        "pending.list" => {
+            let pending: Vec<Value> = w
+                .records
+                .values()
+                .filter(|r| {
+                    r.state == "PENDING"
+                        && format!("{}/{}", r.record["ten"].as_str().unwrap(), r.record["approver_sub"].as_str().unwrap()) == subject
+                })
+                .map(|r| json!({"pending_id": r.record["pending_id"], "op": r.record["op"],
+                                "created_at": r.record["created_at"], "expires_at": r.record["expires_at"]}))
+                .collect();
+            return json!({"pending": pending});
+        }
+        "mandate.list" => {
+            return json!({"mandates": w.mandates.get(&subject).cloned().unwrap_or_default()});
+        }
+        "mandate.revoke" => {
+            if w.broker_revoke_down {
+                return json!({"__drop": true});
+            }
+            w.order.push("G:mandate.revoke".into());
+            let mid = args["mid"].clone();
+            let Some(list) = w.mandates.get_mut(&subject) else {
+                return na;
+            };
+            let Some(m) = list.iter_mut().find(|m| m["mid"] == mid) else {
+                return na;
+            };
+            m["state"] = json!("revoked");
+            return json!({});
+        }
+        _ => {}
+    }
     let pid = args["pending_id"].as_str().unwrap_or("");
     let Some(rec) = w.records.get_mut(pid) else {
         return na;
@@ -365,6 +413,10 @@ fn authority(world: &Shared, op: &str, args: &Value) -> Value {
             }
         }
         "read_grant" => json!({"grant": FAKE_GRANT}),
+        "mandate.revoke" => {
+            w.order.push("I:mandate.revoke".into());
+            json!({})
+        }
         _ => json!({"__error": "unknown_operation"}),
     }
 }

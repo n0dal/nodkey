@@ -115,6 +115,7 @@ pub fn build(
         wid: cfg.wid.clone(),
         tenants: cfg.tenants.clone(),
         r_max: cfg.r_max(),
+        support: cfg.support.clone(),
     };
     // The retransmission context must accept the compiled-in declaration.
     nodkey_grant::RetransmissionContext::new(

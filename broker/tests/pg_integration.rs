@@ -12,7 +12,7 @@ use nodkey_broker::v2::ids::{decode_id, encode_id};
 use nodkey_broker::v2::server::{Channel, Server, serve};
 use nodkey_broker::v2::service::{Delivery, Execution};
 use nodkey_broker::v2::wire::Code;
-use serde_json::json;
+use serde_json::{Value, json};
 
 const ALICE: (&str, &str) = ("acme", "user:alice");
 const BOB: (&str, &str) = ("acme", "user:bob");
@@ -70,9 +70,15 @@ async fn full_flow_succeeds_once() {
     assert_eq!(st["state"], "SUCCEEDED");
     assert_eq!(st["outcome"]["class"], "succeeded");
     assert!(decode_id(st["outcome"]["receipt_id"].as_str().unwrap()).is_some());
-    // The status response never contains the approver, facts, grant or params.
+    // The status response never contains the approver, facts, grant or params. `awaiting` is
+    // effect-protocol-v2 Draft 4 §12.2 (null outside PENDING).
     let keys: Vec<_> = st.as_object().unwrap().keys().cloned().collect();
-    assert_eq!(keys.len(), 4, "{keys:?}");
+    assert_eq!(
+        keys,
+        ["awaiting", "expires_at", "outcome", "pending_id", "state"],
+        "{keys:?}"
+    );
+    assert_eq!(st["awaiting"], Value::Null);
 }
 
 /// W14 denial (insufficient funds): FAILED/denied, consumed DENIED, no effect.

@@ -50,7 +50,8 @@ fn write_config(dir: &Path, patch: impl FnOnce(&mut Value)) -> std::path::PathBu
 fn manifest(dir: &Path, paths: &[&str]) {
     let m = json!({"format":"nodkey.deployment-manifest.v1","workload_mounts":[
         {"wid":"spiffe://nodkey.test/workload/shop","host_paths": paths},
-        {"wid":"spiffe://nodkey.test/workload/agent","host_paths": []}]});
+        {"wid":"spiffe://nodkey.test/workload/agent","host_paths": []},
+        {"wid":"spiffe://nodkey.test/workload/support","host_paths": []}]});
     std::fs::write(dir.join("manifest.json"), m.to_string()).unwrap();
 }
 

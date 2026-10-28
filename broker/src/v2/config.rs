@@ -538,9 +538,12 @@ impl V2Config {
                             w.wid
                         ));
                     }
-                    Some(Executor::PaymentsRefund | Executor::PaymentsGetOrder)
-                        if payments.is_none() =>
-                    {
+                    Some(
+                        Executor::PaymentsRefund
+                        | Executor::PaymentsGetOrder
+                        | Executor::SupportRefund
+                        | Executor::SupportGetOrder,
+                    ) if payments.is_none() => {
                         return e(format!("{}: op {op} needs the payments section", w.wid));
                     }
                     _ => {}
@@ -632,6 +635,143 @@ pub fn config_digest(ops_bytes: &[u8], workloads_bytes: &[u8]) -> [u8; 32] {
 struct AuthWorkloads {
     format: String,
     workloads: Vec<AuthWorkload>,
+    /// agent-interface-v1 §3: `support_principals(ten)`, in `config.digest` (spec gap MD-1:
+    /// the spec does not say which file; it lives in the workloads file so that both the broker
+    /// and the authority hash and parse the same bytes).
+    #[serde(default)]
+    support_principals: Option<BTreeMap<String, Vec<String>>>,
+    /// agent-interface-v1 §4.1 template configuration (same file, same reason).
+    #[serde(default)]
+    mandate_template: Option<RawTemplate>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawTemplate {
+    template: String,
+    refund_op: String,
+    read_ops: Vec<String>,
+    message_op: String,
+    ceilings: RawCeilings,
+}
+
+/// Spec gap MD-2: AI §4.1 writes `"ceilings":{…}`. Members used here: counts, and the total
+/// refund ceiling per currency (the per-call ceiling is the total ceiling, since per_call ≤ total).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCeilings {
+    refund_max_count: u64,
+    message_max_count: u64,
+    refund_max_total_minor: BTreeMap<String, u64>,
+}
+
+/// Mandate configuration shared with the authority (agent-interface-v1 §3, §4.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MandateCfg {
+    pub support_principals: BTreeMap<String, BTreeSet<String>>,
+    pub template: Option<TemplateCfg>,
+}
+
+impl MandateCfg {
+    pub fn is_support_principal(&self, ten: &str, sub: &str) -> bool {
+        self.support_principals
+            .get(ten)
+            .is_some_and(|s| s.contains(sub))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateCfg {
+    pub refund_op: String,
+    pub read_ops: Vec<String>,
+    pub message_op: String,
+    pub max_refund_count: u64,
+    pub max_message_count: u64,
+    pub max_refund_total_minor: BTreeMap<String, u64>,
+}
+
+/// Largest valid lifetime of a mandate (AI §4.1: `valid_for_s` 60 … 3600).
+pub const MANDATE_MIN_S: u64 = 60;
+pub const MANDATE_MAX_S: u64 = 3600;
+
+fn parse_mandate_cfg(
+    sp: Option<BTreeMap<String, Vec<String>>>,
+    tpl: Option<RawTemplate>,
+    ops: &Operations,
+) -> Result<Option<MandateCfg>, String> {
+    let Some(sp) = sp else {
+        if tpl.is_some() {
+            return Err("mandate_template requires support_principals".into());
+        }
+        return Ok(None);
+    };
+    let mut principals = BTreeMap::new();
+    for (ten, subs) in sp {
+        if !is_id(&ten, 128) || subs.is_empty() {
+            return Err(format!(
+                "support_principals: bad tenant {ten:?} or empty list"
+            ));
+        }
+        let mut set = BTreeSet::new();
+        for s in subs {
+            if !is_id(&s, 256) || !set.insert(s) {
+                return Err("support_principals: invalid or duplicate subject".into());
+            }
+        }
+        principals.insert(ten, set);
+    }
+    let template = match tpl {
+        None => None,
+        Some(t) => {
+            let decl_of = |op: &str| ops.get(op);
+            if t.template != decls::MANDATE_TEMPLATE || decl_of(&t.template).is_none() {
+                return Err("mandate_template: unknown or undeclared template".into());
+            }
+            if decl_of(&t.template).is_some_and(|d| d.mandate_eligible) {
+                return Err("mandate_template: a template must not be mandate_eligible".into());
+            }
+            // AI-08: covered operations are mandate_eligible writes and never templates; this
+            // template's covered set is fixed by agent-interface-v1 §4.1.
+            for op in [&t.refund_op, &t.message_op] {
+                let ok = decl_of(op).is_some_and(|d| d.mandate_eligible && d.kind == OpKind::Write)
+                    && op != decls::MANDATE_TEMPLATE;
+                if !ok {
+                    return Err(format!(
+                        "mandate_template: covered op {op} is not a mandate_eligible write"
+                    ));
+                }
+            }
+            if t.refund_op != decls::SUPPORT_REFUND
+                || t.message_op != decls::MESSAGES_SEND
+                || t.read_ops != [decls::SUPPORT_GET_ORDER]
+                || decl_of(decls::SUPPORT_GET_ORDER).map(|d| d.kind) != Some(OpKind::Read)
+            {
+                return Err("mandate_template: ops differ from agent-interface-v1 §4.1".into());
+            }
+            let c = t.ceilings;
+            let max = super::digest::MAX_UINT;
+            if c.refund_max_count > max || c.message_max_count > max {
+                return Err("mandate_template: ceiling out of range".into());
+            }
+            for (cur, v) in &c.refund_max_total_minor {
+                if decls::iso4217_exponent(cur).is_none() || *v > max {
+                    return Err(format!("mandate_template: bad currency ceiling {cur}"));
+                }
+            }
+            Some(TemplateCfg {
+                refund_op: t.refund_op,
+                read_ops: t.read_ops,
+                message_op: t.message_op,
+                max_refund_count: c.refund_max_count,
+                max_message_count: c.message_max_count,
+                max_refund_total_minor: c.refund_max_total_minor,
+            })
+        }
+    };
+    Ok(Some(MandateCfg {
+        support_principals: principals,
+        template,
+    }))
 }
 
 #[derive(Deserialize, PartialEq, Eq)]
@@ -652,12 +792,14 @@ struct AuthWorkload {
 }
 
 /// Refuses to start unless the authority's registration file describes exactly this broker's
-/// workloads (same wids, tenant sets, approver sources, and write/read operation sets).
+/// workloads (same wids, tenant sets, approver sources, and write/read operation sets). Returns
+/// the mandate configuration of that file (agent-interface-v1 §3, §4.1), after the loader
+/// refusals of AI §3 (AI-02, AI-08).
 pub fn check_authority_workloads(
     bytes: &[u8],
     cfg: &V2Config,
     ops: &Operations,
-) -> Result<(), String> {
+) -> Result<Option<MandateCfg>, String> {
     let e = |m: String| Err(format!("authority workloads: {m} (refusing to start)"));
     strict_json::check_strict(bytes).map_err(|x| format!("authority workloads: {x}"))?;
     let doc: AuthWorkloads =
@@ -703,7 +845,35 @@ pub fn check_authority_workloads(
             return e(format!("{}: operation sets differ", a.wid));
         }
     }
-    Ok(())
+    let mandates = parse_mandate_cfg(doc.support_principals, doc.mandate_template, ops)
+        .map_err(|m| format!("authority workloads: {m} (refusing to start)"))?;
+    // AI §3 loader refusals: agent operations only for enrolled workloads whose principal is a
+    // support principal of that tenant; the template only if configured.
+    for w in &cfg.workloads {
+        for op in w.allowed_ops.iter().filter(|o| decls::is_support_op(o)) {
+            let ok = match (&w.approver_source, &mandates) {
+                (ApproverSource::Enrolled { ten, sub }, Some(m)) => {
+                    m.is_support_principal(ten, sub)
+                }
+                _ => false,
+            };
+            if !ok {
+                return e(format!(
+                    "{}: {op} requires an enrolled support principal",
+                    w.wid
+                ));
+            }
+            if op == decls::MANDATE_TEMPLATE
+                && mandates
+                    .as_ref()
+                    .and_then(|m| m.template.as_ref())
+                    .is_none()
+            {
+                return e(format!("{}: {op} without mandate_template", w.wid));
+            }
+        }
+    }
+    Ok(mandates)
 }
 
 #[cfg(test)]
@@ -772,6 +942,122 @@ pub mod tests {
                 "{to}"
             );
         }
+    }
+
+    fn agent_sample(approver: &str) -> String {
+        sample()
+            .replace(r#""ledger_currency":"EUR","#, r#""ledger_currency":"EUR",
+ "payments":{"adapter_socket":"/run/nodkey/br-pay/adapter.sock","adapter_uid":10006,"R_max_s":180,
+   "budget":{"max_count_per_day":3,"limits_minor":{"EUR":20000}}},"#)
+            .replace(
+                r#""approver_source":{"kind":"enrolled","ten":"acme","sub":"user:alice"},"allowed_ops":["ledger.transfer","ledger.get_balance"]"#,
+                &format!(r#""approver_source":{approver},"allowed_ops":["payments.support_refund","messages.send","mandate.support_ticket","payments.support_get_order"]"#),
+            )
+    }
+
+    pub const AGENT_AUTH_WL: &str = r#"{"format":"nodkey.workloads.v1","workloads":[
+ {"wid":"spiffe://nodkey.test/workload/agent","tenants":["acme"],"approver_source":{"enrolled":{"ten":"acme","sub":"user:alice"}},
+  "write_ops":["payments.support_refund","messages.send","mandate.support_ticket"],"read_ops":["payments.support_get_order"]},
+ {"wid":"spiffe://nodkey.test/workload/shop","tenants":["globex","acme"],"approver_source":"named",
+  "write_ops":[],"read_ops":["ledger.get_balance"]}],
+ "support_principals":{"acme":["user:alice"]},
+ "mandate_template":{"template":"mandate.support_ticket","refund_op":"payments.support_refund",
+  "read_ops":["payments.support_get_order"],"message_op":"messages.send",
+  "ceilings":{"refund_max_count":5,"message_max_count":10,"refund_max_total_minor":{"EUR":10000}}}}"#;
+
+    /// AT-08 (broker loader): agent operations need an enrolled support principal; the template
+    /// needs a template configuration; template members are fixed.
+    #[test]
+    fn mandate_loader_refusals() {
+        let ops_text = decls::tests::ops_agent();
+        let (ops, names) = decls::load(&ops_text).unwrap();
+        let build_a = |s: &str| {
+            V2Config::from_raw(
+                RawV2Config::parse(s.as_bytes()).unwrap(),
+                &ops,
+                &names,
+                10002,
+                true,
+            )
+        };
+        let enrolled = r#"{"kind":"enrolled","ten":"acme","sub":"user:alice"}"#;
+        let c = build_a(&agent_sample(enrolled)).unwrap();
+        let m = check_authority_workloads(AGENT_AUTH_WL.as_bytes(), &c, &ops)
+            .unwrap()
+            .unwrap();
+        assert!(m.is_support_principal("acme", "user:alice"));
+        assert!(!m.is_support_principal("acme", "user:bob"));
+        assert_eq!(
+            m.template.as_ref().unwrap().max_refund_total_minor["EUR"],
+            10000
+        );
+        // Named workload with agent ops: refused (named also fails the destination rule).
+        let named = build_a(&agent_sample(r#"{"kind":"named"}"#));
+        assert!(
+            named.is_err() || {
+                let wl = AGENT_AUTH_WL.replace(
+                    r#"{"enrolled":{"ten":"acme","sub":"user:alice"}}"#,
+                    r#""named""#,
+                );
+                check_authority_workloads(wl.as_bytes(), &named.unwrap(), &ops).is_err()
+            }
+        );
+        for (from, to) in [
+            // enrolment not a support principal
+            (
+                r#""support_principals":{"acme":["user:alice"]}"#,
+                r#""support_principals":{"acme":["user:bob"]}"#,
+            ),
+            // no support principals at all (template present)
+            (r#""support_principals":{"acme":["user:alice"]},"#, ""),
+            // template op as the covered refund op (AI-08)
+            (
+                r#""refund_op":"payments.support_refund""#,
+                r#""refund_op":"mandate.support_ticket""#,
+            ),
+            // covered op that is not mandate_eligible
+            (
+                r#""message_op":"messages.send""#,
+                r#""message_op":"payments.refund""#,
+            ),
+            (
+                r#""read_ops":["payments.support_get_order"],"message_op""#,
+                r#""read_ops":[],"message_op""#,
+            ),
+            (
+                r#""template":"mandate.support_ticket""#,
+                r#""template":"mandate.other""#,
+            ),
+            (
+                r#""refund_max_total_minor":{"EUR":10000}"#,
+                r#""refund_max_total_minor":{"XXX":10000}"#,
+            ),
+            (
+                r#""support_principals":{"acme":["user:alice"]}"#,
+                r#""support_principals":{"acme":[]}"#,
+            ),
+            (
+                r#""message_max_count":10"#,
+                r#""message_max_count":10,"x":1"#,
+            ),
+        ] {
+            let bad = AGENT_AUTH_WL.replacen(from, to, 1);
+            assert_ne!(bad, AGENT_AUTH_WL, "{from}");
+            assert!(
+                check_authority_workloads(bad.as_bytes(), &c, &ops).is_err(),
+                "{to}"
+            );
+        }
+        // Template op without a template configuration.
+        let i = AGENT_AUTH_WL.find(r#""mandate_template""#).unwrap();
+        let no_tpl = format!("{}}}", AGENT_AUTH_WL[..i].trim_end().trim_end_matches(','));
+        assert!(check_authority_workloads(no_tpl.as_bytes(), &c, &ops).is_err());
+        // Without any agent op, no mandate configuration is fine.
+        assert!(
+            check_authority_workloads(AUTH_WL.as_bytes(), &build(&sample(), true).unwrap(), &ops)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

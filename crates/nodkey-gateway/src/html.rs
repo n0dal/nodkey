@@ -8,6 +8,44 @@ pub const CSS: &str = include_str!("../static/nodkey.css");
 
 pub const UNIFORM_ERROR: &str = "This request is not available.";
 
+/// The template operation (agent-interface-v1 §4.1).
+pub const MANDATE_TEMPLATE: &str = "mandate.support_ticket";
+/// Label of an agent-written message body (effect-protocol-v2 §12.6).
+pub const AGENT_TEXT_LABEL: &str = "Written by the agent \u{2014} unverified";
+
+/// The static mandate template of agent-interface-v1 §4.2 step 2, filled from the record's own
+/// (digest-checked) params; amounts use display key 11. `None` if a value is missing.
+pub fn mandate_summary(r: &CheckedRecord, workload: &str) -> Option<String> {
+    use crate::json::Scalar;
+    let p = &r.rec.params.0;
+    let u = |k: &str| match p.get(k) {
+        Some(Scalar::Uint(n)) => Some(*n),
+        _ => None,
+    };
+    let t = |k: &str| match p.get(k) {
+        Some(Scalar::Text(v)) => Some(v.clone()),
+        _ => None,
+    };
+    let (cs, ce, cur) = (t("customer_sub")?, t("customer_email")?, t("currency")?);
+    let money = |n: u64| display_amount(r, n);
+    Some(format!(
+        "Allow <strong>{w}</strong>, for <strong>{v} seconds</strong> from approval, to: refund at most \
+         <strong>{n}</strong> times, at most <strong>{pc}</strong> each and <strong>{tot}</strong> in \
+         total (<code>{cur}</code>), only orders of customer <code>{cs}</code> (<code>{ce}</code>); \
+         send at most <strong>{m}</strong> messages to <code>{ce}</code>; read that customer's orders. \
+         <strong>These will happen without asking you again.</strong>",
+        w = esc(workload),
+        v = u("valid_for_s")?,
+        n = u("refund_max_count")?,
+        pc = esc(&money(u("refund_max_per_call_minor")?)?),
+        tot = esc(&money(u("refund_max_total_minor")?)?),
+        cur = esc(&cur),
+        cs = esc(&cs),
+        ce = esc(&ce),
+        m = u("message_max_count")?,
+    ))
+}
+
 /// Banner shown on every auth-origin page while the test login is active (R3B-11).
 const TEST_BANNER: &str = "<div class=\"test-banner\" role=\"alert\"><strong>TEST LOGIN</strong> \
      — this gateway runs with a local test login that asks for no credential. \
@@ -28,6 +66,9 @@ fn op_label(op: &str) -> &'static str {
     match op {
         "payments.refund" => "Refund a payment",
         "ledger.transfer" => "Transfer money",
+        "payments.support_refund" => "Refund a customer's payment",
+        "messages.send" => "Send a message to a customer",
+        MANDATE_TEMPLATE => "Approve a mandate",
         _ => "Perform an operation",
     }
 }
@@ -145,6 +186,18 @@ pub fn confirm_page(
         esc(&ctx.workload_display_name),
         esc(state_label(&rd.state))
     ));
+    if rec.op == MANDATE_TEMPLATE {
+        match mandate_summary(r, &ctx.workload_display_name) {
+            Some(text) => b.push_str(&format!("<p class=\"mandate\">{text}</p>")),
+            None => {
+                return page(
+                    UNIFORM_ERROR,
+                    &format!("<p>{UNIFORM_ERROR}</p>"),
+                    test_login,
+                );
+            }
+        }
+    }
     b.push_str("<h2>What will happen</h2><dl class=\"params\">");
     b.push_str(&format!(
         "<dt>Operation</dt><dd><code>{}</code></dd>",
@@ -164,6 +217,16 @@ pub fn confirm_page(
             }
             Scalar::Text(t) => t.clone(),
         };
+        // §12.6: the message body is the effect; shown in full, escaped, monospace, labelled.
+        if rec.op == "messages.send" && name == "body" {
+            b.push_str(&format!(
+                "<dt>{} ({})</dt><dd><pre class=\"value unverified\">{}</pre></dd>",
+                esc(name),
+                esc(AGENT_TEXT_LABEL),
+                esc(&shown)
+            ));
+            continue;
+        }
         b.push_str(&format!(
             "<dt>{}</dt><dd><code class=\"value\">{}</code></dd>",
             esc(name),
@@ -273,6 +336,93 @@ pub fn confirm_page(
         ),
     }
     page(op_label(&rec.op), &b, test_login)
+}
+
+/// `/pending` (effect-protocol-v2 §12.6): the subject's `PENDING` records.
+pub fn pending_page(items: &[crate::ipc::PendingItem], test_login: bool) -> String {
+    let mut b = String::from("<h1>Requests waiting for you</h1>");
+    if items.is_empty() {
+        b.push_str("<p>None.</p>");
+    } else {
+        b.push_str(
+            "<table><thead><tr><th scope=\"col\">Request</th><th scope=\"col\">Operation</th>\
+             <th scope=\"col\">Created</th><th scope=\"col\">Expires</th></tr></thead><tbody>",
+        );
+        for it in items {
+            b.push_str(&format!(
+                "<tr><td><a href=\"/confirm/{id}\"><code>{id}</code></a></td><td>{op}</td>\
+                 <td>{c}</td><td>{e}</td></tr>",
+                id = esc(&it.pending_id),
+                op = esc(op_label(&it.op)),
+                c = esc(&fmt_utc(it.created_at)),
+                e = esc(&fmt_utc(it.expires_at)),
+            ));
+        }
+        b.push_str("</tbody></table>");
+    }
+    page("Requests waiting for you", &b, test_login)
+}
+
+/// `/mandates` (effect-protocol-v2 §12.6): every mandate of the subject; each active one with a
+/// Revoke form carrying its single-use token. Amounts are shown in minor units (the list carries
+/// no display data).
+pub fn mandates_page(
+    items: &[(crate::ipc::MandateItem, Option<String>)],
+    test_login: bool,
+) -> String {
+    let mut b = String::from("<h1>Your mandates</h1>");
+    if items.is_empty() {
+        b.push_str("<p>None.</p>");
+    }
+    for (m, tok) in items {
+        let t = &m.terms;
+        let c = &m.counters;
+        b.push_str(&format!(
+            "<section class=\"mandate\"><h2>{w}: customer <code>{cs}</code></h2><dl class=\"params\">\
+             <dt>State</dt><dd>{st}</dd>\
+             <dt>Valid</dt><dd>{nbf} to {exp}</dd>\
+             <dt>Refunds</dt><dd>{rc} of {rn} used; {rt} of {rtot} minor units {cur} used; at most {pc} each</dd>\
+             <dt>Messages</dt><dd>{mc} of {mn} sent, only to <code>{ce}</code></dd>\
+             <dt>Mandate id</dt><dd><code>{mid}</code></dd></dl>",
+            w = esc(&m.workload_display_name),
+            cs = esc(&t.customer_sub),
+            st = esc(&m.state),
+            nbf = esc(&fmt_utc(m.nbf)),
+            exp = esc(&fmt_utc(m.exp)),
+            rc = c.refund_count,
+            rn = t.refund_max_count,
+            rt = c.refund_total_minor,
+            rtot = t.refund_max_total_minor,
+            cur = esc(&t.currency),
+            pc = t.refund_max_per_call_minor,
+            mc = c.message_count,
+            mn = t.message_max_count,
+            ce = esc(&t.customer_email),
+            mid = esc(&m.mid),
+        ));
+        if let (Some(tok), "active") = (tok, m.state.as_str()) {
+            b.push_str(&format!(
+                "<form method=\"post\" action=\"/mandates/{mid}/revoke\">\
+                 <input type=\"hidden\" name=\"token\" value=\"{tok}\">\
+                 <button type=\"submit\" class=\"deny\">Revoke</button></form>",
+                mid = esc(&m.mid),
+                tok = esc(tok),
+            ));
+        }
+        b.push_str("</section>");
+    }
+    page("Your mandates", &b, test_login)
+}
+
+/// Result of a revoke POST (§12.6): "revoked" only after the broker's acknowledgement.
+pub fn revoke_page(confirmed: bool, test_login: bool) -> String {
+    let body = if confirmed {
+        "<h1>Mandate revoked</h1><p>The mandate is revoked. Nothing more will happen under it.</p>"
+    } else {
+        "<h1>Revocation not confirmed</h1><p>Revocation not confirmed \u{2014} retrying. \
+         Nodkey keeps retrying in the background; check <a href=\"/mandates\">your mandates</a> again.</p>"
+    };
+    page("Mandate revocation", body, test_login)
 }
 
 pub fn submitted_page(state: Option<&str>, test_login: bool) -> String {

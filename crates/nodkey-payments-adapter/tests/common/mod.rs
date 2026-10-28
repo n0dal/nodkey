@@ -440,6 +440,8 @@ pub struct Opts {
     pub key: &'static str,
     pub kidem: [u8; 32],
     pub idem_key_not_before: u64,
+    /// §16.1 `support` member (absent when `None`).
+    pub support: Option<Value>,
 }
 
 impl Opts {
@@ -458,6 +460,7 @@ impl Opts {
             key: RK,
             kidem: KIDEM,
             idem_key_not_before: 1_704_067_200,
+            support: None,
         }
     }
 }
@@ -480,6 +483,14 @@ pub struct P {
 }
 
 pub fn adapter_config(o: &Opts, sock: &Path) -> Value {
+    let mut v = adapter_config_base(o, sock);
+    if let Some(s) = &o.support {
+        v["support"] = s.clone();
+    }
+    v
+}
+
+fn adapter_config_base(o: &Opts, sock: &Path) -> Value {
     json!({"format": "nodkey.payments-adapter.v1", "socket_path": sock.display().to_string(),
         "broker_uid": o.broker_uid.unwrap_or_else(my_uid), "broker_id": BROKER, "wid": SHOP,
         "tenants": o.tenants, "R_max_s": o.r_max_s, "registry_path": "/etc/nodkey-adapter/keys.json",

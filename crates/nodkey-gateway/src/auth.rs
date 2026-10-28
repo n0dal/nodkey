@@ -112,7 +112,17 @@ pub async fn handle(gw: &Gateway, req: Req) -> Resp {
         (&Method::GET, "/login/app") => login_app(gw, &req),
         (&Method::POST, "/login") if req.query.is_none() => login_submit(gw, &req),
         (&Method::POST, "/logout") if req.query.is_none() => logout(gw, &req),
+        // effect-protocol-v2 Draft 4 §12.6.
+        (&Method::GET, "/pending") if req.query.is_none() => pending(gw, &req).await,
+        (&Method::GET, "/mandates") if req.query.is_none() => mandates(gw, &req).await,
         _ => {
+            if let Some(mid) = path
+                .strip_prefix("/mandates/")
+                .and_then(|r| r.strip_suffix("/revoke"))
+                && req.method == Method::POST
+            {
+                return revoke(gw, &req, mid).await;
+            }
             if let Some(rest) = path.strip_prefix("/confirm/") {
                 if let Some(pid) = rest.strip_suffix("/decision") {
                     if req.method == Method::POST {
@@ -469,6 +479,171 @@ async fn confirm(gw: &Gateway, req: &Req, pid_text: &str) -> Resp {
         gw.cfg.test_login_active,
     );
     harden(http::resp(StatusCode::OK, "text/html; charset=utf-8", body))
+}
+
+fn sign_in_first(gw: &Gateway) -> Resp {
+    html_page(
+        gw,
+        StatusCode::OK,
+        "Sign in",
+        "<h1>Sign in first</h1><p><a href=\"/login\">Sign in</a> to see your requests and mandates.</p>",
+    )
+}
+
+/// `GET /pending` (§12.6): the session subject's `PENDING` records, linking to `/confirm/<id>`.
+async fn pending(gw: &Gateway, req: &Req) -> Resp {
+    if !navigation_or_unknown(req) {
+        return uniform_error();
+    }
+    let Some((_, s)) = session(gw, req) else {
+        return sign_in_first(gw);
+    };
+    let subj = Subject {
+        ten: &s.ten,
+        sub: &s.sub,
+    };
+    let Ok(items) = ipc::pending_list(&gw.broker, subj).await else {
+        return uniform_error();
+    };
+    harden(http::resp(
+        StatusCode::OK,
+        "text/html; charset=utf-8",
+        html::pending_page(&items, gw.cfg.test_login_active),
+    ))
+}
+
+/// `GET /mandates` (§12.6): the subject's mandates; each active one gets a fresh revoke token
+/// bound to the session, its `mid` and the revoke action.
+async fn mandates(gw: &Gateway, req: &Req) -> Resp {
+    if !navigation_or_unknown(req) {
+        return uniform_error();
+    }
+    let Some((sid, s)) = session(gw, req) else {
+        return sign_in_first(gw);
+    };
+    let subj = Subject {
+        ten: &s.ten,
+        sub: &s.sub,
+    };
+    let Ok(items) = ipc::mandate_list(&gw.broker, subj).await else {
+        return uniform_error();
+    };
+    let now = now_secs();
+    let mut out = Vec::with_capacity(items.len());
+    for m in items {
+        let tok = if m.state == "active" {
+            match gw
+                .store()
+                .map(|mut st| st.mint_revoke_token(&sid, &m.mid, m.exp, now))
+            {
+                Some(Ok(t)) => Some(t),
+                _ => return uniform_error(),
+            }
+        } else {
+            None
+        };
+        out.push((m, tok));
+    }
+    harden(http::resp(
+        StatusCode::OK,
+        "text/html; charset=utf-8",
+        html::mandates_page(&out, gw.cfg.test_login_active),
+    ))
+}
+
+/// Background retry interval for an unacknowledged revocation (§12.6: every 5 s).
+pub const REVOKE_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Retries `mandate.revoke` on `peer` every [`REVOKE_RETRY`] until acknowledged, refused, or the
+/// mandate's `exp`. Returns `true` on acknowledgement.
+async fn revoke_until(
+    peer: &ipc::Peer,
+    mid: &str,
+    ten: &str,
+    sub: &str,
+    exp: u64,
+    retry: std::time::Duration,
+) -> bool {
+    loop {
+        match ipc::mandate_revoke(peer, mid, Subject { ten, sub }).await {
+            Ok(()) => return true,
+            Err(ipc::IpcError::Refused(_)) => return false,
+            Err(ipc::IpcError::Transport(_)) => {}
+        }
+        if now_secs() >= exp {
+            return false;
+        }
+        tokio::time::sleep(retry).await;
+    }
+}
+
+/// `POST /mandates/<mid>/revoke` (§12.6): §7.3 steps 1–4 (path, exact form field `token`,
+/// provenance, session, single-use token bound to session, `mid` and action). Then
+/// `mandate.revoke` to the broker (G) **first**: "revoked" only on its `{}`; otherwise "not
+/// confirmed — retrying" and background retries every 5 s until acknowledged or `exp`. Then the
+/// same to the authority (I), retried likewise.
+async fn revoke(gw: &Gateway, req: &Req, mid: &str) -> Resp {
+    if decode_pending_id(mid).is_none() || req.query.is_some() {
+        return uniform_error();
+    }
+    let Some(f) = form_map(req, 1) else {
+        return uniform_error();
+    };
+    let Some(token) = f.get("token") else {
+        return uniform_error();
+    };
+    if !http::provenance_ok(&req.headers, &gw.cfg.auth.serialized, true) {
+        return uniform_error();
+    }
+    let Some((sid, s)) = session(gw, req) else {
+        return uniform_error();
+    };
+    let now = now_secs();
+    let Some(t) = gw.store().and_then(|mut st| st.take_revoke_token(token)) else {
+        return uniform_error();
+    };
+    let bound = ct_eq(t.session_id.as_bytes(), sid.as_bytes())
+        && ct_eq(t.mid.as_bytes(), mid.as_bytes())
+        && now < t.expires;
+    if !bound {
+        return uniform_error();
+    }
+    let subj = Subject {
+        ten: &s.ten,
+        sub: &s.sub,
+    };
+    let broker_ack = match ipc::mandate_revoke(&gw.broker, mid, subj).await {
+        Ok(()) => true,
+        Err(ipc::IpcError::Refused(_)) => return uniform_error(),
+        Err(ipc::IpcError::Transport(e)) => {
+            eprintln!("nodkey-gateway: mandate.revoke at the broker not acknowledged: {e}");
+            false
+        }
+    };
+    let authority_ack = broker_ack && ipc::mandate_revoke(&gw.authority, mid, subj).await.is_ok();
+    if !authority_ack {
+        let (broker, authority) = (gw.broker.clone(), gw.authority.clone());
+        let (mid, ten, sub, exp) = (mid.to_owned(), s.ten.clone(), s.sub.clone(), t.mandate_exp);
+        let retry = gw.revoke_retry;
+        tokio::spawn(async move {
+            if !broker_ack && !revoke_until(&broker, &mid, &ten, &sub, exp, retry).await {
+                eprintln!(
+                    "nodkey-gateway: broker revocation of {mid} not acknowledged before exp"
+                );
+                return;
+            }
+            if !revoke_until(&authority, &mid, &ten, &sub, exp, retry).await {
+                eprintln!(
+                    "nodkey-gateway: authority revocation of {mid} not acknowledged before exp"
+                );
+            }
+        });
+    }
+    harden(http::resp(
+        StatusCode::OK,
+        "text/html; charset=utf-8",
+        html::revoke_page(broker_ack, gw.cfg.test_login_active),
+    ))
 }
 
 /// Minimum time between rendering the approval form and accepting an approval (GW-R-01). The page

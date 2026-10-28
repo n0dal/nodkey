@@ -180,6 +180,7 @@ fn rg(order_id: u64, sub: &str, charge: &str, cur: &str) -> RefundGrant {
         amount_minor: 5,
         currency: cur.into(),
         charge_id: charge.into(),
+        customer_sub: None,
     }
 }
 

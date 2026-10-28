@@ -219,6 +219,17 @@ fn refund_params(p: &Params) -> Result<RefundParams<'_>, Fail> {
     })
 }
 
+/// Who must own the order: the approver for `payments.refund`; the signed, broker-resolved
+/// `customer_sub` (con3) for `payments.support_refund` (payments-adapter-v1 §16.3, §16.4). The
+/// per-customer budget is keyed by the same subject (§16.5).
+pub fn order_owner<'a>(op: &str, p: &'a Params, approver: &'a str) -> Result<&'a str, Fail> {
+    if op == decls::SUPPORT_REFUND {
+        text_param(p, decls::CUSTOMER_SUB)
+    } else {
+        Ok(approver)
+    }
+}
+
 /// The §5 approval checks against an order row (ownership first, then the rest).
 fn approval_reason(
     o: Option<&Order>,
@@ -247,7 +258,8 @@ pub async fn deliver_checks(tx: &Transaction<'_>, rec: &Record) -> Result<bool, 
     }
     counters(tx, rp.charge, true).await?;
     let o = read_order(tx, rp.order_id).await?;
-    Ok(approval_reason(o.as_ref(), &rec.fields.ten, &rec.fields.approver_sub, &rp).is_none())
+    let owner = order_owner(&rec.fields.op, &rec.fields.params, &rec.fields.approver_sub)?;
+    Ok(approval_reason(o.as_ref(), &rec.fields.ten, owner, &rp).is_none())
 }
 
 /// Confirmation-page facts for `payments.refund` (§8; effect-protocol-v2 §5). `None` when the
@@ -263,7 +275,8 @@ pub async fn render_facts(
         return Ok(None);
     }
     let o = read_order(c, rp.order_id).await?;
-    if approval_reason(o.as_ref(), &rec.fields.ten, &rec.fields.approver_sub, &rp).is_some() {
+    let owner = order_owner(&rec.fields.op, &rec.fields.params, &rec.fields.approver_sub)?;
+    if approval_reason(o.as_ref(), &rec.fields.ten, owner, &rp).is_some() {
         return Ok(None);
     }
     let Some(o) = o else { return Ok(None) };
@@ -279,7 +292,7 @@ pub async fn render_facts(
                 .query_opt(
                     "SELECT spent_minor, count FROM nodkey.refund_budget WHERE ten = $1 AND sub = $2 \
                      AND currency = $3 AND day = $4",
-                    &[&rec.fields.ten, &rec.fields.approver_sub, &o.currency, &utc_day(now)],
+                    &[&rec.fields.ten, &owner, &o.currency, &utc_day(now)],
                 )
                 .await
                 .map_err(dbf("budget"))?;
@@ -349,7 +362,10 @@ pub async fn refund_t1(
     now: u64,
 ) -> Result<Result<(), &'static str>, Fail> {
     let rp = refund_params(p)?;
-    let (ten, sub) = (&rec.fields.ten, &rec.fields.approver_sub);
+    let ten = &rec.fields.ten;
+    // Budget and ownership subject (§16.4, §16.5); `payment_effect.sub` keeps the grant's `sub`.
+    let sub = &order_owner(&rec.fields.op, p, &rec.fields.approver_sub)?.to_owned();
+    let grant_sub = &rec.fields.approver_sub;
     // 0. Charge pattern: `unresolved` creates no state row.
     if !is_charge_id(rp.charge) {
         return Ok(Err("not_owner_or_unknown"));
@@ -433,7 +449,7 @@ pub async fn refund_t1(
             &to_i64(rp.order_id),
             &rp.charge,
             ten,
-            sub,
+            grant_sub,
             &amount,
             &rp.currency,
             &idem_kid,

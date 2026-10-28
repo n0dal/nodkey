@@ -15,10 +15,10 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, Semaphore, watch};
 
 use crate::broker_client::{BrokerClient, CallError, DeliverResult};
-use crate::config::{ApproverSource, Workloads};
+use crate::config::{ApproverSource, MANDATE_TEMPLATE, Workloads, is_support_op};
 use crate::digest::{DisplayValue, PendingId, hex, is_id, parse_hex_digest};
 use crate::log;
-use crate::store::{Issuance, Status, Store, StoreError};
+use crate::store::{Extra, Issuance, MandateTerms, MandatedUse, Status, Store, StoreError};
 use crate::wire::{
     Frame, MAX_LINE, PROTOCOL_VERSION, READ_TIMEOUT, exact_members, is_request_id,
     parse_strict_object, read_frame, write_line,
@@ -59,6 +59,47 @@ pub struct Settings {
 
 /// Earliest plausible clock value (2024-01-01). A clock below it is treated as a clock error.
 pub const MIN_SANE_TIME: u64 = 1_704_067_200;
+/// Mandate lifetime bounds (AI §4.1: `valid_for_s` 60 … 3600).
+pub const MANDATE_MIN_S: u64 = 60;
+pub const MANDATE_MAX_S: u64 = 3600;
+/// Mandate loop period (AI §4.4: every 500 ms).
+pub const MANDATE_POLL: Duration = Duration::from_millis(500);
+
+/// Result of one mandated issuance attempt (AI §4.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MandateOutcome {
+    /// Signed and accepted by the broker.
+    Issued,
+    /// Signed; the broker rejected delivery; `mandate.declined{final: true}` sent.
+    Rejected,
+    /// Signed; delivery still in progress at the reply deadline.
+    Pending,
+    /// Not within the authority's mandate: `mandate.declined{final: false}` sent.
+    Declined,
+    /// An issuance row already existed for this jti: nothing changed.
+    Exists,
+    /// `pending.get` failed.
+    Unavailable,
+}
+
+/// C6 key: SHA-256 over the op name, `0x00`, and the params as canonical JSON (sorted keys).
+pub fn params_key(op: &str, params: &BTreeMap<String, ParamValue>) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut m = Map::new();
+    for (k, v) in params {
+        let j = match v {
+            ParamValue::Uint(n) => json!(n),
+            ParamValue::Text(t) => json!(t),
+        };
+        m.insert(k.clone(), j);
+    }
+    let mut h = Sha256::new();
+    h.update(op.as_bytes());
+    h.update([0u8]);
+    h.update(Value::Object(m).to_string().as_bytes());
+    h.finalize().into()
+}
+
 /// Longest pending lifetime the authority accepts (§2.5: 60–900 s).
 pub const MAX_PENDING_LIFETIME: u64 = 900;
 
@@ -252,8 +293,133 @@ impl Authority {
                 return Err(Refusal("pending.get: unavailable"));
             }
         };
+        let (digest, decl) = self.validate_record(&pid, &fetched, cid)?;
         let rec = &fetched.record;
+        if digest != shown {
+            return Err(Refusal("digest_shown differs from record digest"));
+        }
+        if ten != rec.ten || sub != rec.approver_sub {
+            return Err(Refusal("subject is not the intended approver"));
+        }
+        // AI §3, §4.2: agent operations and the template (support principal, ceilings).
+        let extra_terms = self.agent_approval_checks(rec)?;
 
+        // Steps 4–5: exactly once, then sign and store before any delivery.
+        let row = {
+            let mut store = self.store.lock().await;
+            match store.get(&pid) {
+                Some(row) if row.digest == digest && row.ten == ten && row.sub == sub => {
+                    log::event(
+                        "issuance_exists",
+                        json!({"correlation_id": cid, "jti": pid.to_text(), "status": row.status.as_str()}),
+                    );
+                    row.clone()
+                }
+                Some(_) => {
+                    log::alarm(
+                        "issuance_conflict",
+                        json!({"correlation_id": cid, "jti": pid.to_text(), "digest": hex(&digest)}),
+                    );
+                    return Err(Refusal(
+                        "existing issuance with different digest or subject",
+                    ));
+                }
+                None => {
+                    // AI §4.2 step 3 / AI-04: no replacement — refuse while this authority holds
+                    // an active mandate for (wid, ten, sub).
+                    if extra_terms.is_some()
+                        && self
+                            .active_mandate(&store, &rec.wid, &rec.ten, &rec.approver_sub)
+                            .is_some()
+                    {
+                        return Err(Refusal("a mandate is active for (wid, ten, sub)"));
+                    }
+                    let iat = self.signing_now()?;
+                    let exp = iat + self.settings.grant_ttl_secs;
+                    let grant = self.sign_record(rec, decl, pid, iat, None)?;
+                    // The mandate is recorded in the same durable row as its grant.
+                    let extra = extra_terms.map(|(t, valid)| {
+                        Extra::Mandate(MandateTerms {
+                            nbf: iat,
+                            exp: iat + valid,
+                            cfg: self.broker.config_digest(),
+                            ..t
+                        })
+                    });
+                    let row = Issuance {
+                        jti: pid,
+                        digest,
+                        ten: rec.ten.clone(),
+                        sub: rec.approver_sub.clone(),
+                        wid: rec.wid.clone(),
+                        op: rec.op.clone(),
+                        signed_at: iat,
+                        exp,
+                        grant,
+                        status: Status::Signed,
+                    };
+                    match store.insert_with(row.clone(), extra) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            log::alarm(
+                                "issuance_store_failed",
+                                json!({"correlation_id": cid, "jti": pid.to_text(), "detail": format!("{e:?}")}),
+                            );
+                            return Err(Refusal("issuance store write failed"));
+                        }
+                    }
+                    log::event(
+                        "grant_signed",
+                        json!({
+                            "correlation_id": cid, "jti": pid.to_text(), "kind": "write",
+                            "digest": hex(&digest), "wid": row.wid, "ten": row.ten, "sub": row.sub,
+                            "op": row.op, "iat": iat, "exp": exp,
+                        }),
+                    );
+                    row
+                }
+            }
+        };
+
+        // Steps 6–7.
+        match row.status {
+            Status::Accepted => {
+                // The broker shows PENDING although it accepted this grant: a restore or broker
+                // inconsistency (ADR-0006 §9). Safe (nothing is re-signed), but alarm (AU-R-12).
+                log::alarm(
+                    "accepted_issuance_but_broker_pending",
+                    json!({"correlation_id": cid, "jti": pid.to_text()}),
+                );
+                return Ok(ApproveOutcome::Ok);
+            }
+            Status::Rejected | Status::Expired => return Err(Refusal("issuance already final")),
+            Status::Signed => {}
+        }
+        let mut rx = self.deliver_shared(row);
+        let wait = async move {
+            rx.wait_for(Option::is_some)
+                .await
+                .ok()
+                .and_then(|v| (*v).flatten())
+        };
+        match tokio::time::timeout(self.settings.approve_reply_timeout, wait).await {
+            Ok(Some(DeliverResult::Accepted)) => Ok(ApproveOutcome::Ok),
+            Ok(_) => Err(Refusal("delivery not accepted")),
+            // Delivery continues in the background; the gateway shows a neutral page.
+            Err(_) => Err(Refusal("delivery still in progress at reply deadline")),
+        }
+    }
+
+    /// §4.2 step 3 record checks, except `digest_shown` and the subject (shared by `approve` and
+    /// the mandate loop, AI §4.4). Returns the recomputed digest and the declaration.
+    fn validate_record<'s>(
+        &'s self,
+        pid: &PendingId,
+        fetched: &crate::broker_client::Fetched,
+        cid: &str,
+    ) -> Result<([u8; 32], &'s nodkey_grant::OperationDecl), Refusal> {
+        let pid = *pid;
+        let rec = &fetched.record;
         // Step 3: checks.
         if rec.pending_id != pid {
             log::alarm(
@@ -292,12 +458,6 @@ impl Authority {
                 json!({"correlation_id": cid, "jti": pid.to_text()}),
             );
             return Err(Refusal("recomputed digest differs from broker digest"));
-        }
-        if digest != shown {
-            return Err(Refusal("digest_shown differs from record digest"));
-        }
-        if ten != rec.ten || sub != rec.approver_sub {
-            return Err(Refusal("subject is not the intended approver"));
         }
         let wl = self
             .workloads
@@ -364,99 +524,166 @@ impl Authority {
             return Err(Refusal("display facts differ from the authority's own"));
         }
 
-        // Steps 4–5: exactly once, then sign and store before any delivery.
-        let row = {
-            let mut store = self.store.lock().await;
-            match store.get(&pid) {
-                Some(row) if row.digest == digest && row.ten == ten && row.sub == sub => {
-                    log::event(
-                        "issuance_exists",
-                        json!({"correlation_id": cid, "jti": pid.to_text(), "status": row.status.as_str()}),
-                    );
-                    row.clone()
+        // AI §3: the reserved unresolved value " " is never signed.
+        for k in ["customer_sub", "to", "customer_email"] {
+            if let Some(ParamValue::Text(v)) = rec.params.get(k)
+                && (v.contains(' ') || v.is_empty())
+            {
+                log::event(
+                    "agent_param_unresolved",
+                    json!({"correlation_id": cid, "jti": pid.to_text(), "param": k}),
+                );
+                return Err(Refusal("unresolved agent-operation parameter"));
+            }
+        }
+        Ok((digest, decl))
+    }
+
+    /// Signs a write grant from the fetched record only (§4.2 step 5): `cfm = 1`, or `cfm = 2`
+    /// with `mid` for a mandated issuance (grant-v1 Draft 4).
+    fn sign_record(
+        &self,
+        rec: &crate::digest::PendingRecord,
+        decl: &nodkey_grant::OperationDecl,
+        pid: PendingId,
+        iat: u64,
+        mid: Option<PendingId>,
+    ) -> Result<Vec<u8>, Refusal> {
+        let exp = iat + self.settings.grant_ttl_secs;
+        let mut b = GrantBuilder::write(&rec.op, rec.opv)
+            .issuer(&self.settings.issuer)
+            .audience(&self.settings.broker_id)
+            .jti(pid.0)
+            .times(iat, iat, exp)
+            .workload(&rec.wid)
+            .tenant(&rec.ten)
+            .subject(&rec.approver_sub);
+        b = match mid {
+            Some(m) => b.mandated(m.0),
+            None => b.confirmed(true),
+        };
+        for p in &decl.params {
+            let v = rec.params[&p.name].clone();
+            b = match p.binding {
+                Binding::Resource(k) => b.resource(k, v),
+                Binding::Exact(k) => b.exact(k, v),
+                Binding::Free => b,
+                Binding::Bounded(_) | Binding::OwnerScoped => {
+                    return Err(Refusal("declaration not exact-bindable"));
                 }
-                Some(_) => {
-                    log::alarm(
-                        "issuance_conflict",
-                        json!({"correlation_id": cid, "jti": pid.to_text(), "digest": hex(&digest)}),
-                    );
-                    return Err(Refusal(
-                        "existing issuance with different digest or subject",
-                    ));
-                }
-                None => {
-                    let iat = self.signing_now()?;
-                    let exp = iat + self.settings.grant_ttl_secs;
-                    let mut b = GrantBuilder::write(&rec.op, rec.opv)
-                        .issuer(&self.settings.issuer)
-                        .audience(&self.settings.broker_id)
-                        .jti(pid.0)
-                        .times(iat, iat, exp)
-                        .workload(&rec.wid)
-                        .tenant(&rec.ten)
-                        .subject(&rec.approver_sub)
-                        .confirmed(true);
-                    for p in &decl.params {
-                        let v = rec.params[&p.name].clone();
-                        b = match p.binding {
-                            Binding::Resource(k) => b.resource(k, v),
-                            Binding::Exact(k) => b.exact(k, v),
-                            Binding::Free => b,
-                            Binding::Bounded(_) | Binding::OwnerScoped => {
-                                return Err(Refusal("declaration not exact-bindable"));
-                            }
-                        };
-                    }
-                    let grant = b.sign(&self.key).map_err(|e| Refusal(e.0))?;
-                    let row = Issuance {
-                        jti: pid,
-                        digest,
-                        ten: rec.ten.clone(),
-                        sub: rec.approver_sub.clone(),
-                        wid: rec.wid.clone(),
-                        op: rec.op.clone(),
-                        signed_at: iat,
-                        exp,
-                        grant,
-                        status: Status::Signed,
-                    };
-                    match store.insert(row.clone()) {
-                        Ok(()) => {}
-                        Err(e) => {
-                            log::alarm(
-                                "issuance_store_failed",
-                                json!({"correlation_id": cid, "jti": pid.to_text(), "detail": format!("{e:?}")}),
-                            );
-                            return Err(Refusal("issuance store write failed"));
-                        }
-                    }
-                    log::event(
-                        "grant_signed",
-                        json!({
-                            "correlation_id": cid, "jti": pid.to_text(), "kind": "write",
-                            "digest": hex(&digest), "wid": row.wid, "ten": row.ten, "sub": row.sub,
-                            "op": row.op, "iat": iat, "exp": exp,
-                        }),
-                    );
-                    row
-                }
+            };
+        }
+        b.sign(&self.key).map_err(|e| Refusal(e.0))
+    }
+
+    /// Approval checks of the agent operations (AI §3) on the authority's own configuration:
+    /// the approver is a support principal; for the template, the terms are within the
+    /// ceilings. Returns the template terms (without window and `cfg`) and `valid_for_s`.
+    fn agent_approval_checks(
+        &self,
+        rec: &crate::digest::PendingRecord,
+    ) -> Result<Option<(MandateTerms, u64)>, Refusal> {
+        if !is_support_op(&rec.op) {
+            return Ok(None);
+        }
+        let m = self
+            .workloads
+            .mandates
+            .as_ref()
+            .ok_or(Refusal("agent operation without mandate configuration"))?;
+        if !m.is_support_principal(&rec.ten, &rec.approver_sub) {
+            return Err(Refusal("approver is not a support principal"));
+        }
+        if rec.op != MANDATE_TEMPLATE {
+            return Ok(None);
+        }
+        let t = m.template.as_ref().ok_or(Refusal("no mandate template"))?;
+        let u = |k: &str| match rec.params.get(k) {
+            Some(ParamValue::Uint(n)) => Ok(*n),
+            _ => Err(Refusal("template parameter")),
+        };
+        let x = |k: &str| match rec.params.get(k) {
+            Some(ParamValue::Text(v)) => Ok(v.clone()),
+            _ => Err(Refusal("template parameter")),
+        };
+        let terms = MandateTerms {
+            customer_sub: x("customer_sub")?,
+            customer_email: x("customer_email")?,
+            currency: x("currency")?,
+            refund_max_count: u("refund_max_count")?,
+            refund_max_per_call_minor: u("refund_max_per_call_minor")?,
+            refund_max_total_minor: u("refund_max_total_minor")?,
+            message_max_count: u("message_max_count")?,
+            nbf: 0,
+            exp: 0,
+            cfg: [0; 32],
+        };
+        let valid = u("valid_for_s")?;
+        let ok = is_id(&terms.customer_sub, 64)
+            && is_id(&terms.customer_email, 256)
+            && terms.refund_max_count <= t.max_refund_count
+            && terms.message_max_count <= t.max_message_count
+            && terms.refund_max_per_call_minor <= terms.refund_max_total_minor
+            && t.max_refund_total_minor
+                .get(&terms.currency)
+                .is_some_and(|c| terms.refund_max_total_minor <= *c)
+            && (MANDATE_MIN_S..=MANDATE_MAX_S).contains(&valid);
+        if !ok {
+            return Err(Refusal("mandate terms outside the template ceilings"));
+        }
+        Ok(Some((terms, valid)))
+    }
+
+    /// The authority's own active mandate for `(wid, ten, sub)` (AI §4.4 step 2): not revoked, its
+    /// grant not finally rejected or expired at the broker, `nbf ≤ now < exp`, `cfg` current.
+    fn active_mandate(
+        &self,
+        store: &Store,
+        wid: &str,
+        ten: &str,
+        sub: &str,
+    ) -> Option<(PendingId, MandateTerms)> {
+        let now = (self.clock)();
+        let cfg = self.broker.config_digest();
+        store
+            .mandates()
+            .find(|(r, m)| {
+                r.wid == wid
+                    && r.ten == ten
+                    && r.sub == sub
+                    && !store.is_revoked(&r.jti)
+                    && !matches!(r.status, Status::Rejected | Status::Expired)
+                    && m.nbf <= now
+                    && now < m.exp
+                    && m.cfg == cfg
+            })
+            .map(|(r, m)| (r.jti, m.clone()))
+    }
+
+    /// Mandated issuance for one candidate (AI §4.4). Checks the record like `approve` (except
+    /// approval), then under the store lock: an existing row stops (AI-07); C1–C4 and C6 against
+    /// the authority's own mandate; C5 against its own counters for refunds; then sign
+    /// `cfm = 2` + `mid` and append the row (which carries the counter increment) before
+    /// delivery. A refusal sends `mandate.declined{final: false}`; a delivery `rejected` sends
+    /// `mandate.declined{final: true}`.
+    pub async fn mandate_issue(self: &Arc<Self>, pid: PendingId) -> MandateOutcome {
+        let cid = self.cid();
+        let fetched = match self.broker.pending_get(&pid).await {
+            Ok(f) => f,
+            Err(_) => return MandateOutcome::Unavailable,
+        };
+        let row = match self.mandate_sign(&pid, &fetched, &cid).await {
+            Ok(Some(row)) => row,
+            Ok(None) => return MandateOutcome::Exists,
+            Err(Refusal(reason)) => {
+                log::event(
+                    "mandate_declined",
+                    json!({"correlation_id": cid, "jti": pid.to_text(), "reason": reason}),
+                );
+                let _ = self.broker.mandate_declined(&pid, false).await;
+                return MandateOutcome::Declined;
             }
         };
-
-        // Steps 6–7.
-        match row.status {
-            Status::Accepted => {
-                // The broker shows PENDING although it accepted this grant: a restore or broker
-                // inconsistency (ADR-0006 §9). Safe (nothing is re-signed), but alarm (AU-R-12).
-                log::alarm(
-                    "accepted_issuance_but_broker_pending",
-                    json!({"correlation_id": cid, "jti": pid.to_text()}),
-                );
-                return Ok(ApproveOutcome::Ok);
-            }
-            Status::Rejected | Status::Expired => return Err(Refusal("issuance already final")),
-            Status::Signed => {}
-        }
         let mut rx = self.deliver_shared(row);
         let wait = async move {
             rx.wait_for(Option::is_some)
@@ -465,10 +692,174 @@ impl Authority {
                 .and_then(|v| (*v).flatten())
         };
         match tokio::time::timeout(self.settings.approve_reply_timeout, wait).await {
-            Ok(Some(DeliverResult::Accepted)) => Ok(ApproveOutcome::Ok),
-            Ok(_) => Err(Refusal("delivery not accepted")),
-            // Delivery continues in the background; the gateway shows a neutral page.
-            Err(_) => Err(Refusal("delivery still in progress at reply deadline")),
+            Ok(Some(DeliverResult::Accepted)) => MandateOutcome::Issued,
+            Ok(Some(DeliverResult::Rejected)) => {
+                // effect-protocol-v2 §12.3 / AI §4.5: the jti is final; the record ends DENIED.
+                let _ = self.broker.mandate_declined(&pid, true).await;
+                MandateOutcome::Rejected
+            }
+            _ => MandateOutcome::Pending,
+        }
+    }
+
+    async fn mandate_sign(
+        &self,
+        pid: &PendingId,
+        fetched: &crate::broker_client::Fetched,
+        cid: &str,
+    ) -> Result<Option<Issuance>, Refusal> {
+        let (digest, decl) = self.validate_record(pid, fetched, cid)?;
+        let rec = &fetched.record;
+        let m = self
+            .workloads
+            .mandates
+            .as_ref()
+            .ok_or(Refusal("mandates not configured"))?;
+        let t = m.template.as_ref().ok_or(Refusal("no mandate template"))?;
+        let mut store = self.store.lock().await;
+        // 1. AI-07: an issuance row for this jti (e.g. a human approval) ends here.
+        if store.get(pid).is_some() {
+            return Ok(None);
+        }
+        // 2. C1: enrolled (checked by validate_record) and a support principal.
+        if !m.is_support_principal(&rec.ten, &rec.approver_sub) {
+            return Err(Refusal("C1: not a support principal"));
+        }
+        let text = |k: &str| match rec.params.get(k) {
+            Some(ParamValue::Text(v)) => Ok(v.as_str()),
+            _ => Err(Refusal("parameter")),
+        };
+        // C2: the authority's own active mandate.
+        let (mid, terms) = self
+            .active_mandate(&store, &rec.wid, &rec.ten, &rec.approver_sub)
+            .ok_or(Refusal("C2: no active mandate"))?;
+        // C3, C4.
+        let refund = if rec.op == t.refund_op {
+            if text("customer_sub")? != terms.customer_sub {
+                return Err(Refusal("C4: customer"));
+            }
+            match rec.params.get("amount_minor") {
+                Some(ParamValue::Uint(a)) => Some(*a),
+                _ => return Err(Refusal("amount_minor")),
+            }
+        } else if rec.op == t.message_op {
+            if text("customer_sub")? != terms.customer_sub || text("to")? != terms.customer_email {
+                return Err(Refusal("C4: customer or recipient"));
+            }
+            None
+        } else {
+            return Err(Refusal("C3: operation not covered"));
+        };
+        // C6.
+        let pkey = params_key(&rec.op, &rec.params);
+        if store.used(&mid, &pkey) {
+            return Err(Refusal(
+                "C6: identical effect already signed under this mandate",
+            ));
+        }
+        // 3. C5 for refunds against the authority's own counters (never released).
+        if let Some(a) = refund {
+            let (n, total) = store.refund_counters(&mid);
+            let ok = text("currency")? == terms.currency
+                && a <= terms.refund_max_per_call_minor
+                && n < terms.refund_max_count
+                && total
+                    .checked_add(a)
+                    .is_some_and(|x| x <= terms.refund_max_total_minor);
+            if !ok {
+                return Err(Refusal(
+                    "C5: refund outside the mandate's terms or counters",
+                ));
+            }
+        }
+        // 4. Sign cfm = 2 + mid; one durable row with the counter increment, before delivery.
+        let iat = self.signing_now()?;
+        let grant = self.sign_record(rec, decl, *pid, iat, Some(mid))?;
+        let row = Issuance {
+            jti: *pid,
+            digest,
+            ten: rec.ten.clone(),
+            sub: rec.approver_sub.clone(),
+            wid: rec.wid.clone(),
+            op: rec.op.clone(),
+            signed_at: iat,
+            exp: iat + self.settings.grant_ttl_secs,
+            grant,
+            status: Status::Signed,
+        };
+        let extra = Extra::Mandated(MandatedUse {
+            mid,
+            refund_minor: refund,
+            pkey,
+        });
+        if let Err(e) = store.insert_with(row.clone(), Some(extra)) {
+            log::alarm(
+                "issuance_store_failed",
+                json!({"correlation_id": cid, "jti": pid.to_text(), "detail": format!("{e:?}")}),
+            );
+            return Err(Refusal("issuance store write failed"));
+        }
+        log::event(
+            "grant_signed",
+            json!({"correlation_id": cid, "jti": pid.to_text(), "kind": "write", "cfm": 2,
+                   "mid": mid.to_text(), "wid": row.wid, "ten": row.ten, "sub": row.sub,
+                   "op": row.op, "iat": iat, "exp": row.exp}),
+        );
+        Ok(Some(row))
+    }
+
+    /// `mandate.revoke{mid, subject}` on socket I (effect-protocol-v2 §12.3): `{}` once the
+    /// authority's mandate is revoked (idempotent); it then signs no further `cfm = 2` grant.
+    pub async fn mandate_revoke(&self, args: &Map<String, Value>) -> Result<(), Refusal> {
+        exact_members(args, &["mid", "subject"], &[]).map_err(Refusal)?;
+        let mid = args["mid"]
+            .as_str()
+            .ok_or(Refusal("mid type"))
+            .and_then(|s| PendingId::parse(s).map_err(|e| Refusal(e.0)))?;
+        let (ten, sub) = parse_subject(&args["subject"])?;
+        let mut store = self.store.lock().await;
+        let owner_ok = store
+            .mandates()
+            .any(|(r, _)| r.jti == mid && r.ten == ten && r.sub == sub);
+        if !owner_ok {
+            return Err(Refusal("unknown mid or other subject"));
+        }
+        store.revoke_mandate(&mid).map_err(|e| {
+            log::alarm(
+                "mandate_revoke_store_failed",
+                json!({"mid": mid.to_text(), "detail": format!("{e:?}")}),
+            );
+            Refusal("store write failed")
+        })?;
+        log::event("mandate_revoked", json!({"mid": mid.to_text()}));
+        Ok(())
+    }
+
+    /// The mandate loop (AI §4.4): `mandate.candidates` every `MANDATE_POLL`, then one issuance
+    /// attempt per candidate. Runs only when a mandate template is configured.
+    pub async fn mandate_loop(self: Arc<Self>) {
+        if self
+            .workloads
+            .mandates
+            .as_ref()
+            .and_then(|m| m.template.as_ref())
+            .is_none()
+        {
+            return;
+        }
+        loop {
+            match self.broker.mandate_candidates().await {
+                Ok(ids) => {
+                    for pid in ids {
+                        let _ = self.mandate_issue(pid).await;
+                    }
+                }
+                Err(e) => log::event(
+                    "mandate_candidates_failed",
+                    json!({"detail": format!("{e:?}")}),
+                ),
+            }
+            tokio::time::sleep(MANDATE_POLL).await;
         }
     }
 
@@ -573,6 +964,11 @@ impl Authority {
                 })
             })
             .collect()
+    }
+
+    /// Test and operator helper: the mandate extra of `jti`'s row.
+    pub async fn store_extra(&self, jti: &PendingId) -> Option<Extra> {
+        self.store.lock().await.extra(jti).cloned()
     }
 
     /// Test and operator helper: the stored row for `jti`.
@@ -688,6 +1084,18 @@ impl Authority {
                 Err(Refusal(reason)) => {
                     log::event(
                         "read_grant_refused",
+                        json!({"correlation_id": cid, "reason": reason}),
+                    );
+                    err(id, "not_available")
+                }
+            },
+            Some("mandate.revoke") => match self.mandate_revoke(args).await {
+                Ok(()) => {
+                    json!({"v": PROTOCOL_VERSION, "id": id, "correlation_id": cid, "ok": true, "result": {}})
+                }
+                Err(Refusal(reason)) => {
+                    log::event(
+                        "mandate_revoke_refused",
                         json!({"correlation_id": cid, "reason": reason}),
                     );
                     err(id, "not_available")

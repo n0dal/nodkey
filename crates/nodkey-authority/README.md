@@ -157,6 +157,29 @@ or other; its parent directory must satisfy the same owner and write rules (AU-R
 | AU-6 | §4.2 step 7 | How long the gateway waits for a delivery result is unspecified (up to 30 s). | Bounded by `approve_reply_timeout_ms`; delivery continues in the background. |
 | AU-7 | grant-v1 §7.6 / §9 | No clock rule is required of the authority. *Corrected (AU-R-04):* a rollback is fail-safe for `revoked_before` (earlier `iat` revokes more; write grants just expire). The unsafe direction is a **forward** jump: read grants with a future `iat` escape a later `revoked_before` (REV-09). | Implemented: clock errors (value below 2024-01-01) refuse to sign; signing refuses while `now + skew` is below the high-water mark (latest stored write `iat`, plus any `iat` since start). Forward-jump detection needs the broker's time on socket A: not implemented (protocol change outside this crate). |
 
+## Mandates (agent-interface-v1 Draft 2 §4.2 step 3, §4.4, §4.7)
+
+- The workloads file may carry `support_principals` and `mandate_template` (broker README, MD-1/MD-2);
+  loader refusals of AI §3 apply.
+- `approve` of `mandate.support_ticket`: approver ∈ support principals; terms within the ceilings;
+  refused while the store holds an active mandate for `(wid, ten, sub)`; the issuance row carries the
+  terms, `nbf = iat`, `exp = iat + valid_for_s` and `cfg` (same fsync'd line). Any agent operation:
+  approver ∈ support principals; `customer_sub`, `to`, `customer_email` must not contain a space.
+- `mandate_loop` (every 500 ms): `mandate.candidates`, then per id `mandate_issue`: record checks as in
+  `approve`; under the store lock an existing row stops (AI-07); C1–C4, C6 against the authority's own
+  mandate; C5 against its own refund counters; sign `cfm = 2` + `mid`; the row records `mid`, the refund
+  amount and a params key, so counters are durable with the grant and never release. Refusal →
+  `mandate.declined{final:false}`; delivery `rejected` → `mandate.declined{final:true}`. No message
+  counter (R-A9).
+- Socket I `mandate.revoke{mid, subject}`: `mandate_revoke` log record; idempotent; `not_available` for
+  an unknown `mid` or another subject.
+
+Gaps: MD-7 — a template grant finally rejected or expired at the broker is not an active mandate here;
+but if the broker accepted it and activation then failed (`FAILED/denied`), the authority's record stays
+active until `exp` (no message reports it), blocking a new template approval for that key and producing
+`cfm = 2` grants the broker rejects; `/mandates` cannot revoke it (the broker does not list it).
+MD-8 — `revoked_before` is broker-only; the authority's C2 checks state, window and `cfg` only.
+
 ## Display facts (AU-R-01)
 
 The gateway formats amounts only with key 11, so the authority does not take key 11 on the broker's

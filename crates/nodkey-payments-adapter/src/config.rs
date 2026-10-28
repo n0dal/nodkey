@@ -38,6 +38,60 @@ struct RawConfig {
     db: RawDb,
     provider: RawProvider,
     limits: RawLimits,
+    /// payments-adapter-v1 Draft 4 §16.1 (`payments.support_refund`); absent = every
+    /// `payments.support_refund` grant is refused.
+    #[serde(default)]
+    support: Option<RawSupport>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSupport {
+    wids: Vec<String>,
+    support_principals: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// §16.1: the workloads allowed to present `payments.support_refund` grants and the support
+/// principals per tenant (must equal the broker's and authority's copy; not checkable here).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Support {
+    pub wids: Vec<String>,
+    pub principals: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+}
+
+impl Support {
+    pub fn is_principal(&self, ten: &str, sub: &str) -> bool {
+        self.principals.get(ten).is_some_and(|s| s.contains(sub))
+    }
+}
+
+fn parse_support(r: Option<RawSupport>, tenants: &[String]) -> Result<Option<Support>, String> {
+    let Some(r) = r else { return Ok(None) };
+    let wids: std::collections::BTreeSet<&String> = r.wids.iter().collect();
+    if r.wids.is_empty() || wids.len() != r.wids.len() || r.wids.iter().any(|w| !is_id(w, 256)) {
+        return Err("config: support.wids must be a non-empty set of IDs".into());
+    }
+    if r.support_principals.is_empty() {
+        return Err("config: support.support_principals is empty".into());
+    }
+    let mut principals = std::collections::BTreeMap::new();
+    for (ten, subs) in r.support_principals {
+        let set: std::collections::BTreeSet<String> = subs.iter().cloned().collect();
+        if !tenants.contains(&ten)
+            || set.is_empty()
+            || set.len() != subs.len()
+            || set.iter().any(|s| !is_id(s, 256))
+        {
+            return Err(
+                "config: support.support_principals: unknown tenant or invalid list".into(),
+            );
+        }
+        principals.insert(ten, set);
+    }
+    Ok(Some(Support {
+        wids: r.wids,
+        principals,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +153,8 @@ pub struct Config {
     pub broker_id: String,
     pub wid: String,
     pub tenants: Vec<String>,
+    /// §16.1.
+    pub support: Option<Support>,
     pub r_max_s: u64,
     pub registry_path: PathBuf,
     pub db_socket_dir: PathBuf,
@@ -143,8 +199,8 @@ fn abs(p: &str, what: &str) -> Result<PathBuf, String> {
     Ok(pb)
 }
 
-/// IDs: 1..=128 bytes of visible ASCII (no space or control characters).
-fn is_id(s: &str, max: usize) -> bool {
+/// IDs: 1..=`max` bytes of visible ASCII (no space or control characters; grant-v1 §5.1).
+pub fn is_id(s: &str, max: usize) -> bool {
     (1..=max).contains(&s.len()) && s.bytes().all(|b| (0x21..=0x7e).contains(&b))
 }
 
@@ -254,6 +310,7 @@ pub fn parse_config(bytes: &[u8]) -> Result<Config, String> {
         socket_path: abs(&r.socket_path, "socket_path")?,
         broker_uid: r.broker_uid,
         broker_id: r.broker_id,
+        support: parse_support(r.support, &r.tenants)?,
         wid: r.wid,
         tenants: r.tenants,
         r_max_s: r.r_max_s,

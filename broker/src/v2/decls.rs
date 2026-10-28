@@ -12,6 +12,18 @@ pub const LEDGER_TRANSFER: &str = "ledger.transfer";
 pub const LEDGER_GET_BALANCE: &str = "ledger.get_balance";
 pub const PAYMENTS_REFUND: &str = "payments.refund";
 pub const PAYMENTS_GET_ORDER: &str = "payments.get_order";
+/// agent-interface-v1 §3 (Demo A).
+pub const SUPPORT_REFUND: &str = "payments.support_refund";
+pub const SUPPORT_GET_ORDER: &str = "payments.support_get_order";
+pub const MESSAGES_SEND: &str = "messages.send";
+pub const MANDATE_TEMPLATE: &str = "mandate.support_ticket";
+/// Resolved parameter names of the agent operations (AI §3, §4.1).
+pub const CUSTOMER_SUB: &str = "customer_sub";
+pub const CUSTOMER_EMAIL: &str = "customer_email";
+pub const TO: &str = "to";
+/// Reserved value of an unresolved agent-operation parameter (AI §3): one space. It fails the ID
+/// grammar, so it matches no trusted row, and the authority refuses to sign it.
+pub const UNRESOLVED_SPACE: &str = " ";
 
 /// The parameter of `payments.refund` that the broker resolves from `nodkey.orders` at
 /// propose (effect-protocol-v2 Draft 3.1 §2.3); never supplied by the workload.
@@ -27,6 +39,14 @@ pub enum Executor {
     /// `payments.refund` with the Draft 3.1 declaration (`charge_id` con2), payments-adapter-v1.
     PaymentsRefund,
     PaymentsGetOrder,
+    /// `payments.support_refund` (AI §3, payments-adapter-v1 §16): ownership on con3.
+    SupportRefund,
+    /// `payments.support_get_order`: grantless read under a mandate (AI §4.6).
+    SupportGetOrder,
+    /// `messages.send`: internal effect, one `outbox` row (AI §3).
+    MessageSend,
+    /// `mandate.support_ticket`: internal effect, activates a mandate (AI §4.2 step 4).
+    MandateTemplate,
     /// The legacy Phase 3 `payments.refund` declaration (no `charge_id`): loadable, so existing
     /// operation files still start, but always denied (`operation_not_permitted`, audit detail
     /// `not_implemented_legacy_declaration`).
@@ -42,17 +62,32 @@ pub fn executor_of(ops: &Operations, op: &str) -> Option<Executor> {
         PAYMENTS_GET_ORDER => Some(Executor::PaymentsGetOrder),
         PAYMENTS_REFUND if Some(d) == refund_v31().as_ref() => Some(Executor::PaymentsRefund),
         PAYMENTS_REFUND => Some(Executor::NotImplemented),
+        SUPPORT_REFUND => Some(Executor::SupportRefund),
+        SUPPORT_GET_ORDER => Some(Executor::SupportGetOrder),
+        MESSAGES_SEND => Some(Executor::MessageSend),
+        MANDATE_TEMPLATE => Some(Executor::MandateTemplate),
         _ => None,
     }
 }
 
 /// Parameters the broker sets itself (absent from the workload's `params`).
 pub fn resolved_by_broker(op: &str) -> &'static [&'static str] {
-    if op == PAYMENTS_REFUND {
-        &[CHARGE_ID]
-    } else {
-        &[]
+    match op {
+        PAYMENTS_REFUND => &[CHARGE_ID],
+        SUPPORT_REFUND => &[CHARGE_ID, CUSTOMER_SUB],
+        MESSAGES_SEND => &[TO],
+        MANDATE_TEMPLATE => &[CUSTOMER_EMAIL],
+        _ => &[],
     }
+}
+
+/// True for the agent operations that only `enrolled` workloads whose principal is a support
+/// principal may use (AI §3 loader refusals).
+pub fn is_support_op(op: &str) -> bool {
+    matches!(
+        op,
+        SUPPORT_REFUND | SUPPORT_GET_ORDER | MESSAGES_SEND | MANDATE_TEMPLATE
+    )
 }
 
 fn refund_v31() -> Option<OperationDecl> {
@@ -112,10 +147,44 @@ pub fn expected(op: &str) -> Option<OperationDecl> {
             false,
             vec![p("account", OwnerScoped, AccountId, false)],
         ),
-        PAYMENTS_GET_ORDER => (
+        PAYMENTS_GET_ORDER | SUPPORT_GET_ORDER => (
             OpKind::Read,
             false,
             vec![p("order_id", OwnerScoped, Uint, false)],
+        ),
+        SUPPORT_REFUND => (
+            OpKind::Write,
+            true,
+            vec![
+                p("order_id", Resource(0), Uint, false),
+                p("amount_minor", Exact(0), Uint, false),
+                p("currency", Exact(1), Currency, false),
+                p(CHARGE_ID, Exact(2), Text64, false),
+                p(CUSTOMER_SUB, Exact(3), Text64, false),
+            ],
+        ),
+        MESSAGES_SEND => (
+            OpKind::Write,
+            true,
+            vec![
+                p(CUSTOMER_SUB, Resource(0), Text64, false),
+                p(TO, Exact(0), Text256, true),
+                p("body", Free, Text256, false),
+            ],
+        ),
+        MANDATE_TEMPLATE => (
+            OpKind::Write,
+            true,
+            vec![
+                p(CUSTOMER_SUB, Resource(0), Text64, false),
+                p("currency", Exact(0), Currency, false),
+                p("refund_max_count", Exact(1), Uint, false),
+                p("refund_max_per_call_minor", Exact(2), Uint, false),
+                p("refund_max_total_minor", Exact(3), Uint, false),
+                p("message_max_count", Exact(4), Uint, false),
+                p("valid_for_s", Exact(5), Uint, false),
+                p(CUSTOMER_EMAIL, Exact(6), Text256, false),
+            ],
         ),
         _ => return None,
     };
@@ -124,7 +193,8 @@ pub fn expected(op: &str) -> Option<OperationDecl> {
         kind,
         opv: 1,
         requires_confirmation: rc,
-        mandate_eligible: false,
+        // AI §3: the two agent writes are mandate-eligible; the template never is (AI-08).
+        mandate_eligible: matches!(op, SUPPORT_REFUND | MESSAGES_SEND),
         params,
     })
 }
@@ -143,7 +213,10 @@ pub fn load(json: &str) -> Result<(Operations, Vec<String>), String> {
                 "operation {name} is not implemented by this broker"
             ));
         }
-        if !want.iter().any(|w| ops.get(&name) == Some(w)) {
+        if !want
+            .iter()
+            .any(|w| ops.get(&name).is_some_and(|d| same_decl(d, w)))
+        {
             return Err(format!(
                 "operation {name} differs from the declaration this broker implements"
             ));
@@ -154,6 +227,18 @@ pub fn load(json: &str) -> Result<(Operations, Vec<String>), String> {
         return Err("no operations declared".into());
     }
     Ok((ops, names))
+}
+
+/// Declaration equality, except that a `free` parameter's justification text is the operator's
+/// (the grant crate requires it to be present and non-empty).
+fn same_decl(loaded: &OperationDecl, want: &OperationDecl) -> bool {
+    let mut l = loaded.clone();
+    for p in &mut l.params {
+        if p.binding == Binding::Free {
+            p.justification = None;
+        }
+    }
+    &l == want
 }
 
 /// Every declaration accepted for `op`.
@@ -235,6 +320,84 @@ pub mod tests {
             assert!(load(&bad).is_err(), "{to}");
         }
         assert!(load(r#"{"format":"nodkey.operations.v1","operations":[]}"#).is_err());
+    }
+
+    /// The agent operations of agent-interface-v1 §3 (Demo A), appended to the Draft 3.1 set.
+    pub fn ops_agent() -> String {
+        ops_v31().replace(
+            r#"{"op":"ledger.get_balance","#,
+            r#"{"op":"payments.support_refund","kind":"write","opv":1,"requires_confirmation":true,"mandate_eligible":true,"params":[
+  {"name":"order_id","in":"res","key":0,"class":"exact","type":"uint","destination":false},
+  {"name":"amount_minor","in":"con","key":0,"class":"exact","type":"uint","destination":false},
+  {"name":"currency","in":"con","key":1,"class":"exact","type":"currency","destination":false},
+  {"name":"charge_id","in":"con","key":2,"class":"exact","type":"text64","destination":false},
+  {"name":"customer_sub","in":"con","key":3,"class":"exact","type":"text64","destination":false}]},
+ {"op":"payments.support_get_order","kind":"read","opv":1,"requires_confirmation":false,"params":[
+  {"name":"order_id","in":"request","key":null,"class":"owner_scoped","type":"uint","destination":false}]},
+ {"op":"messages.send","kind":"write","opv":1,"requires_confirmation":true,"mandate_eligible":true,"params":[
+  {"name":"customer_sub","in":"res","key":0,"class":"exact","type":"text64","destination":false},
+  {"name":"to","in":"con","key":0,"class":"exact","type":"text256","destination":true},
+  {"name":"body","in":"con","key":null,"class":"free","type":"text256","destination":false,"justification":"message content (R-A2)"}]},
+ {"op":"mandate.support_ticket","kind":"write","opv":1,"requires_confirmation":true,"params":[
+  {"name":"customer_sub","in":"res","key":0,"class":"exact","type":"text64","destination":false},
+  {"name":"currency","in":"con","key":0,"class":"exact","type":"currency","destination":false},
+  {"name":"refund_max_count","in":"con","key":1,"class":"exact","type":"uint","destination":false},
+  {"name":"refund_max_per_call_minor","in":"con","key":2,"class":"exact","type":"uint","destination":false},
+  {"name":"refund_max_total_minor","in":"con","key":3,"class":"exact","type":"uint","destination":false},
+  {"name":"message_max_count","in":"con","key":4,"class":"exact","type":"uint","destination":false},
+  {"name":"valid_for_s","in":"con","key":5,"class":"exact","type":"uint","destination":false},
+  {"name":"customer_email","in":"con","key":6,"class":"exact","type":"text256","destination":false}]},
+ {"op":"ledger.get_balance","#,
+        )
+    }
+
+    /// AI §3: the agent declarations load; eligibility and resolution are as specified, and a
+    /// template declared `mandate_eligible` (AI-08) or a covered op without it is refused.
+    #[test]
+    fn agent_declarations() {
+        let text = ops_agent();
+        let (ops, names) = load(&text).unwrap();
+        assert_eq!(names.len(), 8);
+        assert!(ops.get(SUPPORT_REFUND).unwrap().mandate_eligible);
+        assert!(ops.get(MESSAGES_SEND).unwrap().mandate_eligible);
+        assert!(!ops.get(MANDATE_TEMPLATE).unwrap().mandate_eligible);
+        assert!(has_destination(ops.get(MESSAGES_SEND).unwrap()));
+        assert_eq!(
+            executor_of(&ops, SUPPORT_REFUND),
+            Some(Executor::SupportRefund)
+        );
+        assert_eq!(
+            executor_of(&ops, MANDATE_TEMPLATE),
+            Some(Executor::MandateTemplate)
+        );
+        assert_eq!(
+            resolved_by_broker(SUPPORT_REFUND),
+            &[CHARGE_ID, CUSTOMER_SUB]
+        );
+        assert_eq!(resolved_by_broker(MESSAGES_SEND), &[TO]);
+        assert_eq!(resolved_by_broker(MANDATE_TEMPLATE), &[CUSTOMER_EMAIL]);
+        for (from, to) in [
+            (
+                r#""op":"mandate.support_ticket","kind":"write","opv":1,"requires_confirmation":true,"#,
+                r#""op":"mandate.support_ticket","kind":"write","opv":1,"requires_confirmation":true,"mandate_eligible":true,"#,
+            ),
+            (
+                r#""op":"messages.send","kind":"write","opv":1,"requires_confirmation":true,"mandate_eligible":true,"#,
+                r#""op":"messages.send","kind":"write","opv":1,"requires_confirmation":true,"#,
+            ),
+            (
+                r#""name":"to","in":"con","key":0,"class":"exact","type":"text256","destination":true"#,
+                r#""name":"to","in":"con","key":0,"class":"exact","type":"text256","destination":false"#,
+            ),
+            (
+                r#""name":"customer_sub","in":"con","key":3"#,
+                r#""name":"customer_sub","in":"con","key":4"#,
+            ),
+        ] {
+            let bad = text.replacen(from, to, 1);
+            assert_ne!(bad, text, "{from}");
+            assert!(load(&bad).is_err(), "{to}");
+        }
     }
 
     /// Draft 3.1 `payments.refund` (broker-resolved `charge_id` con2).

@@ -14,14 +14,17 @@ use nodkey_grant::{
     Params, RMax, Registry, RetransmissionContext, verify_binding, verify_retransmission,
 };
 
-/// The single operation this adapter serves (compiled in; effect-protocol-v2 Draft 3.1).
+/// The operation this adapter serves (compiled in; effect-protocol-v2 Draft 3.1).
 pub const OP: &str = "payments.refund";
+/// payments-adapter-v1 Draft 4 §16 (agent-interface-v1 §3): ownership on the signed con3.
+pub const SUPPORT_OP: &str = "payments.support_refund";
 pub const OPV: u16 = 1;
 
 /// Largest amount simpay accepts and the adapter's response validation range (§6.1).
 pub const MAX_AMOUNT: u64 = 999_999_999_999;
 
-/// `payments.refund` opv 1 placements (§2: compiled into the adapter, not configurable).
+/// `payments.refund` and `payments.support_refund` opv 1 placements (§2, §16: compiled into the
+/// adapter, not configurable).
 pub fn operations() -> Operations {
     let p = |name: &str, binding, ty| ParamDecl {
         name: name.into(),
@@ -30,20 +33,35 @@ pub fn operations() -> Operations {
         destination: false,
         justification: None,
     };
-    Operations::new(vec![OperationDecl {
-        name: OP.into(),
-        kind: OpKind::Write,
-        opv: OPV,
-        requires_confirmation: true,
-        mandate_eligible: false,
-        params: vec![
-            p("order_id", Binding::Resource(0), ParamType::Uint),
-            p("amount_minor", Binding::Exact(0), ParamType::Uint),
-            p("currency", Binding::Exact(1), ParamType::Currency),
-            p("charge_id", Binding::Exact(2), ParamType::Text64),
-        ],
-    }])
-    .expect("compiled-in declaration is valid")
+    let base = vec![
+        p("order_id", Binding::Resource(0), ParamType::Uint),
+        p("amount_minor", Binding::Exact(0), ParamType::Uint),
+        p("currency", Binding::Exact(1), ParamType::Currency),
+        p("charge_id", Binding::Exact(2), ParamType::Text64),
+    ];
+    let mut support = base.clone();
+    support.push(p("customer_sub", Binding::Exact(3), ParamType::Text64));
+    Operations::new(vec![
+        OperationDecl {
+            name: OP.into(),
+            kind: OpKind::Write,
+            opv: OPV,
+            requires_confirmation: true,
+            mandate_eligible: false,
+            params: base,
+        },
+        // §16.2: `cfm` 1, or 2 with `mid` (grant-v1 Draft 4 W11d); the adapter does not evaluate
+        // the mandate.
+        OperationDecl {
+            name: SUPPORT_OP.into(),
+            kind: OpKind::Write,
+            opv: OPV,
+            requires_confirmation: true,
+            mandate_eligible: true,
+            params: support,
+        },
+    ])
+    .expect("compiled-in declarations are valid")
 }
 
 /// ISO 4217 codes this prototype accepts (the same table as the broker's
@@ -98,6 +116,8 @@ pub struct GrantInputs {
     pub wid: String,
     pub tenants: Vec<String>,
     pub r_max: RMax,
+    /// §16.1; `None` refuses every `payments.support_refund` grant.
+    pub support: Option<crate::config::Support>,
 }
 
 /// The signed values of a verified `payments.refund` grant, after the adapter rules. Every
@@ -115,6 +135,8 @@ pub struct RefundGrant {
     pub amount_minor: u64,
     pub currency: String,
     pub charge_id: String,
+    /// `payments.support_refund` con3 (§16.2); `None` for `payments.refund`.
+    pub customer_sub: Option<String>,
 }
 
 impl RefundGrant {
@@ -127,17 +149,49 @@ impl RefundGrant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal(pub &'static str);
 
-fn context(g: &GrantInputs) -> Result<RetransmissionContext<'_>, Refusal> {
+fn context<'a>(
+    g: &'a GrantInputs,
+    wid: &'a str,
+    op: &'a str,
+) -> Result<RetransmissionContext<'a>, Refusal> {
     RetransmissionContext::new(
         &g.registry,
         &g.broker_id,
-        &g.wid,
+        wid,
         &g.tenants,
         &g.operations,
-        OP,
+        op,
         Limits::default(),
     )
     .ok_or(Refusal("context_invalid"))
+}
+
+/// The `(wid, op)` pairs a grant may be verified against: `payments.refund` for the configured
+/// `wid`; `payments.support_refund` for each `support.wids` entry (§16.2). The grant's own `wid`
+/// and `op` are checked by the crate in each context, so at most one can succeed.
+fn contexts(g: &GrantInputs) -> Vec<(&str, &'static str)> {
+    let mut v = vec![(g.wid.as_str(), OP)];
+    if let Some(s) = &g.support {
+        v.extend(s.wids.iter().map(|w| (w.as_str(), SUPPORT_OP)));
+    }
+    v
+}
+
+/// Runs `f` in each context; the first success wins, otherwise the first context's refusal.
+fn first_ok<T>(
+    g: &GrantInputs,
+    mut f: impl FnMut(&RetransmissionContext<'_>) -> Result<T, Refusal>,
+) -> Result<T, Refusal> {
+    let mut first = None;
+    for (wid, op) in contexts(g) {
+        match context(g, wid, op).and_then(|c| f(&c)) {
+            Ok(v) => return Ok(v),
+            Err(r) => {
+                first.get_or_insert(r);
+            }
+        }
+    }
+    Err(first.unwrap_or(Refusal("context_invalid")))
 }
 
 /// The claims both crate result types expose, gathered into one value.
@@ -152,7 +206,7 @@ struct Claims<'a> {
     params: &'a Params,
 }
 
-fn extract(c: Claims<'_>) -> Result<RefundGrant, Refusal> {
+fn extract(g: &GrantInputs, c: Claims<'_>) -> Result<RefundGrant, Refusal> {
     let uint = |k: &str| match c.params.get(k) {
         Some(ParamValue::Uint(n)) => Some(*n),
         _ => None,
@@ -169,6 +223,22 @@ fn extract(c: Claims<'_>) -> Result<RefundGrant, Refusal> {
     ) else {
         return Err(Refusal("params_shape"));
     };
+    // §16.2: `sub` ∈ support_principals[ten]; con3 an ID (the reserved " " fails).
+    let customer_sub = if c.op == SUPPORT_OP {
+        let s = g
+            .support
+            .as_ref()
+            .ok_or(Refusal("support_not_configured"))?;
+        if !s.is_principal(c.ten, c.sub) {
+            return Err(Refusal("support_sub_not_principal"));
+        }
+        match text("customer_sub") {
+            Some(cs) if crate::config::is_id(&cs, 64) => Some(cs),
+            _ => return Err(Refusal("support_customer_sub")),
+        }
+    } else {
+        None
+    };
     let rg = RefundGrant {
         iss: c.iss.to_owned(),
         jti: *c.jti,
@@ -181,6 +251,7 @@ fn extract(c: Claims<'_>) -> Result<RefundGrant, Refusal> {
         amount_minor,
         currency,
         charge_id,
+        customer_sub,
     };
     adapter_rules(&rg)?;
     Ok(rg)
@@ -195,18 +266,23 @@ fn decode(grant_text: &str) -> Result<Vec<u8>, Refusal> {
 /// the caller.
 pub fn verify_create(g: &GrantInputs, grant_text: &str, now: u64) -> Result<RefundGrant, Refusal> {
     let bytes = decode(grant_text)?;
-    let ctx = context(g)?;
-    let a = verify_retransmission(&ctx, &bytes, now, g.r_max).map_err(|e| Refusal(e.as_str()))?;
-    let (iss, jti) = a.idempotency_identity();
-    extract(Claims {
-        iss,
-        jti,
-        op: a.op(),
-        opv: a.opv(),
-        iat: a.iat(),
-        ten: a.tenant(),
-        sub: a.subject(),
-        params: a.params(),
+    first_ok(g, |ctx| {
+        let a =
+            verify_retransmission(ctx, &bytes, now, g.r_max).map_err(|e| Refusal(e.as_str()))?;
+        let (iss, jti) = a.idempotency_identity();
+        extract(
+            g,
+            Claims {
+                iss,
+                jti,
+                op: a.op(),
+                opv: a.opv(),
+                iat: a.iat(),
+                ten: a.tenant(),
+                sub: a.subject(),
+                params: a.params(),
+            },
+        )
     })
 }
 
@@ -215,24 +291,28 @@ pub fn verify_create(g: &GrantInputs, grant_text: &str, now: u64) -> Result<Refu
 /// charge pattern on every op). No order check: lookups cannot cause an effect.
 pub fn verify_lookup(g: &GrantInputs, grant_text: &str, now: u64) -> Result<RefundGrant, Refusal> {
     let bytes = decode(grant_text)?;
-    let ctx = context(g)?;
-    let b = verify_binding(&ctx, &bytes, now).map_err(|e| Refusal(e.as_str()))?;
-    let (iss, jti) = b.idempotency_identity();
-    extract(Claims {
-        iss,
-        jti,
-        op: b.op(),
-        opv: b.opv(),
-        iat: b.iat(),
-        ten: b.tenant(),
-        sub: b.subject(),
-        params: b.params(),
+    first_ok(g, |ctx| {
+        let b = verify_binding(ctx, &bytes, now).map_err(|e| Refusal(e.as_str()))?;
+        let (iss, jti) = b.idempotency_identity();
+        extract(
+            g,
+            Claims {
+                iss,
+                jti,
+                op: b.op(),
+                opv: b.opv(),
+                iat: b.iat(),
+                ten: b.tenant(),
+                sub: b.subject(),
+                params: b.params(),
+            },
+        )
     })
 }
 
 /// §3.1 step 6: rules on the crate's output that the declaration format cannot express.
 pub fn adapter_rules(g: &RefundGrant) -> Result<(), Refusal> {
-    if g.op != OP || g.opv != OPV {
+    if (g.op != OP && g.op != SUPPORT_OP) || g.opv != OPV {
         return Err(Refusal("adapter_op"));
     }
     if g.amount_minor < 1 {
@@ -292,6 +372,7 @@ mod tests {
             amount_minor: 1,
             currency: "USD".into(),
             charge_id: "ch_ABCDEFGH".into(),
+            customer_sub: None,
         }
     }
 
@@ -317,5 +398,9 @@ mod tests {
         let ops = operations();
         let d = ops.get(OP).unwrap();
         assert_eq!((d.kind, d.opv, d.params.len()), (OpKind::Write, 1, 4));
+        assert!(!d.mandate_eligible);
+        let s = ops.get(SUPPORT_OP).unwrap();
+        assert_eq!((s.kind, s.opv, s.params.len()), (OpKind::Write, 1, 5));
+        assert!(s.mandate_eligible && s.requires_confirmation);
     }
 }

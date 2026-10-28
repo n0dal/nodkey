@@ -103,6 +103,18 @@ rejected). Repeated headers are rejected.
 pending id, digest, expires = min(render + 300 s, record.expires_at)}`; a re-render invalidates the
 previous token for that `(session, pending id)`.
 
+### Mandate pages (effect-protocol-v2 Draft 4 §12.6)
+
+| Route | Behaviour |
+|---|---|
+| `GET /pending` | The session subject's `PENDING` records (`pending.list`), each linking to `/confirm/<id>` |
+| `GET /mandates` | The subject's mandates (`mandate.list`); each active one has a Revoke form with a fresh single-use token bound to session, `mid` and the revoke action (5 min) |
+| `POST /mandates/<mid>/revoke` | §7.3 steps 1–4 (exactly the `token` field; provenance; session; token). `mandate.revoke` to the broker (G) **first**: "Mandate revoked" only on its `{}`; a broker refusal is the uniform error; no answer → "Revocation not confirmed — retrying" and background retries every 5 s until acknowledged or the mandate's `exp`. Then the authority (I), retried likewise |
+
+Template confirmation pages show the AI §4.2 static text (amounts via key 11; both `_minor` amounts
+typed). A `messages.send` body is shown in full, escaped, in a `<pre>`, labelled "Written by the agent —
+unverified". Residual: background revoke retries are in memory and stop if the gateway restarts.
+
 ## Sessions and login
 
 - Cookies: `__Host-nodkey_session` (`Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=<absolute>`),

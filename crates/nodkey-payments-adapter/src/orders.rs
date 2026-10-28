@@ -49,8 +49,16 @@ pub trait OrderView: Send + Sync {
 }
 
 /// §3.2: a row with `ten` = grant `ten`, `owner_sub` = grant `sub`, `charge_id` = con2 and
-/// `currency` = con1.
+/// `currency` = con1. For `payments.support_refund` (§16.3), `owner_sub` = grant con3 instead.
 pub async fn check_order(view: &dyn OrderView, g: &RefundGrant) -> Result<(), OrderCheck> {
+    let owner = if g.op == crate::grant::SUPPORT_OP {
+        match g.customer_sub.as_deref() {
+            Some(c) => c,
+            None => return Err(OrderCheck::Mismatch),
+        }
+    } else {
+        g.sub.as_str()
+    };
     let row = view
         .fetch(g.order_id)
         .await
@@ -59,7 +67,7 @@ pub async fn check_order(view: &dyn OrderView, g: &RefundGrant) -> Result<(), Or
         Some(r)
             if r.order_id == g.order_id
                 && r.ten == g.ten
-                && r.owner_sub == g.sub
+                && r.owner_sub == owner
                 && r.charge_id == g.charge_id
                 && r.currency == g.currency =>
         {
@@ -191,6 +199,7 @@ mod tests {
             amount_minor: 1,
             currency: "USD".into(),
             charge_id: "ch_demoorder0001".into(),
+            customer_sub: None,
         }
     }
 

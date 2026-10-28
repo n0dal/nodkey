@@ -202,8 +202,11 @@ async fn run(config: &Path, mounts_verified: bool) -> Result<(), String> {
     );
 
     let serve = tokio::spawn(Arc::clone(&authority).serve(listener));
+    // agent-interface-v1 §4.4: returns at once unless a mandate template is configured.
+    let mandates = tokio::spawn(Arc::clone(&authority).mandate_loop());
     shutdown_signal().await;
     serve.abort();
+    mandates.abort();
     log::event("stopped", json!({}));
     Ok(())
 }

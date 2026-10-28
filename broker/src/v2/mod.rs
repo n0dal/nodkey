@@ -17,6 +17,7 @@ pub mod decls;
 pub mod digest;
 pub mod ids;
 pub mod limits;
+pub mod mandate;
 pub mod payments;
 pub mod server;
 pub mod service;

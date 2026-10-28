@@ -83,6 +83,12 @@ impl Server {
             (Channel::Workload(w), op) => b.read(w, op, &env.args).await,
             (Channel::Gateway, "pending.render") => b.render(&env.args).await,
             (Channel::Gateway, "pending.deny") => b.deny(&env.args).await,
+            // effect-protocol-v2 Draft 4 §12.3.
+            (Channel::Gateway, "mandate.revoke") => b.mandate_revoke(&env.args).await,
+            (Channel::Gateway, "mandate.list") => b.mandate_list(&env.args).await,
+            (Channel::Gateway, "pending.list") => b.pending_list(&env.args).await,
+            (Channel::Authority, "mandate.candidates") => b.mandate_candidates(&env.args).await,
+            (Channel::Authority, "mandate.declined") => b.mandate_declined(&env.args).await,
             (Channel::Authority, "pending.get") => b.pending_get(&env.args).await,
             (Channel::Authority, "config.digest") => Ok(b.config_digest()),
             (Channel::Authority, "grant.deliver") => match b.deliver(&env.args).await {

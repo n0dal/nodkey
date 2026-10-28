@@ -68,6 +68,18 @@ nodkey-payments-adapter --config /etc/nodkey-adapter/config.json
     not zeroized.
   - `tokio-postgres` depends on `whoami`. It is unused here, because `user` is always set.
 
+## `payments.support_refund` (Draft 4 §16)
+
+Minimal change for Demo A: an optional `"support":{"wids":[…],"support_principals":{"<ten>":[…]}}`
+configuration member (strict; tenants must be configured; no empty lists). Without it every
+`payments.support_refund` grant is refused. The compiled-in declarations add `payments.support_refund`
+(con3 `customer_sub`, `mandate_eligible`). A grant is verified against the `payments.refund` context for
+`wid` and the `payments.support_refund` context for each `support.wids` entry; the first that verifies
+wins (the crate checks the grant's own `op` and `wid`). Then: `sub` ∈ `support_principals[ten]`; con3
+in the ID grammar (so `" "` fails); `cfm` 1 or 2 (+`mid`, grant-v1 W11d); the order check uses
+`owner_sub = con3` (§16.3). Tests: `tests/support_refund.rs` (PT-45, PT-46, PT-47, PT-49, config
+refusals). PT-48 (shared budget) is broker-side and not tested here.
+
 ## Tests
 
 ```sh
