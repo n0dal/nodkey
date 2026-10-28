@@ -1,10 +1,14 @@
 # ADR-0013: Agent interface (MCP tools) and mandates
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-28) with Revision 1 below, per
+  [`docs/reviews/2026-10-28-agent-interface-review.md`](../reviews/2026-10-28-agent-interface-review.md)
+  (verdict: accept after revising the spec; blocking AI-01, AI-02, AI-04, AI-08 resolved in Revision 1).
+  Makes SECURITY_INVARIANTS v0.5 binding.
 - **Date:** 2026-10-28
 - **Invariants:** SI-01, SI-02, SI-05, SI-06, SI-07, SI-09, SI-10, SI-11, SI-16, SI-19, SI-20, SI-21
-- **Resolves (on acceptance):** OQ-12
-- **Specified in:** [`docs/specs/agent-interface-v1.md`](../specs/agent-interface-v1.md) Draft 1
+- **Resolves:** OQ-12
+- **Specified in:** [`docs/specs/agent-interface-v1.md`](../specs/agent-interface-v1.md) Draft 2, with
+  grant-v1 Draft 4, effect-protocol-v2 Draft 4 §12, payments-adapter-v1 Draft 4 §16, ADR-0006 Amendment 3
 
 ## Problem
 
@@ -74,7 +78,7 @@ amendment so its independent check becomes `owner_sub = con3`).
 1. **Interface.** A per-agent MCP front (`nodkey-mcp`), outside the TCB, holding nothing but that
    agent's socket W. Socket form on `/run/nodkey/agent/<name>/mcp.sock` with MCP stdio framing, plus
    the no-secret byte-copying shim `nodkey-mcp-stdio`. Identity is socket W (`SO_PEERCRED`), as for
-   every workload. Target MCP **2026-07-28**, with 2025-11-25 handshake compatibility; **tools only**
+   every workload. Target MCP **2026-07-28** only (Revision 1); **tools only**
    (`server/discover`, `tools/list`, `tools/call`, `ping`); no elicitation, Tasks, sampling, resources
    or OAuth in v1. Strict parsing that rejects ambiguity (spec §2.4). Write tools call
    `effect.propose`; results via `effect.status` and `nodkey.effect_status`.
@@ -85,8 +89,8 @@ amendment so its independent check becomes `owner_sub = con3`).
    with its own mandate record and durable counters, the broker re-checks under lock against current
    state, and the payments adapter re-checks scope. Both the authority's and the broker's mandate must
    permit an effect. Counters never release in v1. Identical repeats fall back to confirmation.
-   Revocation by the principal (authority and broker, each sufficient), `revoked_before`, expiry,
-   supersession. Proposals outside a mandate use normal confirmation.
+   Revocation by the principal (broker first, acknowledged; then authority; Revision 1), `revoked_before`, expiry,
+   no replacement while one is active (Revision 1). Proposals outside a mandate use normal confirmation.
 3. **Reads.** An agent's reads are permitted only under an active mandate, filtered by its customer
    scope; there is no other read path for agents in v1.
 4. **Demo A** as in spec §5, with a scripted, fully obedient agent and a baseline positive control.
@@ -107,7 +111,7 @@ amendment so its independent check becomes `owner_sub = con3`).
 
 - **Advantages:** no MCP code in the TCB; any MCP client works; mandates reuse the reviewed confirm
   pipeline; the scope and totals of mandated effects do not depend on the broker alone.
-- **Drawbacks:** five dependent amendments (SI v0.5 for SI-06/20/21, grant-v1 Draft 4,
+- **Drawbacks:** five dependent amendments (written 2026-10-28, not yet reviewed) (SI v0.5 for SI-06/20/21, grant-v1 Draft 4,
   effect-protocol-v2 Draft 4, payments-adapter-v1 Draft 4, ADR-0006 Amendment 3); one mandate per
   (workload, principal); failed mandated effects burn budget; agent reads require a mandate.
 - **Security:** mandated effects execute without per-effect human review by design: misuse within
@@ -124,3 +128,25 @@ amendment so its independent check becomes `owner_sub = con3`).
 Removing mandates leaves the interface intact: all agent writes fall back to confirmation and agent
 reads become unavailable. The MCP front can be replaced by native protocol v2 clients without broker
 changes. If `cfm = 2` proves insufficient, mandate grants move to grant v2 with a new `typ`.
+
+## Revision 1 (2026-10-28): review changes
+
+Decision items 1–3 are amended as follows; where they conflict, this revision wins.
+
+1. **Revocation reaches the broker (AI-01).** The broker checks its own mandate row before delivering or
+   executing any `cfm = 2` grant and before every mandate read. The gateway revokes at the broker first and
+   reports success only on the broker's acknowledgement, retrying otherwise; then at the authority. After
+   revocation both refuse. A `cfm = 2` delivery rejected for an inactive mandate ends the record `DENIED`.
+2. **Support principals (AI-02).** `approver ∈ support_principals(ten)` is required for the template, for
+   mandate reads and for coverage; loaders refuse templates and support operations for other enrolments,
+   and refuse templates declared `mandate_eligible` or used as a template's covered operation (AI-08).
+3. **No replacement (AI-04).** A template approval requires that no mandate is active for
+   (workload, principal), checked by the gateway render, the authority and broker activation. A new mandate
+   is a new human approval with fresh counters.
+4. **Claims (AI-03, AI-05, AI-06, AI-10).** Refund bounds are independent of the broker; message bounds are
+   broker-only (the authority keeps no message counter). The SI-09 claim is "no grant produces more than
+   one effect; identical repeats under a mandate require confirmation". New residuals R-A8 (agent-chosen
+   mandate scope), R-A9 (broker-only message bounds), R-A10 (authority-only revocation).
+5. **Simplification (AI-12).** MCP 2026-07-28 only; two transport forms (per-agent socket, no-secret shim).
+6. **Binding (AI-09, AI-11).** The customer's email is a resolved, signed mandate term and must equal `to`;
+   mandates end when `config.digest` changes.

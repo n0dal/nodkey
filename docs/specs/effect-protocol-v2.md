@@ -1,6 +1,9 @@
 # Nodkey effect protocol v2 — propose → confirm → execute
 
-- **Status:** **Draft 3.1** (2026-10-25): Draft 3 plus one amendment for `payments.refund` (`charge_id` is a
+- **Status:** **Draft 4** (2026-10-28): Draft 3.1 plus the mandate and agent additions of §12, required by
+  [agent-interface-v1](agent-interface-v1.md) Draft 2 and [ADR-0013](../decisions/0013-agent-interface-and-mandates.md).
+  Nothing in §1–§11 changes for operations that are not `mandate_eligible` or template operations.
+  Draft 3.1 (2026-10-25): Draft 3 plus one amendment for `payments.refund` (`charge_id` is a
   broker-resolved, signed parameter; §2.3, §5, §11), required by
   [payments-adapter-v1](payments-adapter-v1.md) Draft 2. Draft 3 (2026-10-25). Not yet re-reviewed. Supersedes Draft 2 (changes in §10; Draft
   1 → 2 in §9). Draft 3 makes no design change: it records what the reviewed implementation does
@@ -831,3 +834,77 @@ Draft 3 records the verified implementation; none of the security properties cha
 | Digest vectors DG-11 (`payments.refund` with `charge_id`) and DG-12 (`unresolved`) in `tests/vectors/effect-v2/` (generated; Python cross-check agrees; the broker and authority vector tests still assert a count of 10) | PA-01 |
 | Authority refuses to approve a `payments.refund` record whose `charge_id` is not a charge id (`unresolved` is never signed) | grant crate RX-6 |
 | §5 refund execution rules are now specified in payments-adapter-v1 Draft 2 (per-charge accounting, `RESERVED` also blocks, budget, workload-facing reasons) | payments-adapter-v1 §7–§8 |
+
+## 12. Draft 4 amendment: mandates and agents
+
+Normative for `enrolled` workloads using [agent-interface-v1](agent-interface-v1.md) (AI) Draft 2. `named`
+workloads are unaffected: the workloads file refuses template and `mandate_eligible` operations for them.
+
+**12.1 Record.** New mutable column `awaiting` ∈ {`mandate`, `confirmation`}, set once at creation by the
+read-only coverage check (AI §4.3) and changed only `mandate → confirmation` by `mandate.declined`. It is
+not part of the digest (§3.2 is unchanged). New table `mandate` (AI §4.2 step 4); its terms are immutable
+(trigger), only `state` (`active → revoked`, `active → expired`) and the counters change.
+
+**12.2 `effect.status`** result gains `"awaiting": "mandate" | "confirmation" | null` (null in every state
+other than `PENDING`). `effect.propose` is unchanged and its response is identical whatever `awaiting` is
+(PC-10). A `mid` or `mandate` member in `args` is `invalid_argument`.
+
+**12.3 New control messages** (§1.3 envelope and rules):
+
+| Socket | `op` | `args` | `result` | errors |
+|---|---|---|---|---|
+| A | `mandate.candidates` | `{}` | `{pending_ids: [≤ 16]}`: `PENDING` records with `awaiting = mandate` | `unavailable` |
+| A | `mandate.declined` | `{pending_id, final: bool}` | `{}`. `final = false`: `awaiting → confirmation`. `final = true` (the authority's issuance for this `jti` ended `rejected`): `PENDING → DENIED`, `outcome.class = denied` | `not_found`, `unavailable` |
+| G | `mandate.revoke` | `{mid, subject:{ten,sub}}` | `{}` after the broker's mandate row is `revoked` (idempotent) | `not_available` (unknown `mid` or subject ≠ mandate `(ten, sub)`) |
+| G | `mandate.list` | `{subject}` | `{mandates: [{mid, wid display name, terms, counters, nbf, exp, state}]}` for that subject | — |
+| G | `pending.list` | `{subject}` | `{pending: [{pending_id, op, created_at, expires_at}]}` for records whose approver is the subject | — |
+| I | `mandate.revoke` | `{mid, subject}` | `{}` after the authority's mandate is `revoked` (idempotent; it signs no further `cfm = 2` grant for `mid`) | `not_available` |
+
+§3.3 gains one transition: `PENDING → DENIED` by `mandate.declined{final: true}` (A), same conditions as
+`pending.deny` except the digest and subject checks.
+
+**12.4 Delivery and execution of `cfm = 2` grants** (§4.3 step 4, §4.4 step 4): additionally the grant's
+`mid` equals an active broker mandate for the record's `(wid, ten, approver_sub)`, and AI §4.3 C1–C5 hold
+(at delivery: read under the mandate row lock; at execution: under lock, with counter increments, AI §4.5).
+A failure at delivery returns `rejected` (writes nothing, BR-04); at execution, `FAILED/denied`.
+
+**12.5 Authority (§4.2).** For a template operation the authority, in the issuance row, records the mandate
+(AI §4.2 step 3) and refuses if it already holds an active mandate for `(wid, ten, sub)`. The mandate loop
+(AI §4.4) uses `pending.get` and `grant.deliver` as specified, with the AI §4.4 order (existing-row check
+first). Its exactly-once rule (§4.2 step 4) is unchanged: a human `approve` for a `jti` that already has a
+mandate issuance row re-delivers the stored `cfm = 2` grant.
+
+**12.6 Gateway pages** (§7 headers, uniform error and provenance rules apply):
+- `/pending`: the session subject's `PENDING` records, each linking to `/confirm/<pending_id>` (via
+  `pending.list`).
+- `/mandates`: the subject's mandates (via `mandate.list`), each active one with a Revoke form (POST
+  `/mandates/<mid>/revoke`, §7.3 steps 1–4 with a token bound to session, `mid` and the action; no delay or
+  typed field). On submit the gateway sends `mandate.revoke` to the broker (G) **first** and reports
+  "revoked" only on its `{}`; otherwise "revocation not confirmed — retrying", with background retries
+  every 5 s until acknowledged or the mandate's `exp`. It then sends `mandate.revoke` to the authority (I),
+  retried likewise.
+- Confirmation pages for template operations use the AI §4.2 static template; for `messages.send` the
+  `body` is shown escaped and labelled (the Phase 3 "free text not displayed" rule does not apply: the body
+  is the effect). Pages for `mandate_eligible` operations show "an identical effect executed at `<t>` under
+  mandate `<mid>`" when such a record exists (AI §4.3 C6).
+
+**12.7 Tests.** T55–T60 (agent-interface-v1 AT-xx cover the scenario level):
+
+| # | Case | Expected | Maps to |
+|---|---|---|---|
+| T55 | `effect.status` `awaiting` values; propose response identical for covered and uncovered proposals | as §12.2 | PC-10 |
+| T56 | `mandate.declined` with `final` false/true; on a non-`PENDING` record | `awaiting` changes / `DENIED`; no change | §12.3 |
+| T57 | `mandate.revoke` on G for another subject's `mid`; unknown `mid`; repeated | `not_available`; idempotent `{}` | §12.3 |
+| T58 | `cfm = 2` grant delivered after broker revocation; executed after revocation committed between delivery and execution | `rejected` → `DENIED`; `FAILED/denied` | AI-01 |
+| T59 | Revoke page with the broker down | "not confirmed"; retried; no "revoked" text until acknowledged | AI-01 |
+| T60 | Second template approval while a mandate is active (render, authority, activation) | uniform error; `not_available`; `FAILED/denied` | AI-04 |
+
+**12.8 Changes from Draft 3.1**
+
+| Change | Source |
+|---|---|
+| `awaiting` column and `effect.status` member | AI §4.3 |
+| Socket A `mandate.candidates`, `mandate.declined`; socket G `mandate.revoke`, `mandate.list`, `pending.list`; socket I `mandate.revoke`; transition `PENDING → DENIED` via A | AI §4.4, §4.7; review AI-01, AI-08 |
+| `cfm = 2` delivery and execution checks | AI §4.5; grant-v1 Draft 4 |
+| `/pending`, `/mandates` pages; revoke broker-first with acknowledgement; template page; displayed message body | AI §2.6, §4.7; review AI-01 |
+| Operations `payments.support_refund`, `payments.support_get_order`, `messages.send`, `mandate.support_ticket` declared by AI §3 | ADR-0013 |

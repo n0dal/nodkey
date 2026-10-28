@@ -135,3 +135,31 @@ Decision 7 is extended:
 
 SI-19 needs no text change if "effect" is read as "one decided effect row"; a clarifying note is proposed
 for SECURITY_INVARIANTS v0.5 (not made here).
+
+## Amendment 3 (2026-10-28): mandate counters (OQ-12)
+
+Required by [ADR-0013](0013-agent-interface-and-mandates.md); specified in
+[`docs/specs/agent-interface-v1.md`](../specs/agent-interface-v1.md) Draft 2 §4.4–§4.5. Status of this ADR
+unchanged (Accepted).
+
+Decision gains:
+
+> **10. Mandate counters.** A mandate (an authority-signed, user-approved grant for a template operation)
+> carries limits: refund count, refund total and per-call amount in one currency, and a message count.
+> They are enforced by two independent counter sets, neither ever released in v1:
+>
+> - **Broker:** columns `refund_count`, `refund_total_minor`, `message_count` on the broker-owned
+>   `mandate` row. They are checked and incremented in the effect transaction of each `cfm = 2` grant,
+>   under `SELECT … FOR UPDATE` of the mandate row, in the same transaction as the `RESERVED` insert
+>   (external effect) or the effect itself (internal effect). Lock order: pending record → mandate row →
+>   existing budget and per-charge locks. A denial rolls back to the decision savepoint, so it increments
+>   nothing.
+> - **Authority:** refund count and total per mandate in its durable issuance store, checked and
+>   incremented under the store lock **before** signing, in the same fsync'd row as the grant. They count
+>   signed grants, so a grant that later fails still consumes budget (liveness only).
+>
+> A mandated effect commits only if both sets permit it. For refunds, the authority's set bounds the
+> totals even if the broker's state is falsified. Message counts are broker-only (published residual).
+> A mandate's counters start at zero and belong to that mandate alone; v1 has no mandate replacement,
+> so nothing carries or resets counters across mandates. Restoring the broker database follows decision 9;
+> because the authority's counters are not restored with it, a restore cannot raise a refund total.

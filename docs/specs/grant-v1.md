@@ -1,6 +1,9 @@
 # Nodkey-Grant v1 — format and verification specification
 
-- **Status:** **Draft 3** (2026-10-25). Not yet re-reviewed. Supersedes Draft 2 (changes in
+- **Status:** **Draft 4** (2026-10-28): Draft 3 plus mandate-issued write grants (`cfm = 2`, key 20
+  `mid`, declaration member `mandate_eligible`) for [ADR-0013](../decisions/0013-agent-interface-and-mandates.md);
+  changes and required vectors in [§17](#17-changes-from-draft-3-draft-4). Vectors not yet regenerated.
+  Draft 3 (2026-10-25). Not yet re-reviewed. Supersedes Draft 2 (changes in
   [§16](#16-changes-from-draft-2); Draft 1 → 2 in [§15](#15-changes-from-draft-1)). Draft 3 settles the
   independent implementer's issues D2-1..D2-4 (`crates/nodkey-grant/SPEC_ISSUES.md`). It does not
   change any vector result. Implements [ADR-0004](../decisions/0004-grant-format.md) (Proposed) as
@@ -36,6 +39,7 @@ RFC 8174 when, and only when, they appear in all capitals.
 14. [References](#14-references)
 15. [Changes from Draft 1](#15-changes-from-draft-1)
 16. [Changes from Draft 2](#16-changes-from-draft-2)
+17. [Changes from Draft 3 (Draft 4)](#17-changes-from-draft-3-draft-4)
 
 ## 0. ADR-0004 amendments
 
@@ -265,10 +269,11 @@ deliberately not reused). **Unknown keys are rejected**; the key set is fixed by
 | 15 | — | — | reserved (was `epo`, removed by ADR-0004 rev. 2); MUST NOT appear | — | — |
 | 16 | — | — | reserved (was `rqh`, removed by ADR-0004 rev. 2); MUST NOT appear | — | — |
 | 17 | `knd` | uint | 1 = write, 2 = read [D-1] | REQUIRED | REQUIRED |
-| 18 | `cfm` | uint | 0 = not confirmed, 1 = user confirmed the exact bound values on the auth origin [D-2] | REQUIRED | FORBIDDEN |
+| 18 | `cfm` | uint | 0 = not confirmed, 1 = user confirmed the exact bound values on the auth origin [D-2], **2 = issued by the Authority under mandate `mid` without per-effect approval (Draft 4)**; any other value invalid | REQUIRED | FORBIDDEN |
 | 19 | `rop` | map tstr → uint | read operation set: 1–16 entries, key = op name, value = opv (1–65535), keys in C8 order [D-1] | FORBIDDEN | REQUIRED |
+| 20 | `mid` | bstr | exactly 16 bytes: the mandate id (= the `jti` of the mandate's own grant) (Draft 4) | REQUIRED iff `cfm = 2`, else FORBIDDEN | FORBIDDEN |
 
-Every key ≥ 20, and every non-uint key, is unknown and rejected. Reserved numbers are never reassigned.
+Every key ≥ 21, and every non-uint key, is unknown and rejected. Reserved numbers are never reassigned.
 
 An **ID** is a text string whose bytes are all in `0x21–0x7E` (printable ASCII, no space `0x20`, no
 `DEL 0x7F`, no control characters, no NUL). All comparisons are **byte-exact**: no case folding,
@@ -277,7 +282,7 @@ trimming, or Unicode normalization.
 ### 5.2 Version and kind
 
 `ver` is checked before the key set: a payload whose key 0 is a uint other than 1 is rejected with
-`grant_version_unsupported`. Then `knd` selects the exact key set (write: 0–14, 17, 18; read: 0–9, 17,
+`grant_version_unsupported`. Then `knd` selects the exact key set (write: 0–14, 17, 18, plus 20 exactly when `cfm = 2`; read: 0–9, 17,
 19). A missing, extra, or wrongly typed key → `grant_payload_invalid`.
 
 ### 5.3 `res` and `con` (write grants)
@@ -349,6 +354,7 @@ unknown members, missing members and wrong types are errors):
 | `kind` | `write` or `read` [D-1] |
 | `opv` | one integer 1–65535 (**exactly one version per operation in v1**) |
 | `requires_confirmation` | boolean; `true` only for `write` operations [D-2] |
+| `mandate_eligible` | boolean, OPTIONAL (absent = `false`) (Draft 4); `true` only for `write` operations with `requires_confirmation: true` |
 | `params[].name` | `[a-z0-9_]{1,64}`; unique within the operation |
 | `params[].in` | write: `res` or `con`; read: `request` |
 | `params[].key` | write `res`, and write `con` with class `exact`/`bounded`: integer 0–15, unique per placement; `free` and read parameters: `null` |
@@ -376,7 +382,8 @@ The broker MUST refuse to start (`ops_declaration_invalid`) if any member rule o
 an unclassified parameter; a `res` parameter that is not `exact`; a `bounded` parameter whose type is not
 `uint`; a parameter with `destination: true` whose class is not `exact`; a `free` parameter with a key
 or without a justification; duplicate operation names, parameter names, or placement/key pairs; more
-than one `opv`; `requires_confirmation` on a read operation; a read operation with `res`/`con`
+than one `opv`; `requires_confirmation` on a read operation; `mandate_eligible: true` on a read operation or
+on a write without `requires_confirmation`, or a non-boolean `mandate_eligible` (Draft 4); a read operation with `res`/`con`
 parameters; a write operation with `owner_scoped` parameters; an unknown type; **a write operation that
 binds no parameter**, i.e. one that has no `res` parameter and no `exact` or `bounded` `con` parameter
 (D2-3; review GC-05). A grant for such an operation would bind only the operation name. Every
@@ -455,7 +462,7 @@ After step 9 the broker opens the **effect transaction** and runs:
 | W11a | `op` equals the requested operation and is declared | `grant_op_mismatch` |
 | W11b | the declared kind of `op` is `write` | `grant_kind_mismatch` |
 | W11c | `opv` equals the declared `opv` | `grant_opv_unsupported` |
-| W11d | if the operation `requires_confirmation`, `cfm == 1` | `grant_confirmation_required` |
+| W11d | if `cfm == 2`, the operation is `mandate_eligible`; and if the operation `requires_confirmation`, `cfm == 1` or (`cfm == 2` and `mandate_eligible`). The mandate itself (active, terms, counters) is a W14 precondition of the broker (agent-interface-v1 §4.5) | `grant_confirmation_required` |
 | W12a | `res` and `con` match the declaration: same key sets (`free` parameters absent from `con`), each `con` class equals the declared class, each `res` value and each exact `con` value has the declared type (§6.2) | `grant_op_schema_invalid` |
 | W12b | for each `res` entry: the request has that parameter with an identical value (§5.3) | `grant_resource_mismatch` |
 | W12c | for each `con` entry in ascending key order: exact → the request value is identical, else `grant_constraint_mismatch`; bounded → the request value is a uint, else `grant_constraint_mismatch`, and ≤ ceiling, else `grant_bound_exceeded` | `grant_constraint_mismatch` / `grant_bound_exceeded` |
@@ -631,7 +638,9 @@ The Authority MUST:
 - set `iss` to its registered issuer name and `aud` to the single target broker's `broker_id`;
 - for write grants: put every `exact` parameter's value and every `bounded` parameter's ceiling into
   `con`, every resource parameter into `res`, and omit `free` parameters; set `cfm = 1` only when the
-  user approved exactly the values in `op`, `res`, and `con` on the auth origin [D-2];
+  user approved exactly the values in `op`, `res`, and `con` on the auth origin [D-2]; set `cfm = 2` and
+  `mid` only for a `mandate_eligible` operation whose effect it found within an active mandate on its
+  **own** mandate record and counters (agent-interface-v1 §4.4), never on a caller's word;
 - for read grants: list only operations declared `read` for the target broker, with their declared opv;
 - encode the payload and protected header with the core deterministic encoding of §4 (note C8 for text
   keys), with tag 18 and an empty unprotected header.
@@ -774,3 +783,39 @@ step 7b).
 | §7.3: deadline re-checked before committing an accepted effect; on expiry the transaction rolls back (`unavailable`, nothing consumed) | D2-4, review GC-03 |
 | §12.1 / vectors README: CON-24 listed with CON-20..23 as a vector whose request lies outside the declaration (its grant fails earlier, at step 7); vector set otherwise unchanged | D2-1 |
 
+## 17. Changes from Draft 3 (Draft 4)
+
+v1 has not been deployed outside this repository, so these additions stay in v1 (§13's "new fields
+require a new version" applies once v1 is final). A Draft 3 verifier rejects every Draft 4 mandate grant
+(`cfm = 2` or key 20 → `grant_payload_invalid`): the change fails closed.
+
+| Change | Source |
+|---|---|
+| Key 18 `cfm` gains value 2 (mandate-issued); new key 20 `mid` (bstr 16) REQUIRED iff `cfm = 2`; unknown keys now start at 21 | ADR-0013, agent-interface-v1 §4.4 |
+| Declaration member `mandate_eligible` (optional boolean) and its §6.3 refusals | ADR-0013; review AI-08 |
+| W11d accepts `cfm = 2` only for `mandate_eligible` operations; mandate state is a W14 precondition | ADR-0013 |
+| §9: issuer rule for `cfm = 2` | ADR-0013, SI-20 v0.5 |
+
+**Vectors (to be generated; not generated yet).** The manifest moves to `"spec_draft": 4`; `operations.json`
+gains `test.mandated` (write, `requires_confirmation`, `mandate_eligible: true`, one exact `res` param).
+
+| Status | Vector | Expected |
+|---|---|---|
+| changed (regenerate; same result) | ENV-02 — padding key 20 → 21 | `grant_payload_invalid` |
+| changed (rename; same result) | PSCH-03 `unknown-key-20` → `unknown-key-21` | `grant_payload_invalid` |
+| changed (description only) | PSCH-61 `cfm = 2` → "`cfm = 2` without `mid`" | `grant_payload_invalid` |
+| unchanged | ENV-01, SIG-38, PSCH-26, PSCH-63, OP-13, ACC-03 and all others | as before |
+| new | MND-01 `test.mandated`, `cfm = 2`, valid `mid` | `ACCEPT` |
+| new | MND-02 `cfm = 2` + `mid` on `ledger.transfer` (not eligible) | `grant_confirmation_required` |
+| new | MND-03 `cfm = 2` + `mid` on a write without `requires_confirmation` | `grant_confirmation_required` |
+| new | MND-04 `mid` with `cfm = 1` | `grant_payload_invalid` |
+| new | MND-05 `mid` with `cfm = 0` | `grant_payload_invalid` |
+| new | MND-06 `mid` of 15 bytes; MND-07 of 17 bytes; MND-08 `mid` as tstr | `grant_payload_invalid` |
+| new | MND-09 read grant carrying `mid` | `grant_payload_invalid` |
+| new | MND-10 `cfm = 3` | `grant_payload_invalid` |
+| new | MND-11 `mid` altered after signing | `grant_signature_invalid` |
+| new | MND-12 `test.mandated` with `cfm = 1` (human approval still valid) | `ACCEPT` |
+| new (operations) | OPS-21 `mandate_eligible` on a read; OPS-22 on a write without `requires_confirmation`; OPS-23 non-boolean | `ops_declaration_invalid` |
+| new (operations) | OPS-24 `mandate_eligible: true` on a confirmed write; OPS-25 member absent | `LOAD_OK` |
+
+OPS-20 stays reserved for the Draft 3 binds-no-parameter rule (§6.3).

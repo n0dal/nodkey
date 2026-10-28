@@ -1,6 +1,9 @@
 # Nodkey payments adapter v1 — refunds against simpay (Demo P)
 
-- **Status:** **Draft 3.3** (2026-10-28). Resolves the Demo P conformance findings DEMOP-F03..F08
+- **Status:** **Draft 4** (2026-10-28): Draft 3.3 plus the operation `payments.support_refund` for
+  merchant-side support agents (§16; [ADR-0013](../decisions/0013-agent-interface-and-mandates.md),
+  [agent-interface-v1](agent-interface-v1.md) Draft 2). Nothing in §1–§15 changes for `payments.refund`.
+  Not implemented. **Draft 3.3** (2026-10-28). Resolves the Demo P conformance findings DEMOP-F03..F08
   (`tests/demop/FINDINGS.md`); changes in §15. Draft 3.2 (2026-10-26) amended Draft 3 after the code reviews
   [`2026-10-26-payments-adapter-code-review.md`](../reviews/2026-10-26-payments-adapter-code-review.md) (PC-A-xx) and
   [`2026-10-26-broker-payments-review.md`](../reviews/2026-10-26-broker-payments-review.md) (BP-xx); changes in §14.
@@ -708,3 +711,58 @@ Resolves the Demo P conformance findings in `tests/demop/FINDINGS.md`.
 | PT-18: `hostile_error_text` → `refused/other_4xx` (as §6.2 already specified); `te_and_cl` → any `ambiguous` cause; one refund at most and no corrupted state in every case | DEMOP-F05, DEMOP-F08 |
 | Post-success settlement watch: `succeeded` rows re-checked with `refund.get` (lookup only) until `dispatched_at + settlement_watch_s` (broker config, default 30 days, 1 h ..= 90 days); a reversal → `settlement = failed`, anomaly `settlement_reversed`, alarm, encumbered; §7.4 and the DB guard allow `succeeded → failed`; residual for reversals after the window; PT-23 extended | DEMOP-F06 |
 | PA-17 restated: the control is schema-qualified SQL, pinned function `search_path`, and no `CREATE`/`TEMPORARY` for any Nodkey role on any schema or database (incl. `postgres`, `template1`); per-role `search_path = ''` is defence in depth, since a role can `ALTER ROLE` its own session defaults; PT-31 tests exactly that | DEMOP-F07 |
+
+## 16. Draft 4 amendment: `payments.support_refund`
+
+A support agent's principal never owns the customer's order, so `payments.refund`'s `owner_sub = sub`
+cannot hold. `payments.support_refund` (declared in agent-interface-v1 §3) adds a fifth signed parameter,
+`customer_sub` (con3, `text64`, broker-resolved from `orders.owner_sub` at propose), and moves the
+ownership check onto it. Everything not listed here is as for `payments.refund` (same adapter operations,
+idempotency-key derivation from the grant, age rule, provider request built only from the grant, broker
+states, reconciler).
+
+**16.1 Configuration.** The adapter configuration gains an optional member
+`"support":{"wids":[ID…],"support_principals":{"<ten>":[ID…]}}` (strict JSON; every `ten` must be in
+`tenants`; empty lists refused). Without it, the adapter refuses every `payments.support_refund` grant.
+The broker's and authority's `support_principals` (agent-interface-v1 §3) MUST equal it; the adapter cannot
+check that equality, so an operator error that adds a subject to the broker's copy only fails closed at
+the adapter.
+
+**16.2 Claims (§3.1) for `op = payments.support_refund`**, replacing the rows that differ:
+
+| Claim | Requirement |
+|---|---|
+| `wid` | ∈ `support.wids` |
+| `knd`, `use` | `1`, `1` |
+| `cfm` | `1`, or `2` with key 20 `mid` present (grant-v1 Draft 4); the adapter does not evaluate the mandate (the authority and broker do) |
+| `sub` | ∈ `support.support_principals[ten]` |
+| `op`, `opv` | `payments.support_refund`, `1` |
+| `con` | exactly `{0: amount_minor, 1: currency, 2: charge_id, 3: customer_sub}`; con3 is an ID (`0x21–0x7E`, 1–64 bytes, so the reserved `" "` fails) |
+
+**16.3 Order check (§3.2).** For `payments.support_refund`: a row with `ten` = grant `ten`,
+**`owner_sub` = grant con3**, `charge_id` = con2, `currency` = con1. Under broker compromise this bounds the
+scope of mandated refunds: the broker cannot write `nodkey.orders` (§2), so a false con3 never matches.
+
+**16.4 Broker T1 (§7.2).** Step 3 requires `owner_sub` = grant **con3** (instead of `sub`). For `cfm = 2`
+grants, the mandate row lock and checks of agent-interface-v1 §4.5 come between the record lock and the
+`refund_budget` lock: **record → mandate → `refund_budget` → `charge_refund_state` → `payment_effect`**.
+
+**16.5 Budget (§7.5).** The per-customer budget row is keyed `(ten, con3, currency, day)` for
+`payments.support_refund`, so refunds to one customer share one daily budget whichever operation or
+principal produced them.
+
+**16.6 Tests.**
+
+| # | Case | Expected | Maps to |
+|---|---|---|---|
+| PT-45 | `support_refund` grant with `sub` ∉ `support_principals`, `wid` ∉ `support.wids`, no `support` config | `grant_refused`, nothing sent | SI-06 |
+| PT-46 | con3 ≠ the order's `owner_sub` (broker-compromise client); con3 = `" "` | `grant_refused`, nothing sent | SI-10, EP-03 |
+| PT-47 | `cfm = 2` without `mid`; `cfm = 0` | `grant_refused` (crate: `grant_payload_invalid` / adapter claim) | SI-08 |
+| PT-48 | `payments.refund` and `support_refund` to one customer on one day | one shared budget | AR-05 |
+| PT-49 | Owner changed between signing and T1 | T1 `not_owner_or_unknown`; adapter refuses on a resend | SI-11 |
+
+**16.7 Changes from Draft 3.3**
+
+| Change | Source |
+|---|---|
+| `payments.support_refund`: `support` configuration; claims (`wid`, `sub`, `cfm` 1/2, con3); order check on con3; T1 step 3 on con3; lock order with the mandate row; budget keyed by con3; PT-45..PT-49 | ADR-0013; agent-interface review AI-02 (support principals), EP-03 |

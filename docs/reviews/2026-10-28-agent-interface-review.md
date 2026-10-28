@@ -273,3 +273,25 @@ Demo A with confirmation only first, as §0 already allows.
 - **Before implementation:** resolve AI-01, AI-02, AI-04 and AI-08.
 - **Before claims are published:** correct the claim wording in AI-05, AI-06 and AI-10, and add the
   missing residuals.
+
+## Resolution (2026-10-28)
+
+Addressed in agent-interface-v1 Draft 2 (AI §), ADR-0013 Revision 1, SECURITY_INVARIANTS v0.5, grant-v1
+Draft 4, effect-protocol-v2 Draft 4 §12 (EP §12), payments-adapter-v1 Draft 4 §16 (PA §16) and ADR-0006
+Amendment 3. Not re-reviewed; nothing implemented.
+
+| ID | Resolution | Where |
+|---|---|---|
+| AI-01 | Broker checks its mandate row before delivering or executing any `cfm = 2` grant and before reads; revoke goes to the broker first and is reported only on its acknowledgement, with background retry, then to the authority; AT-15 rewritten; residual R-A10 for authority-only revocation | AI §4.5–§4.7, EP §12.3, §12.4, §12.6, T58, T59 |
+| AI-02 | `approver ∈ support_principals(ten)` on the template, reads and C1; loader refusals; adapter requires `sub ∈ support_principals` | AI §3, §4.2, §4.3, §4.6, AT-08; PA §16.2 |
+| AI-03 | Residual R-A8; step S0' (agent reads the whole ticket, proposes a c9 mandate, denied). Trusted ticket record deferred | AI §5, §6 |
+| AI-04 | Replacement removed: template approval requires no active mandate (gateway render, authority, broker activation); fresh counters per mandate | AI §4.2, S11, AT-17; EP §12.5, T60; ADR-0006 Am. 3 |
+| AI-05 | Claims split refunds / messages; authority message counter removed; R-A9; AT-18 scoped to refunds | AI §4.4, §4.5, §6, AT-18 |
+| AI-06 | Claim reworded; pages show an identical earlier execution under the mandate; workload idempotency key not added (later draft) | AI §3, §6, AT-13; EP §12.6 |
+| AI-07 | Authority checks for an existing issuance row for the `jti` first, before any counter change; race in AT-12 | AI §4.4; EP §12.5 |
+| AI-08 | Rejected `cfm = 2` delivery → authority marks final → `mandate.declined{final}` → `DENIED`; loader refuses template as `mandate_eligible` or as covered op; grant-v1 `mandate_eligible` refusals with vectors OPS-21..23 (template refusal is an effects-config rule, tested by AT-08) | AI §3, §4.5; EP §12.3; grant-v1 §6.3, §17 |
+| AI-09 | `customer_email` is a resolved, signed mandate term; C4 and execution require `to` = it and = current `customers.email` | AI §4.1, §4.3, §4.5, AT-10 |
+| AI-10 | "No recipient address or payment destination is agent-supplied"; currency on the mandate page | AI §4.2, §6 |
+| AI-11 | Socket access stated as agent authority; uid-mapping test in AT-01; mandates bound to `config.digest` on both sides | AI §2.2, §4.2, AT-01, AT-16 |
+| AI-12 | One MCP revision (2026-07-28); two transport forms; no authority message counter; `/pending` off the Demo A critical path | AI §2.1, §2.2, §2.6 |
+| R-A6 / cross-ticket memory | R-A6 now names re-approval and scope statements; R-A2 extended with cross-ticket memory | AI §6 |

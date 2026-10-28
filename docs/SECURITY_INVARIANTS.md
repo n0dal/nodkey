@@ -1,7 +1,7 @@
 # Security Invariants
 
 > [!IMPORTANT]
-> Status: **DRAFT v0.4** (2026-10-25; see [Changelog](#changelog)). These invariants are the project's non-negotiable security
+> Status: **DRAFT v0.5** (2026-10-28; see [Changelog](#changelog)). These invariants are the project's non-negotiable security
 > requirements. Changing one requires an accepted ADR. Implementation that cannot satisfy an
 > invariant blocks the affected milestone; it does not justify reinterpreting the invariant.
 
@@ -69,10 +69,15 @@ tenant are *sourced* from the verified grant; every other bound field is compare
 independent trusted value (socket identity, broker id, clock, registry) or with the submitted request.
 A *read grant* binds (tenant, subject, workload, declared set of read operations, validity window);
 read operations filter by the grant's tenant and by subject ownership evaluated on trusted rows, and a
-read grant is never accepted for a write operation.
+read grant is never accepted for a write operation. A *mandate* (v0.5, ADR-0013) is an authority-signed,
+user-approved grant for a declared template operation; it binds (tenant, subject, workload, template
+operations, customer scope, limits, validity window, configuration digest). A grantless read under a
+mandate is served only while the broker's record of that mandate is active, and filters by tenant and by
+the mandate's scope evaluated on trusted rows.
 *Falsified by:* a grant producing an effect where any bound field differs from the request, an
-operation with an unclassified parameter being served, or a read grant authorizing a write or a read
-of a row not owned by its subject.
+operation with an unclassified parameter being served, a read grant authorizing a write or a read
+of a row not owned by its subject, or a mandate read returning a row outside the mandate's scope or
+after the broker's record of the mandate is inactive.
 
 **SI-07 — No broadening.** No transformation available to the workload (editing, re-encoding,
 combining, attenuating) yields a grant authorizing a strictly larger set of effects.
@@ -163,14 +168,22 @@ workload or touching a user-owned row; a `derived` transition taking any value f
 unless the pending effect's **intended approver** — named in the proposal and satisfying the
 operation's trusted-fact checks (e.g. owns the order; is the agent's registered principal) — approved
 it on the auth origin, and the approval commits to a digest of exactly the values displayed, which must
-equal the immutable stored pending effect. The grant binds exactly those values. *Full strength requires
+equal the immutable stored pending effect. The grant binds exactly those values. **Mandate path (v0.5,
+ADR-0013):** for an operation declared `mandate_eligible`, a write grant marked `cfm = 2` may instead be
+issued when the pending effect lies within an active mandate that the same intended approver approved
+under this invariant (the mandate approval is itself an SI-20 approval of exactly the mandate's terms),
+as checked by the authority against its **own** record of that mandate (and, for amount-bearing
+operations, its own durable counters), and the broker re-checks the mandate under lock before delivery
+and execution. Mandates exist only for workloads enrolled to one principal. *Full strength requires
 a user-verifying WebAuthn assertion whose challenge commits to the digest; with session-only approval
 (Phase 3 test login) this invariant is* **PARTIALLY MET** *and must be reported as such.*
-*Falsified by:* a grant for a confirmation-required operation without such an approval; an approval by
-anyone other than the intended approver; or any bound value differing from what was displayed.
+*Falsified by:* a grant for a confirmation-required operation without such an approval or such a
+mandate; an approval by anyone other than the intended approver; any bound value differing from what was
+displayed; a `cfm = 2` grant for an operation not `mandate_eligible`, outside the mandate's terms, or
+beyond the authority's counters; or an effect executed under a mandate the broker records as inactive.
 
 **SI-21 — Request provenance.** Write grants are never issued in response to a workload-origin HTTP
-request; they are issued only by the authority after an SI-20 approval. The approval endpoint accepts
+request; they are issued only by the authority after an SI-20 approval, direct or through a mandate (v0.5). The approval endpoint accepts
 only non-safe requests with `Sec-Fetch-Site: same-origin` relative to the **auth origin** (or, when the
 header is absent, an `Origin` exactly equal to the auth origin) carrying a single-use approval token bound
 to the session, the pending id, and the displayed-values digest. Read grants are never issued for
@@ -219,6 +232,10 @@ profile and assumptions and links to a test or explicitly says *NOT TESTED*.
 
 ## Changelog
 
+- **v0.5 (2026-10-28):** Mandates (ADR-0013, agent-interface-v1 Draft 2). SI-06: mandate binding and
+  mandate-scoped grantless reads. SI-20: mandate path (`cfm = 2`) for `mandate_eligible` operations,
+  approved once by the intended approver, checked by the authority on its own records and re-checked by
+  the broker; falsifiers added. SI-21: "direct or through a mandate". No other invariant changes.
 
 - **v0.4 (2026-10-25):** SI-20 and SI-21 rewritten for ADR-0011 (propose → confirm → execute): intended approver, digest-committed approval of immutable pending effects, auth-origin provenance with approval tokens; write grants never issued from workload-origin requests. SI-20 marked PARTIALLY MET without WebAuthn. SI-06 binding source for confirmed writes is the approved pending effect.
 - **v0.3 (2026-10-25):** Gateway term (edge/proxy); Authority = gateway signer only (scheduler
