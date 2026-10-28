@@ -1,0 +1,35 @@
+[package]
+name = "nodkey-grant-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# cargo-fuzz harness (nightly + libFuzzer). Not part of any product build. See docs/supply-chain.md.
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nodkey-grant = { path = ".." }
+# Same pinned version as the crate under test; used only for the `Signer` trait (re-signing).
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast", "zeroize"] }
+serde_json = "1"
+
+[[bin]]
+name = "verify_raw"
+path = "fuzz_targets/verify_raw.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "verify_resigned"
+path = "fuzz_targets/verify_resigned.rs"
+test = false
+doc = false
+bench = false
+
+# Standalone workspace: keeps the parent crate's Cargo.lock untouched.
+[workspace]
+members = ["."]

@@ -2,7 +2,7 @@
 name = "simpay"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.89"
 license = "Apache-2.0"
 description = "SIMULATED payment provider for Nodkey Demo P tests. Not a real payment API."
 publish = false

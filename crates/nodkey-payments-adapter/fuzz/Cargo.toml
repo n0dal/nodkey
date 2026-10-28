@@ -1,0 +1,25 @@
+[package]
+name = "nodkey-payments-adapter-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# cargo-fuzz harness (nightly + libFuzzer). Not part of any product build. See docs/supply-chain.md.
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nodkey-payments-adapter = { path = ".." }
+
+[[bin]]
+name = "provider_response"
+path = "fuzz_targets/provider_response.rs"
+test = false
+doc = false
+bench = false
+
+# Standalone workspace: keeps the parent crate's Cargo.lock untouched.
+[workspace]
+members = ["."]

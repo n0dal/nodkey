@@ -1,0 +1,26 @@
+[package]
+name = "nodkey-broker-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+# cargo-fuzz harness (nightly + libFuzzer). Not part of any product build. See docs/supply-chain.md.
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nodkey-broker = { path = ".." }
+serde_json = "1"
+
+[[bin]]
+name = "v2_request_line"
+path = "fuzz_targets/v2_request_line.rs"
+test = false
+doc = false
+bench = false
+
+# Standalone workspace: keeps the parent crate's Cargo.lock untouched.
+[workspace]
+members = ["."]
