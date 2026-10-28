@@ -1,0 +1,8 @@
+{"format":"nodkey.workloads.v1","workloads":[
+ {"wid":"spiffe://nodkey.demo/workload/shop","tenants":["shop1"],"approver_source":"named","write_ops":["payments.refund"],"read_ops":["payments.get_order"]},
+ {"wid":"spiffe://nodkey.demo/workload/support-bot","tenants":["shop1"],"approver_source":{"enrolled":{"ten":"shop1","sub":"staff:carol"}},
+  "write_ops":["payments.support_refund","messages.send","mandate.support_ticket"],"read_ops":["payments.support_get_order"]}],
+ "support_principals":{"shop1":["staff:carol"]},
+ "mandate_template":{"template":"mandate.support_ticket","refund_op":"payments.support_refund",
+  "read_ops":["payments.support_get_order"],"message_op":"messages.send",
+  "ceilings":{"refund_max_count":5,"message_max_count":10,"refund_max_total_minor":{"EUR":10000}}}}

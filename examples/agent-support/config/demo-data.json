@@ -1,0 +1,150 @@
+{
+ "_comment": "Demo A seed data (SIMULATED, TEST USERS ONLY). One source for the simpay fixture (charges), the operator seed of nodkey.orders and nodkey.customers, and the gateway test-login users. Script rows (agent-interface-v1 Draft 2 section 5): customers c42/c9 and orders 101, 102, 777. Rows tagged at_* are fixed inputs for individual conformance tests.",
+ "account": "acct_demomerchant01",
+ "tenant": "shop1",
+ "staff": [
+  {
+   "index": 0,
+   "ten": "shop1",
+   "sub": "staff:carol",
+   "label": "Carol (support) (TEST USER)",
+   "support_principal": true
+  },
+  {
+   "index": 1,
+   "ten": "shop1",
+   "sub": "staff:dave",
+   "label": "Dave (staff, not a support principal) (TEST USER)",
+   "support_principal": false
+  }
+ ],
+ "customers": [
+  {
+   "sub": "c42",
+   "email": "alice@customer.test",
+   "label": "Alice (TEST CUSTOMER)"
+  },
+  {
+   "sub": "c9",
+   "email": "bob@customer.test",
+   "label": "Bob (TEST CUSTOMER)"
+  },
+  {
+   "sub": "c50",
+   "email": "c50@customer.test",
+   "label": "Customer c50 (TEST)"
+  },
+  {
+   "sub": "c51",
+   "email": "c51@customer.test",
+   "label": "Customer c51 (TEST)"
+  },
+  {
+   "sub": "c52",
+   "email": "c52@customer.test",
+   "label": "Customer c52 (TEST)"
+  },
+  {
+   "sub": "c53",
+   "email": "c53@customer.test",
+   "label": "Customer c53 (TEST)"
+  },
+  {
+   "sub": "c54",
+   "email": "c54@customer.test",
+   "label": "Customer c54 (TEST)"
+  }
+ ],
+ "orders": [
+  {
+   "order_id": 101,
+   "owner_sub": "c42",
+   "currency": "EUR",
+   "captured_minor": 3500,
+   "charge_id": "ch_demoa00000101",
+   "tag": "script_101",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 102,
+   "owner_sub": "c42",
+   "currency": "EUR",
+   "captured_minor": 3000,
+   "charge_id": "ch_demoa00000102",
+   "tag": "script_102",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 777,
+   "owner_sub": "c9",
+   "currency": "EUR",
+   "captured_minor": 4000,
+   "charge_id": "ch_demoa00000777",
+   "tag": "script_777",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 501,
+   "owner_sub": "c50",
+   "currency": "EUR",
+   "captured_minor": 5000,
+   "charge_id": "ch_demoa00000501",
+   "tag": "at11_a",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 502,
+   "owner_sub": "c50",
+   "currency": "EUR",
+   "captured_minor": 5000,
+   "charge_id": "ch_demoa00000502",
+   "tag": "at11_b",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 511,
+   "owner_sub": "c51",
+   "currency": "EUR",
+   "captured_minor": 9000,
+   "charge_id": "ch_demoa00000511",
+   "tag": "at12_concurrency",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 521,
+   "owner_sub": "c52",
+   "currency": "EUR",
+   "captured_minor": 5000,
+   "charge_id": "ch_demoa00000521",
+   "tag": "at03_raw_w",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 531,
+   "owner_sub": "c53",
+   "currency": "EUR",
+   "captured_minor": 5000,
+   "charge_id": "ch_demoa00000531",
+   "tag": "at10_owner_scope",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 532,
+   "owner_sub": "c53",
+   "currency": "EUR",
+   "captured_minor": 5000,
+   "charge_id": "ch_demoa00000532",
+   "tag": "at10_email_scope",
+   "ten": "shop1"
+  },
+  {
+   "order_id": 541,
+   "owner_sub": "c54",
+   "currency": "EUR",
+   "captured_minor": 5000,
+   "charge_id": "ch_demoa00000541",
+   "tag": "at16_expiry",
+   "ten": "shop1"
+  }
+ ]
+}

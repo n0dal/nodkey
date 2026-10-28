@@ -1,0 +1,395 @@
+# =================================================================================================
+#  Demo A — an AI support agent under Nodkey (agent-interface-v1 Draft 2, ADR-0013).
+#  LOCAL ONLY, CLEARLY LABELLED TEST STACK. Never expose it to a network.
+#   - The agent is `tools/demo-agent`: a deterministic stand-in for a FULLY PROMPT-INJECTED model
+#     (it obeys every instruction in the ticket, including the injected ones). No model, no API key.
+#   - simpay is a SIMULATED payment provider; mailsink is a SIMULATED mail sink (delivers no mail).
+#   - The gateway runs the TEST LOGIN (no credentials): staff "Carol (support)" (the agent's enrolled
+#     principal) and "Dave" (staff, not a support principal). Customers c42 (alice@customer.test)
+#     and c9 (bob@customer.test) are data rows only.
+#   - The Demo P shop (INTENTIONALLY VULNERABLE: POST /debug/eval) is kept as the gateway's app
+#     upstream, unchanged ("as Demo P"); Demo A does not use it.
+#
+#  Start/stop only through tests/demoa/run.sh (secrets, keys, PKI and the adapter's volumes are
+#  generated into ../../var/demoa/, Git-ignored).
+#
+#  Topology = Demo P (examples/confirmed-refund/compose.yaml) plus:
+#    agent      : the scripted agent; network none; uid 10011; ONLY mcp.sock mounted (read-only);
+#                 no broker socket, no secret
+#    mcp-front  : nodkey-mcp for `support-bot` (outside the TCB, no secret); network none; runs as
+#                 the agent's registered uid 10011; listens mcp.sock, connects socket W
+#    mailsink   : SIMULATED mail sink; data 172.30.20.30 (DB role: SELECT public.outbox only);
+#                 admin on harness 172.30.40.40:12121
+#  Every container: cap_drop ALL, no-new-privileges.
+# =================================================================================================
+name: nodkey-demoa
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]   # default seccomp + AppArmor apply; never "unconfined"
+  ipc: private
+  pids_limit: 256
+  privileged: false
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  gateway:                      # TRUSTED (TCB). TEST LOGIN compiled in and enabled: LOCAL ONLY.
+    <<: *hardening
+    image: nodkey/demoa-gateway:dev
+    build: { context: ../.., dockerfile: examples/confirmed-transfer/docker/gateway.Dockerfile }
+    user: "10005:10005"
+    labels:
+      org.nodkey.warning: "TEST LOGIN ENABLED - local demo only"
+    networks: [edge]
+    ports: ["127.0.0.1:8443:8443"]          # the ONLY published port (served by gateway-port)
+    stop_signal: SIGINT
+    tmpfs: ["/run/gw-tls:rw,noexec,nosuid,nodev,size=1m,uid=10005,gid=10005,mode=0700"]
+    volumes:
+      - ./config/gateway.json:/etc/nodkey/gateway.json:ro
+      - sock-gw-broker:/run/nodkey/gw-broker           # G (client)
+      - sock-gw-authority:/run/nodkey/gw-authority     # I (client)
+      - app-http:/run/app-http                           # untrusted app web server (client)
+    depends_on:
+      broker: { condition: service_healthy }
+      authority: { condition: service_healthy }
+      web: { condition: service_healthy }
+
+  gateway-port:                 # DEV-ONLY TCP relay inside the gateway's network namespace (DEMO2-F01)
+    <<: *hardening
+    image: nginxinc/nginx-unprivileged:1.28-alpine@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
+    user: "101:101"
+    network_mode: "service:gateway"
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=1m,uid=101,gid=101"]
+    volumes:
+      - ../confirmed-refund/docker/nginx/relay.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gateway: { condition: service_started }
+
+  web:                          # UNTRUSTED (shop trust domain): receives traffic only from the gateway
+    <<: *hardening
+    image: nginxinc/nginx-unprivileged:1.28-alpine@sha256:7377697a821c131a924a7105fafbe7414db4e9fcc77a6f08f776f33f141ec3f8
+    user: "101:101"
+    network_mode: "none"
+    entrypoint: ["sh", "-c", "umask 000; rm -f /run/app-http/nginx.sock; exec nginx -g 'daemon off;'"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,uid=101,gid=101"]
+    volumes:
+      - ../confirmed-refund/docker/nginx/app.conf:/etc/nginx/nginx.conf:ro
+      - fcgi:/run/fcgi
+      - app-http:/run/app-http
+    depends_on:
+      app: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/app-http/nginx.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  app:                          # UNTRUSTED workload `shop` (INTENTIONALLY VULNERABLE: /debug/eval)
+    <<: *hardening
+    image: nodkey/demoa-shop:dev
+    build: { context: ../.., dockerfile: examples/confirmed-refund/docker/php/Dockerfile }
+    user: "10001:10001"
+    network_mode: "none"
+    labels:
+      org.nodkey.warning: "INTENTIONALLY VULNERABLE (remote code execution) - local demo only"
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700"]
+    volumes:
+      - fcgi:/run/fcgi
+      - sock-wl-shop:/run/nodkey:ro      # broker socket W for THIS workload only
+    environment: {}                        # no secrets
+    mem_limit: 512m
+    cpus: 1.0
+    depends_on:
+      broker: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/fcgi/php.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  broker:                       # TRUSTED (TCB)
+    <<: *hardening
+    image: nodkey/demoa-broker:dev
+    build: { context: ../.., dockerfile: broker/Dockerfile }
+    user: "10002:10002"
+    command: ["--config", "/etc/nodkey/broker.json", "--mounts-verified-externally"]
+    networks:
+      data: { ipv4_address: 172.30.20.10 }
+    volumes:
+      - ./config/broker.json:/etc/nodkey/broker.json:ro
+      - ./config/operations.json:/etc/nodkey/operations.json:ro
+      - ./config/workloads.json:/etc/nodkey/workloads.json:ro
+      - ../../var/demoa/config/keys.json:/etc/nodkey/keys.json:ro
+      - sock-wl-shop:/run/nodkey/wl/shop          # W (listener)
+      - sock-wl-agent:/run/nodkey/wl/support-bot  # W of the agent (listener)
+      - sock-gw-broker:/run/nodkey/gw-broker      # G (listener)
+      - sock-au-broker:/run/nodkey/au-broker      # A (listener)
+      - sock-br-pay:/run/nodkey/br-pay            # P (client)
+    secrets:
+      - source: db_broker_password
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nodkey-broker", "--healthcheck", "/etc/nodkey/broker.json"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  authority:                    # TRUSTED (TCB): the only grant signer; no network
+    <<: *hardening
+    image: nodkey/demoa-authority:dev
+    build: { context: ../.., dockerfile: examples/confirmed-transfer/docker/authority.Dockerfile }
+    user: "10004:10004"
+    network_mode: "none"
+    volumes:
+      - ../../var/demoa/config/authority.json:/etc/nodkey/authority.json:ro
+      - ./config/operations.json:/etc/nodkey/operations.json:ro
+      - ./config/workloads.json:/etc/nodkey/workloads.json:ro
+      - authority-state:/var/lib/nodkey-authority
+      - sock-gw-authority:/run/nodkey/gw-authority # I (listener)
+      - sock-au-broker:/run/nodkey/au-broker       # A (client)
+    depends_on:
+      broker: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/nodkey/gw-authority/authority.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  adapter:                      # TRUSTED (TCB): payments adapter; alone holds the simpay key and K_idem
+    <<: *hardening
+    image: nodkey/demoa-adapter:dev
+    build: { context: ../.., dockerfile: examples/confirmed-refund/docker/adapter.Dockerfile }
+    user: "10006:10006"
+    networks:
+      pay-egress: { ipv4_address: 172.30.30.10 }   # its ONLY network (not on data)
+    volumes:
+      - adapter-etc:/etc/nodkey-adapter:ro         # config, key registry, pinned CA (root, 0444)
+      - adapter-secrets:/run/adapter-secrets:ro      # simpay key, K_idem, DB password (0400, uid 10006)
+      - sock-br-pay:/run/nodkey/br-pay             # P (listener)
+      - pg-adapter:/run/pg-adapter                   # DB channel (client)
+    depends_on:
+      db: { condition: service_healthy }
+      simpay: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/nodkey/br-pay/adapter.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # One-shot (profile `setup`, run by tests/demoa/run.sh). Copies the adapter's §2 inputs from the
+  # Git-ignored staging directory into named volumes: operator files (config, registry, CA) owned by
+  # root, mode 0444; secrets owned by uid 10006, mode 0400. Named volumes are used because host bind
+  # mounts on the local VM (Colima virtiofs) do not preserve file ownership, which the adapter's
+  # start-up checks rightly refuse (tests/demop/FINDINGS.md DEMOP-F02). Needs CAP_CHOWN for the copy
+  # only; it is not part of the running topology and has no network.
+  adapter-init:
+    profiles: ["setup"]
+    image: nodkey/demoa-adapter:dev
+    user: "0:0"
+    network_mode: "none"
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        set -e; for f in config.json keys.json ca.crt; do
+        install -m 0444 /staging/etc/$$f /etc/nodkey-adapter/$$f; done;
+        for f in simpay_key k_idem db_password; do
+        install -m 0400 /staging/secrets/$$f /run/adapter-secrets/$$f;
+        chown 10006:10006 /run/adapter-secrets/$$f; done;
+        ls -ln /etc/nodkey-adapter /run/adapter-secrets
+    volumes:
+      - adapter-etc:/etc/nodkey-adapter
+      - adapter-secrets:/run/adapter-secrets
+      - ../../var/demoa/adapter-stage:/staging:ro
+
+  mcp-front:                    # per-agent MCP front (outside the TCB, holds no secret)
+    <<: *hardening
+    image: nodkey/demoa-agent:dev
+    build: { context: ../.., dockerfile: examples/agent-support/docker/agent.Dockerfile }
+    user: "10011:10011"           # the agent's registered uid (socket W peer)
+    network_mode: "none"
+    entrypoint: ["/usr/local/bin/nodkey-mcp"]
+    command: ["--config", "/etc/nodkey/front.json"]
+    volumes:
+      - ./config/front.json:/etc/nodkey/front.json:ro
+      - ./config/operations.json:/etc/nodkey/operations.json:ro
+      - sock-wl-agent:/run/nodkey/wl/support-bot:ro        # W (client)
+      - sock-mcp-agent:/run/nodkey/agent/support-bot       # mcp.sock (listener)
+    depends_on:
+      broker: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "test", "-S", "/run/nodkey/agent/support-bot/mcp.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  agent:                        # UNTRUSTED: scripted, fully prompt-injected stand-in agent
+    <<: *hardening
+    image: nodkey/demoa-agent:dev
+    user: "10011:10011"
+    network_mode: "none"
+    labels:
+      org.nodkey.warning: "Demo A scripted agent (obeys injected instructions) - local demo only"
+    entrypoint: ["sh", "-c", "while :; do sleep 3600; done"]   # the harness execs demo-agent
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=4m,uid=10011,gid=10011,mode=0700"]
+    volumes:
+      - sock-mcp-agent:/run/nodkey/agent/support-bot:ro    # mcp.sock ONLY
+    environment: {}
+    depends_on:
+      mcp-front: { condition: service_healthy }
+
+  mailsink:                     # SIMULATED mail sink (delivers no mail); untrusted, outside every TCB
+    <<: *hardening
+    image: nodkey/demoa-mailsink:dev
+    build: { context: ../.., dockerfile: examples/agent-support/docker/mailsink.Dockerfile }
+    user: "10012:10012"
+    labels:
+      org.nodkey.warning: "SIMULATED mail sink - delivers no mail"
+    networks:
+      data: { ipv4_address: 172.30.20.30 }
+      harness: { ipv4_address: 172.30.40.40 }
+    secrets: [db_mailsink_password]
+    depends_on:
+      db: { condition: service_healthy }
+
+  db:                           # PROTECTED RESOURCE (runs as the postgres uid 70, never root)
+    image: postgres:17-alpine@sha256:eee6c6e1b0894fa4fe0075eb054af9fd1cf39a35321c2d4110626cfe506411fb
+    user: "70:70"
+    group_add: ["10006"]          # so the server can give the pg-adapter socket the adapter's group
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      data: { ipv4_address: 172.30.20.20 }
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - unix_socket_directories=/var/run/postgresql,/run/pg-adapter
+      - -c
+      - unix_socket_group=10006
+      - -c
+      - unix_socket_permissions=0770
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_superuser_password
+    secrets: [db_broker_password, db_superuser_password, db_adapter_password, db_operator_password, db_mailsink_password]
+    volumes:
+      - ./docker/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ../php-ledger/docker/postgres/initdb/01-ledger.sh:/docker-entrypoint-initdb.d/01-ledger.sh:ro
+      - ../php-ledger/docker/postgres/initdb/02-effects-v2.sh:/docker-entrypoint-initdb.d/02-effects-v2.sh:ro
+      - ../php-ledger/docker/postgres/initdb/03-payments.sh:/docker-entrypoint-initdb.d/03-payments.sh:ro
+      - ../php-ledger/docker/postgres/initdb/04-mandates.sh:/docker-entrypoint-initdb.d/04-mandates.sh:ro
+      - ./docker/postgres/05-mailsink.sh:/docker-entrypoint-initdb.d/05-mailsink.sh:ro
+      - pg-adapter:/run/pg-adapter
+      - dbdata:/var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "ledger"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  simpay:                       # SIMULATED payment provider (untrusted; attacker G in malicious mode)
+    <<: *hardening
+    image: nodkey/demoa-simpay:dev
+    build: { context: ../../tools/simpay }
+    user: "10003:10003"
+    labels:
+      org.nodkey.warning: "SIMULATED payment provider - not a real payment API"
+    command: ["--config", "/etc/simpay/config.json",
+              "--tls-cert", "/etc/simpay/tls/server.crt", "--tls-key", "/etc/simpay/tls/server.key"]
+    networks:
+      pay-egress: { ipv4_address: 172.30.30.20 }   # API listener (TLS) only
+      harness: { ipv4_address: 172.30.40.20 }      # admin listener only
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=4m,uid=10003,gid=10003,mode=0700"]
+    volumes:
+      - ./config/simpay.json:/etc/simpay/config.json:ro
+      - ../../var/demoa/simpay/fixture.json:/etc/simpay/fixture.json:ro
+      - ../../var/demoa/pki/server.crt:/etc/simpay/tls/server.crt:ro
+      - ../../var/demoa/pki/server.key:/etc/simpay/tls/server.key:ro
+    healthcheck:
+      # TCP connect to its own admin listener (perl-base ships in the debian runtime image).
+      test: ["CMD", "perl", "-MIO::Socket::INET", "-e", "exit(IO::Socket::INET->new(PeerAddr=>'172.30.40.20:8081',Timeout=>1)?0:1)"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  simpay-ctl:                   # HARNESS-ONLY tool container: reaches simpay's admin listener only
+    <<: *hardening
+    image: nodkey/demoa-shop:dev
+    user: "10007:10007"
+    command: ["php", "-r", "while (true) { sleep(3600); }"]
+    networks:
+      harness: { ipv4_address: 172.30.40.30 }
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=4m,uid=10007,gid=10007,mode=0700"]
+
+  # Positive control for the egress probes (profile `probe`, started and removed by the harness
+  # for one test only): a container that IS on pay-egress at a non-adapter address. It shows simpay is
+  # reachable when attached, and that the restricted key is refused from any address but the adapter's.
+  paynet-probe:
+    <<: *hardening
+    profiles: ["probe"]
+    image: nodkey/demoa-shop:dev
+    user: "10008:10008"
+    command: ["php", "-r", "while (true) { sleep(3600); }"]
+    networks:
+      pay-egress: { ipv4_address: 172.30.30.99 }
+    tmpfs: ["/tmp:rw,noexec,nosuid,nodev,size=4m,uid=10008,gid=10008,mode=0700"]
+
+networks:
+  edge: {}
+  data:
+    internal: true
+    ipam: { config: [{ subnet: 172.30.20.0/24 }] }
+  pay-egress:
+    internal: true
+    ipam: { config: [{ subnet: 172.30.30.0/24 }] }
+  harness:
+    internal: true
+    ipam: { config: [{ subnet: 172.30.40.0/24 }] }
+
+# Socket volumes are tmpfs-backed (non-persistent, noexec). Each socket has its own directory
+# (the volume root): owner = listener, group = the one permitted client, setgid, no "other" bits.
+volumes:
+  sock-wl-shop:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10001,mode=2750" }
+  sock-wl-agent:                # W of support-bot: broker listens, the front (uid 10011) connects
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10011,mode=2750" }
+  sock-mcp-agent:               # mcp.sock: the front listens; directory 2750, group = the agent's
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10011,gid=10011,mode=2750" }
+  sock-gw-broker:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10005,mode=2750" }
+  sock-au-broker:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10002,gid=10004,mode=2750" }
+  sock-gw-authority:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10004,gid=10005,mode=2750" }
+  sock-br-pay:                  # P: adapter listens, broker connects (payments-adapter-v1 §1)
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10006,gid=10002,mode=2750" }
+  pg-adapter:                   # adapter DB channel: postgres uid 70, adapter group, 2750 (PA-16)
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=70,gid=10006,mode=2750" }
+  app-http:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=101,gid=10005,mode=0750" }
+  fcgi:
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,noexec,nosuid,nodev,uid=10001,gid=10001,mode=0755" }
+  adapter-etc: {}
+  adapter-secrets: {}
+  authority-state: {}
+  dbdata: {}
+
+secrets:
+  db_broker_password: { file: ../../var/demoa/secrets/db_broker_password }
+  db_superuser_password: { file: ../../var/demoa/secrets/db_superuser_password }
+  db_adapter_password: { file: ../../var/demoa/secrets/db_adapter_password }
+  db_operator_password: { file: ../../var/demoa/secrets/db_operator_password }
+  db_mailsink_password: { file: ../../var/demoa/secrets/db_mailsink_password }

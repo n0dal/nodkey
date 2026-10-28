@@ -1,0 +1,16 @@
+{"format":"nodkey.broker.v2","profile":"phase3","broker_id":"nodkey.broker.demoa",
+ "auth_origin":"https://auth.localhost:8443","ledger_currency":"EUR",
+ "db":{"host":"db","port":5432,"dbname":"ledger","user":"nodkey_broker","password_file":"/run/secrets/db_broker_password"},
+ "registry_path":"/etc/nodkey/keys.json","operations_path":"/etc/nodkey/operations.json",
+ "authority_workloads_path":"/etc/nodkey/workloads.json",
+ "limits":{"pending_per_wid":64,"pending_per_approver":32,"proposals_per_min":240,"proposal_burst":120,"status_per_min":2400,"pending_lifetime_s":120,"reads_per_min":600,"db_conns_per_wid":2},
+ "gateway":{"socket_path":"/run/nodkey/gw-broker/broker.sock","uid":10005},
+ "authority":{"socket_path":"/run/nodkey/au-broker/broker.sock","uid":10004},
+ "payments":{"adapter_socket":"/run/nodkey/br-pay/adapter.sock","adapter_uid":10006,"R_max_s":180,"max_resends":5,"adapter_total_ms":5000,"settlement_watch_s":2592000,
+   "budget":{"max_count_per_day":20,"limits_minor":{"EUR":100000,"USD":100000}}},
+ "workloads":[
+  {"wid":"spiffe://nodkey.demo/workload/shop","display_name":"Demo shop (self-service refunds)","socket_path":"/run/nodkey/wl/shop/broker.sock","uid":10001,
+   "tenants":["shop1"],"approver_source":{"kind":"named"},"allowed_ops":["payments.refund","payments.get_order"]},
+  {"wid":"spiffe://nodkey.demo/workload/support-bot","display_name":"Support bot (Demo A scripted agent)","socket_path":"/run/nodkey/wl/support-bot/broker.sock","uid":10011,
+   "tenants":["shop1"],"approver_source":{"kind":"enrolled","ten":"shop1","sub":"staff:carol"},
+   "allowed_ops":["payments.support_refund","messages.send","mandate.support_ticket","payments.support_get_order"]}]}

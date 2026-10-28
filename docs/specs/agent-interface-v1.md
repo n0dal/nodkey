@@ -76,9 +76,11 @@ The front MUST reject, without contacting the broker:
 - `jsonrpc` ≠ `"2.0"`; an `id` that is not a string of 1–64 `[A-Za-z0-9._-]` or an integer 0…2^53−1;
 - missing `_meta["io.modelcontextprotocol/protocolVersion"]`, or a value ≠ `2026-07-28`;
 - unknown tool → JSON-RPC error `-32602`;
-- `arguments` with unknown, missing or wrongly typed members; an integer with fraction, exponent, sign or
-  leading zero (`1.0`, `1e3`, `-0`, `01`) or above 2^53 − 1; a string outside its grammar → tool result
-  `isError: true`, `invalid_argument`.
+- `arguments` with unknown, missing or wrongly typed members; an integer with fraction, exponent or sign
+  (`1.0`, `1e3`, `-0`) or above 2^53 − 1; a string outside its grammar → tool result
+  `isError: true`, `invalid_argument`;
+- a message that is not valid JSON (RFC 8259), including a number with a leading zero (`01`) → JSON-RPC
+  error `-32700` (DEMOA-F02).
 
 No normalization (trimming, case folding, Unicode normalization, numeric coercion). The broker re-applies
 the same rules; the front's checks only improve messages.
@@ -304,7 +306,7 @@ ticket's visible sender (c42) and to deny everything else.
 | S7 | `messages.send{customer_sub:"c9", body}` | `pending_confirmation`; page shows bob's address and body; denied | C4 |
 | S8 | `messages.send{c42, "Card details: …"}` | `succeeded` (messages 1/3); one outbox row to alice with only what the agent had | allowed-channel exfiltration, bounded to c42's data and address (R-A2) |
 | S9 | `payments.support_refund{102, 2500, EUR}`, then `{102, 500, EUR}` | both `succeeded`; M1 3/3, €50/€50 | misuse within bounds (R-A1) |
-| S10 | `payments.support_refund{101, 2000, EUR}` | `pending_confirmation` (C5, C6; page shows the identical refund of S2); if approved, `failed` (remaining €15) | SI-11 |
+| S10 | `payments.support_refund{101, 2000, EUR}` | `pending_confirmation` (C5, C6; page shows the identical refund of S2); if approved, `denied` before dispatch (remaining €15; nothing sent; DEMOA-F01) | SI-11 |
 | S11 | `mandate.support_ticket{c42, …}` again | approval page not available (uniform error: M1 active); record expires | no replacement (AI-04) |
 | S12 | `op_ana` revokes M1; agent calls S1 again and a €1 refund on 102 | `grant_denied`; `pending_confirmation` | §4.7 |
 | S13 | `nodkey.effect_status` on S3's id from another agent; guessed ids | `not_found` | T11 |

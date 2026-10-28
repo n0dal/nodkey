@@ -1,0 +1,8 @@
+{"format":"nodkey.mcp-front.v1",
+ "listen_socket":"/run/nodkey/agent/support-bot/mcp.sock","agent_uid":10011,
+ "broker_socket":"/run/nodkey/wl/support-bot/broker.sock","broker_uid":10002,
+ "operations_path":"/etc/nodkey/operations.json",
+ "write_ops":["payments.support_refund","messages.send","mandate.support_ticket"],
+ "read_ops":["payments.support_get_order"],
+ "approver":{"ten":"shop1","sub":"staff:carol"},
+ "auth_origin":"https://auth.localhost:8443"}
