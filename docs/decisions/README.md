@@ -17,3 +17,4 @@ Statuses: `Proposed` → `Accepted` | `Rejected`; later `Superseded by ADR-NNNN`
 | [0010](0010-project-focus.md) | Project focus: authority control for consequential external actions | Accepted (owner) |
 | [0011](0011-propose-confirm-execute.md) | Propose → confirm → execute for consequential effects | Accepted (rev. 1) |
 | [0012](0012-payments-adapter.md) | Payments adapter for Demo P: grant-verifying adapter process, broker-owned effect state, reconciler (rev. 2) | Proposed (rev. 2; on acceptance resolves OQ-10 via ADR-0006 Amendment 2) |
+| [0013](0013-agent-interface-and-mandates.md) | Agent interface (MCP tools outside the TCB) and mandates | Proposed (on acceptance resolves OQ-12; needs SI v0.5 and spec amendments) |
