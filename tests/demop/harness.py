@@ -1137,9 +1137,11 @@ def t_pt10_12_inputs():
     ok10 = all(c == "invalid_argument" for c in res.values()) and n_before == n_after
     record(GID, "PT-10a", "bad amount_minor forms (string, float, 1000.0, 1e3, 0, -1, -0, >2^53, >u64, bool, null, array, object) and charge_id supplied in propose -> invalid_argument; no record",
            "PT-10 / P-10, P-12", "SI-08", verdict(ok10), f"{res} pending_rows {n_before}->{n_after}")
-    record(GID, "PT-10b", "duplicate amount_minor key in propose -> invalid_argument (PT-10 row); no record",
-           "PT-10 / P-10", "SI-08", verdict(dup_code == "invalid_argument" and n_before == n_after),
-           f"code={dup_code} pending_rows {n_before}->{n_after} (see FINDINGS DEMOP-F04)")
+    # payments-adapter-v1 Draft 3.3 §11 PT-10 (DEMOP-F04): a duplicate key is rejected by strict
+    # framing (effect-protocol-v2 §1.2) as malformed_request, before argument validation.
+    record(GID, "PT-10b", "duplicate amount_minor key in propose -> malformed_request (framing); no record",
+           "PT-10 / P-10", "SI-08", verdict(dup_code == "malformed_request" and n_before == n_after),
+           f"code={dup_code} pending_rows {n_before}->{n_after}")
     res12 = {
         "extra_param": w_code(w_call("effect.propose", {"op": "payments.refund",
                                                         "params": dict(base, amount_minor=100, note="x"), "approver": appr})),
@@ -1336,8 +1338,10 @@ def t_pt18_hostile_responses():
              ("PT-18d", "m_malformed_json", "malformed_json", {"variant": "huge_number"}, "ambiguous", 630),
              ("PT-18e", "m_header_injection", "header_injection", {"variant": "crlf_injection"}, "created", 640),
              ("PT-18f", "m_header_injection", "header_injection", {"variant": "bare_cr"}, "ambiguous", 650),
+             # Draft 3.3 §11 PT-18 (DEMOP-F08): te_and_cl -> ambiguous with any cause.
              ("PT-18g", "m_header_injection", "header_injection", {"variant": "te_and_cl"}, "ambiguous", 660),
-             ("PT-18h", "m_hostile_error_text", "hostile_error_text", {}, "ambiguous", 670),
+             # Draft 3.3 §11 PT-18 / §6.2 (DEMOP-F05): 400 with an unknown code -> refused/other_4xx.
+             ("PT-18h", "m_hostile_error_text", "hostile_error_text", {}, "refused", 670),
              ("PT-18i", "f_slow_response", "slow_drip", {"chunk": 8, "interval_ms": 400}, "ambiguous", 680)]
     for tid, tag, kind, params, want, amt in cases:
         o = ORD[tag]
@@ -1353,14 +1357,22 @@ def t_pt18_hostile_responses():
             and len(refs) == before + 1 and first.get("elapsed_ms", 10 ** 9) <= 5000 + 1000
         if want == "created":
             ok = ok and row["reconcile_rounds"] == 0 and row["resends"] == 0
-        if kind == "header_injection" and want == "ambiguous":
+        # Draft 3.3 §11 PT-18: bare_cr is bad_headers; te_and_cl may be any ambiguous cause (DEMOP-F08).
+        if kind == "header_injection" and params.get("variant") == "bare_cr":
             ok = ok and first.get("cause") == "bad_headers"
+        if kind == "hostile_error_text":
+            # §6.2: refused/other_4xx; §7.2: row UNKNOWN + alarm, resolved by lookup (DEMOP-F05).
+            ok = ok and first.get("cause") == "other_4xx" and row["reason"] in (None, "refused")
+        k18 = crs(o["charge_id"])
+        if kind == "hostile_error_text" or params.get("variant") == "te_and_cl":
+            # Draft 3.3 §11 PT-18: no corrupted state: nothing left in flight or unknown on the
+            # charge, and the broker's succeeded counter equals the provider's refunds.
+            ok = ok and k18["inflight_minor"] == 0 and k18["unknown_minor"] == 0 \
+                and k18["succeeded_minor"] == sum(x["amount"] for x in refs)
         record(GID, tid, f"{kind} {params.get('variant', '')}: create classified {want}; bounded; one refund",
                "PT-18 / P-18", "SI-16", verdict(ok),
                f"first_create={first.get('class')}/{first.get('cause')} elapsed_ms={first.get('elapsed_ms')} "
-               f"final={row and row['state']} refunds_for_grant={len(mine)}"
-               + (" (FINDINGS DEMOP-F05)" if kind == "hostile_error_text" else "")
-               + (" (FINDINGS DEMOP-F08)" if params.get("variant") == "te_and_cl" else ""))
+               f"final={row and row['state']} refunds_for_grant={len(mine)} counters={k18}")
     # No provider text anywhere: adapter, broker, gateway, authority logs; the broker DB; the shop's status page.
     dump = compose("exec", "-T", "--user", "postgres", "db", "pg_dump", "-U", "postgres", "-d", "ledger", "-a",
                    timeout=120).stdout.decode("utf-8", "replace")
@@ -1634,23 +1646,32 @@ def t_pt23_late_failed():
     log("\n== PT-23 / PT-37: late_refund_failed ==")
     o = ORD["late_refund_failed"]
     alarms0 = len(broker_alarms())
-    _, pid, row, st = _fault_flow("late_refund_failed", 1500, [rule(o["charge_id"], "late_refund_failed", op=None, after_s=0)])
+    # The refund is created `succeeded` and moves to `failed` 20 s later, after the broker has
+    # recorded settlement `succeeded` (Draft 3.3 §7.3 post-success watch, DEMOP-F06).
+    _, pid, row, st = _fault_flow("late_refund_failed", 1500, [rule(o["charge_id"], "late_refund_failed", op=None, after_s=20)])
     if pid is None:
         record(GID, "PT-23", "late_refund_failed", "PT-23 / §7.3", "SI-15", "INCONCLUSIVE", st)
         return
-    end = time.time() + 120
+    settled_first = (pe_row(pid) or {}).get("settlement")
+    end = time.time() + 180
     while time.time() < end and (pe_row(pid) or {}).get("settlement") != "failed":
         time.sleep(3)
     row = pe_row(pid)
     refs = refunds_of(o["charge_id"])
     k = crs(o["charge_id"])
-    new_alarms = broker_alarms()[alarms0:]
+    new_alarms = [a for a in broker_alarms()[alarms0:] if a.get("pending_id") == pid]
+    kinds = [a.get("kind") for a in new_alarms]
+    lookups = [e.get("op") for e in calls(pid)]
     ok = row and row["state"] == "SUCCEEDED" and row["settlement"] == "failed" and [x["status"] for x in refs] == ["failed"] \
-        and k["succeeded_minor"] == 1500 and len(new_alarms) >= 1
-    record(GID, "PT-23", "late_refund_failed: SUCCEEDED with settlement failed, alarm raised, amount stays encumbered",
+        and k["succeeded_minor"] == 1500 and "refund_settlement_failed" in kinds \
+        and settled_first == "succeeded" and row["anomaly"] == "settlement_reversed" \
+        and creates(pid) == 1 and lookups.count("refund.create") == 1 and row["resends"] == 0
+    record(GID, "PT-23", "late_refund_failed: settled succeeded, then failed at the provider -> post-success watch records "
+           "settlement failed + anomaly settlement_reversed, alarm, amount encumbered, lookups only (no resend)",
            "PT-23 / §7.3", "SI-15", verdict(ok),
-           f"state={row and row['state']} settlement={row and row['settlement']} provider={[(x['amount'], x['status']) for x in refs]} "
-           f"broker_counters={k} new_alarms={[a.get('kind') for a in new_alarms][:4]} (FINDINGS DEMOP-F06)")
+           f"first_settlement={settled_first} state={row and row['state']} settlement={row and row['settlement']} "
+           f"anomaly={row and row['anomaly']} provider={[(x['amount'], x['status']) for x in refs]} "
+           f"broker_counters={k} alarms={kinds[:4]} adapter_ops={lookups} creates_sent={creates(pid)}")
     view = shop_order_view(o["owner_sub"], o["order_id"])
     record(GID, "PT-37b", "get_order.refunded_minor counts a refund whose settlement failed (= external + succeeded)",
            "PT-37, §8", "SI-16", verdict(view == "15.00 USD"), f"shop_shows_refunded={view!r}")
@@ -1690,10 +1711,12 @@ def t_pt24_32_31_startup():
     ok = all(s is False and r for s, r in res.values())
     record(GID, "PT-32b", "adapter refuses to start: R_max >= retention - margin; margin >= retention",
            "PT-32 / PA-05, PA-13", "SI-15", verdict(ok), f"{res}")
-    s, r = adapter_trial(cfg_mut=lambda c: c["provider"].__setitem__("retention_s", 400))
-    record(GID, "PT-32c", "retention_s configured above simpay's idempotency_retention_s (400 > 300): refused at start",
+    # Draft 3.3 §11 PT-32 / §3.1 (DEMOP-F03): retention_s is an operator statement the adapter cannot
+    # verify; the start-up rule is tested against the configured value (R_max 180, margin 60).
+    s, r = adapter_trial(cfg_mut=lambda c: c["provider"].__setitem__("retention_s", 240))
+    record(GID, "PT-32c", "configured retention_s lowered so that R_max >= retention_s - margin (180 >= 240 - 60): refused at start",
            "PT-32 / PA-13", "SI-15", verdict(s is False and bool(r)),
-           f"started={s} refuse={r} (see FINDINGS DEMOP-F03: the adapter has no source for simpay's retention)")
+           f"started={s} refuse={r} (retention above the provider's actual value is not checkable: spec §10)")
     s, r = adapter_trial(cfg_mut=lambda c: c["provider"].__setitem__("idem_key_not_before", int(time.time()) + 86400))
     record(GID, "PT-36a", "idem_key_not_before in the future: adapter refuses to start",
            "PT-36 / §3.3 rule 3", "SI-09", verdict(s is False and bool(r)), f"started={s} refuse={r}")
@@ -1904,10 +1927,16 @@ def t_pt29_40_43_broker_compromise():
     time.sleep(0.5)
     after = len(creates_sent(pid_hex(pid)))
     window = [e for e in adapter_events() if e.get("event") == "p_request"][n0:]
-    sent = [e for e in window if e.get("provider_request_started")]
-    ok = codes[:4] == ["malformed_request"] * 4 and codes[4:] == ["idem_kid_mismatch"] * 4 and before == after and not sent
+    # Only this probe's own requests (by correlation id): the broker's lookup-only settlement watch
+    # (Draft 3.3 §7.3, DEMOP-F06) legitimately sends refund.get for other rows during the window.
+    cids = {x.get("correlation_id") for x in rs if isinstance(x, dict) and x.get("correlation_id")}
+    mine = [e for e in window if e.get("correlation_id") in cids]
+    sent = [e for e in mine if e.get("provider_request_started")]
+    ok = codes[:4] == ["malformed_request"] * 4 and codes[4:] == ["idem_kid_mismatch"] * 4 and before == after \
+        and len(cids) == 8 and not sent
     record(GID, "PT-43", "every op on P with a missing / foreign idem_kid: malformed_request / idem_kid_mismatch; nothing sent",
-           "PT-43 / PC-A-01, BP-01", "SI-09", verdict(ok), f"replies={codes} creates {before}->{after}")
+           "PT-43 / PC-A-01, BP-01", "SI-09", verdict(ok),
+           f"replies={codes} creates {before}->{after} own_requests={len(mine)} sent_to_provider={len(sent)}")
 
 
 # =============================================================================== PT: DB roles
@@ -1930,12 +1959,13 @@ def t_pt30_31_39_db():
     stmts = {
         "update_orders": "UPDATE nodkey.orders SET status='refunded' WHERE order_id=1001",
         "select_for_update": "SELECT order_id FROM nodkey.orders WHERE order_id=1001 FOR UPDATE",
-        "alter_role": "ALTER ROLE nodkey_broker SET search_path = 'public'",
         "grant": "GRANT SELECT ON nodkey.orders TO PUBLIC",
         "create_in_nodkey": "CREATE TABLE nodkey.x (a int)",
         "create_in_public": "CREATE TABLE public.x (a int)",
         "create_temp": "CREATE TEMP TABLE x (a int)",
         "shadow_view": "CREATE VIEW public.orders AS SELECT 1",
+        # Draft 3.3 §2 PA-17: changing the session search_path does not help create a shadow.
+        "shadow_after_set_path": "SET LOCAL search_path = public, nodkey; CREATE VIEW orders AS SELECT 1",
     }
     res = {k: as_role("nodkey_broker", s) for k, s in stmts.items()}
     refused = {k: ("permission denied" in v or "must be" in v or "no privileges were granted" in v) for k, v in res.items()}
@@ -1944,11 +1974,33 @@ def t_pt30_31_39_db():
     bpaths = infra("broker", "path=/etc/nodkey-adapter/keys.json", "path=/etc/nodkey-adapter/config.json",
                    "path=/run/adapter-secrets/k_idem", "path=/run/adapter-secrets/simpay_key", "path=/run/pg-adapter")
     absent = all(v == "absent" for k, v in bpaths.items() if k.startswith("path "))
-    ok = all(refused.values()) and "pg_hba.conf rejects" in hba and absent
-    record(GID, "PT-31", "broker role: UPDATE / FOR UPDATE / ALTER ROLE / GRANT / CREATE (any schema, temp) / shadowing view refused; adapter role over TCP rejected by pg_hba; adapter inputs absent in broker",
+    # Draft 3.3 §2 PA-17 / PT-31 (DEMOP-F07): the control is "nothing can be created anywhere" plus
+    # pinned function search_path; ALTER ROLE on one's own session defaults is permitted by
+    # PostgreSQL and is not expected to be refused.
+    roles = "('nodkey_broker','nodkey_payments_adapter','nodkey_shop_operator')"
+    db_privs = psql(f"SELECT string_agg(r.rolname || '@' || d.datname, ',') FROM pg_roles r CROSS JOIN pg_database d "
+                    f"WHERE r.rolname IN {roles} AND (has_database_privilege(r.oid, d.oid, 'CREATE') "
+                    f"OR has_database_privilege(r.oid, d.oid, 'TEMPORARY'))")
+    schema_privs = psql(f"SELECT string_agg(r.rolname || '@' || n.nspname, ',') FROM pg_roles r CROSS JOIN pg_namespace n "
+                        f"WHERE r.rolname IN {roles} AND has_schema_privilege(r.oid, n.oid, 'CREATE')")
+    role_attrs = psql(f"SELECT string_agg(rolname, ',') FROM pg_roles WHERE rolname IN {roles} "
+                      f"AND (rolsuper OR rolcreatedb OR rolcreaterole)")
+    unpinned = psql("SELECT string_agg(p.oid::regprocedure::text, ',') FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                    "WHERE n.nspname IN ('public','nodkey') AND NOT EXISTS "
+                    "(SELECT 1 FROM unnest(coalesce(p.proconfig, '{}')) c WHERE c LIKE 'search_path=%')")
+    n_roles = psql(f"SELECT count(*) FROM pg_roles WHERE rolname IN {roles}")
+    catalog_ok = db_privs == "" and schema_privs == "" and role_attrs == "" and unpinned == "" and n_roles == "3"
+    alter_role = as_role("nodkey_broker", "ALTER ROLE nodkey_broker SET search_path = 'public'")
+    ok = all(refused.values()) and catalog_ok and "pg_hba.conf rejects" in hba and absent
+    record(GID, "PT-31", "broker role: UPDATE / FOR UPDATE / GRANT / CREATE (any schema, temp) / shadowing view (also after SET search_path) refused; "
+           "no Nodkey role has CREATE on any schema or CREATE/TEMPORARY on any database; functions pin search_path; "
+           "adapter role over TCP rejected by pg_hba; adapter inputs absent in broker",
            "PT-31 / PA-03, PA-15..17", "SI-02/SI-10", verdict(ok),
            f"refused={refused} not_refused={ {k: (v.splitlines() or ['succeeded'])[0][:70] for k, v in res.items() if not refused[k]} } "
-           f"pg_hba={'rejects' if 'pg_hba.conf rejects' in hba else hba[:80]!r} broker_paths_absent={absent} (ALTER ROLE: FINDINGS DEMOP-F07)")
+           f"db_create_temp={db_privs or 'none'} schema_create={schema_privs or 'none'} role_attrs={role_attrs or 'none'} "
+           f"unpinned_functions={unpinned or 'none'} "
+           f"pg_hba={'rejects' if 'pg_hba.conf rejects' in hba else hba[:80]!r} broker_paths_absent={absent} "
+           f"alter_own_role_defaults={'permitted (residual, spec §10)' if not alter_role else alter_role.splitlines()[0][:60]}")
     # PT-39: counters out of step; operator updates; operator cannot touch broker tables.
     _, e = psql_err(f"BEGIN; UPDATE nodkey.charge_refund_state SET succeeded_minor = succeeded_minor + 1 "
                     f"WHERE charge_id='{lg['charge_id']}'; COMMIT;")

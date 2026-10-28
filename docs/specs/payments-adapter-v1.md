@@ -1,10 +1,11 @@
 # Nodkey payments adapter v1 — refunds against simpay (Demo P)
 
-- **Status:** **Draft 3.2** (2026-10-26). Amends Draft 3 after the code reviews
+- **Status:** **Draft 3.3** (2026-10-28). Resolves the Demo P conformance findings DEMOP-F03..F08
+  (`tests/demop/FINDINGS.md`); changes in §15. Draft 3.2 (2026-10-26) amended Draft 3 after the code reviews
   [`2026-10-26-payments-adapter-code-review.md`](../reviews/2026-10-26-payments-adapter-code-review.md) (PC-A-xx) and
   [`2026-10-26-broker-payments-review.md`](../reviews/2026-10-26-broker-payments-review.md) (BP-xx); changes in §14.
   Supersedes Draft 2 (changes in §13; Draft 1 → 2 in §12). Implemented as a prototype in
-  `crates/nodkey-payments-adapter` and `broker/src/v2/payments.rs`; Draft 3.2 is not yet re-reviewed.
+  `crates/nodkey-payments-adapter` and `broker/src/v2/payments.rs`; Drafts 3.2 and 3.3 are not yet re-reviewed.
 - **Implements:** [ADR-0012](../decisions/0012-payments-adapter.md) (rev. 2, Proposed) and
   [ADR-0006](../decisions/0006-replay-and-effect-state.md) Amendment 2 (reconciler resend; OQ-10).
 - **Builds on:** [effect-protocol-v2](effect-protocol-v2.md) **Draft 3.1** (`payments.refund` now binds
@@ -104,7 +105,7 @@ The adapter refuses to start unless every check in this table holds, and re-read
 | Operation declaration | `payments.refund` opv 1 placements (§3.1) | compiled into the adapter; not configurable |
 | Orders view: privileges | `SELECT order_id, ten, owner_sub, charge_id, currency FROM nodkey.orders WHERE order_id = $1` | DB role `nodkey_payments_adapter`: `SELECT` on those columns only, nothing else. `nodkey.orders` is owned by `postgres`; only `nodkey_shop_operator` may write it; `nodkey_broker` has `SELECT` only (no `UPDATE`, so it cannot even lock rows), no `CREATEROLE`, ownership or `GRANT` option. Password file owner adapter, `0400` |
 | Orders view: transport | Unix socket in `pg-adapter` | mounted into PostgreSQL and the adapter only; server peer uid checked; `pg_hba` rejects the adapter role over TCP (§1) |
-| Orders view: name resolution (PA-17) | schema-qualified names | every table used by any Nodkey role is in schema `nodkey` (owner `postgres`) and every statement names it `nodkey.<table>`; `ALTER ROLE … SET search_path = ''` for `nodkey_broker`, `nodkey_payments_adapter` and `nodkey_shop_operator`; `REVOKE CREATE, TEMPORARY ON DATABASE ledger FROM PUBLIC`; `REVOKE CREATE ON SCHEMA public FROM PUBLIC`; no Nodkey role has `CREATE` on any schema. A shadowing table or view therefore cannot be created, and would not be resolved |
+| Orders view: name resolution (PA-17) | schema-qualified names; nothing can be created | **The control (Draft 3.3):** (1) every statement issued by the broker and the adapter names every object schema-qualified (`nodkey.<table>`, `public.<table>`); (2) every function in schemas `nodkey` and `public` pins `search_path` (`SET search_path = ''` or `pg_catalog, public`); (3) no Nodkey role (`nodkey_broker`, `nodkey_payments_adapter`, `nodkey_shop_operator`) has `CREATE` on any schema, nor `CREATE` or `TEMPORARY` on any database of the cluster (`REVOKE CREATE, TEMPORARY ON DATABASE ledger, postgres, template1 FROM PUBLIC`; `REVOKE CREATE ON SCHEMA public FROM PUBLIC`; no `SUPERUSER`, `CREATEDB`, `CREATEROLE`). No object that could shadow a qualified name, or capture an unqualified one, can therefore exist. **Not a control:** the per-role default `ALTER ROLE … SET search_path = ''` is defence in depth only — PostgreSQL lets any role `ALTER ROLE` its own session defaults and `SET search_path` in its session, so a compromised broker can change its own `search_path` (DEMOP-F07); with (1)–(3) that changes nothing it resolves |
 | Clock | host `CLOCK_REALTIME` | no container has `CAP_SYS_TIME`; Linux time namespaces do not virtualize `CLOCK_REALTIME`; the adapter refuses to verify while the clock reads below 2024-01-01. Host clock rollback is attacker I (residual) |
 | simpay key, `K_idem` | secrets | files owner adapter uid, mode `0400`, not symlinks; never mounted into the broker |
 | Pinned CA | one certificate | owner root, `0444`, exactly one certificate |
@@ -172,10 +173,12 @@ and §3.2 are the adapter's independent checks.
 behaviour above. `verify_binding` is **not yet implemented**; until it is, the adapter MUST refuse lookups
 rather than call `verify_retransmission` with a widened age (that would merge the two types).
 
-**`R_max` start-up rule.** `R_max_s < provider_retention_s − resend_margin_s`, and `resend_margin_s <
-provider_retention_s ≤` the profile's documented minimum retention (simpay: its configured
-`idempotency_retention_s`; Stripe: 86 400). Otherwise the adapter refuses to start. Defaults:
-retention 86 400, margin 7 200, `R_max` 43 200.
+**`R_max` start-up rule.** With `retention_s` the configured provider retention: `R_max_s < retention_s −
+resend_margin_s` and `resend_margin_s < retention_s`; otherwise the adapter refuses to start. Defaults:
+retention 86 400, margin 7 200, `R_max` 43 200. **`retention_s` is an operator statement (Draft 3.3,
+DEMOP-F03):** it MUST NOT exceed the provider's actual key retention (simpay: its configured
+`idempotency_retention_s`; Stripe: documented 86 400), but the adapter has no source for that value and
+cannot check it; a value set too high re-opens a resend after the provider pruned the key (§10).
 
 ### 3.2 Order check against the adapter's own view
 
@@ -462,10 +465,24 @@ misconfigured retention cannot produce a resend after the provider could have pr
 (steps 1 and 4, settlement) are not age-bounded.
 
 **Settlement:** for `SUCCEEDED` with `settlement = pending`, `refund.get` on the same backoff for up to
-30 days; `failed` → alarm, amount stays encumbered. **One rule for both paths (BP-09):** a refund that the
-provider confirms (identical `refund.get`) is `SUCCEEDED`, with `settlement` = its status, whether the
-dispatcher or the reconciler confirms it; `failed` raises the alarm. `payments.get_order.refunded_minor`
-therefore counts a refund whose settlement failed (§8).
+30 days from `dispatched_at` (then alarm `settlement_unresolved`, polling stops); `failed` → alarm, amount
+stays encumbered. **One rule for both paths (BP-09):** a refund that the provider confirms (identical
+`refund.get`) is `SUCCEEDED`, with `settlement` = its status, whether the dispatcher or the reconciler
+confirms it; `failed` raises the alarm. `payments.get_order.refunded_minor` therefore counts a refund
+whose settlement failed (§8).
+
+**Post-success watch (Draft 3.3, DEMOP-F06).** A provider can move a refund it reported `succeeded` to
+`failed` later (simpay `late_refund_failed`; card refunds can fail after acceptance). For `SUCCEEDED` with
+`settlement = succeeded` (whether set by the dispatcher, the reconciler or settlement polling) the broker
+keeps calling `refund.get` (lookup only, same lease and kid rules as above; never `refund.create`, no
+resend) at 10 s, 1 min, 5 min, 30 min after it became `succeeded`, then daily, until `dispatched_at +
+settlement_watch_s` (broker config, §9; default 30 days, bounds 1 h ..= 90 days). If an identical
+`refund.get` then reports `failed`: `settlement` → `failed`, `anomaly = settlement_reversed`, alarm
+`refund_settlement_failed` (with `previous: succeeded`), and the row stays `SUCCEEDED` with its amount
+encumbered (counted in `succeeded_minor`, never released; §7.4) — the same end state as a refund that
+failed while `pending`. `failed` is final: no further checks. Any other answer (`pending`, `not_found`,
+mismatch, adapter failure) changes nothing and the watch continues. A reversal reported after the window
+is not observed (§10).
 
 **Authority (ADR-0006 Amendment 2).** A resend retransmits the effect decided in T1: the same stored
 grant, no new row, no value from the workload; the adapter re-verifies the grant and its age. It is not
@@ -479,7 +496,7 @@ a grantless effect under SI-19. The workload cannot trigger, delay or shape it.
 | `RESERVED` → `FAILED/not_dispatched`; `DISPATCHED` → `FAILED/not_sent` | `EXECUTING → FAILED` |
 | `DISPATCHED` → `SUCCEEDED` / `UNKNOWN` | `EXECUTING → SUCCEEDED` / `UNKNOWN` |
 | `UNKNOWN` → `SUCCEEDED` / `FAILED` (reconciler only) | `UNKNOWN → SUCCEEDED` / `FAILED` |
-| `SUCCEEDED`: only `settlement` | unchanged |
+| `SUCCEEDED`: only `settlement`: `pending` → `succeeded` / `failed`; `succeeded` → `failed` (post-success watch, §7.3); `failed` is final | unchanged |
 
 Both rows change in one transaction, which also locks the `charge_refund_state` row and moves the amount
 between its counters (`inflight` → `succeeded` / `unknown`, `unknown` → `succeeded`, or out of all three
@@ -528,7 +545,9 @@ Adapter: `{"format":"nodkey.payments-adapter.v1","socket_path","broker_uid","bro
 `R_max` rule; empty `tenants`; `addr` not an IP literal; uid 0 or = `broker_uid`;
 `idem_key_not_before` before 2024-01-01 or in the future; not `connect_ms < total_ms ≤ 60 000`.
 
-Broker: `"payments":{"adapter_socket","adapter_uid","R_max_s","max_resends":5,"adapter_total_ms":10000,"budget":{…}}`.
+Broker: `"payments":{"adapter_socket","adapter_uid","R_max_s","max_resends":5,"adapter_total_ms":10000,
+"settlement_watch_s":2592000,"budget":{…}}`; `settlement_watch_s` (post-success watch, §7.3) is optional
+(default 2 592 000 = 30 days) and refused outside 3 600 ..= 7 776 000.
 At start, and again before every dispatch, reconciliation round and payments tick (§3.3), the broker
 calls `adapter.hello`, requires the format, `r_max_s` = its own, `deadline_ms < adapter_total_ms + 2 s`
 (§1) and no non-final row under another kid, and otherwise does not execute `payments.refund` (records
@@ -565,6 +584,16 @@ P-19 is NOT APPLICABLE in Phase 4 (negative test PT-19).
   costs liveness: an approved grant issued before the rotation and not yet executed can no longer be
   executed (it ends `FAILED/not_dispatched` or `UNKNOWN`). Host clock rollback (attacker I) also defeats
   this rule. A compromised authority (J, out of scope) could sign a later `iat`.
+- **`retention_s` is an operator statement (Draft 3.3, DEMOP-F03).** The adapter checks `R_max_s <
+  retention_s − resend_margin_s` against the configured value only (§3.1); it cannot learn the provider's
+  actual retention. A value above it can allow a same-key resend after the provider pruned the key.
+- **Settlement reversal after the watch (Draft 3.3, DEMOP-F06).** A provider that moves a refund from
+  `succeeded` to `failed` after `dispatched_at + settlement_watch_s` is not observed by the broker; the
+  row stays `succeeded`. The operator's alarm-only charge comparison (§7.1) is the remaining detector.
+- **Own session defaults (Draft 3.3, DEMOP-F07).** A compromised broker (or adapter) can `ALTER ROLE` its
+  own role's session defaults and `SET search_path`. This is not prevented; it is harmless because every
+  statement is schema-qualified, every function pins `search_path`, and the role can create no object
+  anywhere (§2, PA-17).
 - **Rows under a lost key.** A non-final row whose `K_idem` is lost stays unresolved (no lookup or
   resend is possible under another key); the charge stays blocked and payment processing stays refused
   until the operator restores the key or resolves the row by hand against provider listings.
@@ -588,7 +617,7 @@ positive control** (shop holds `rk_sim_…`, reaches simpay directly; the attack
 | PT-07 | `commit_after_delay` > `total_ms` | `in_progress` → no resend; resolves `SUCCEEDED`; ledger 1 | P-07 |
 | PT-08 | `commit_then_500` | `find` resolves `SUCCEEDED`; ledger 1 | P-08 |
 | PT-09 | `fail_before_commit`, `rate_limit`, `inflight_409`, `drop_before_commit` | `find` not_found → same-key resend → one refund | P-09, SI-09 |
-| PT-10 | Bad `amount_minor` forms; duplicate key; `charge_id` supplied in propose | `invalid_argument` | P-10, P-12, SI-08 |
+| PT-10 | Bad `amount_minor` forms; duplicate key; `charge_id` supplied in propose | `invalid_argument`, except duplicate key → `malformed_request` (strict framing rejects the line before argument validation, effect-protocol-v2 §1.2; Draft 3.3, DEMOP-F04); no record in every case | P-10, P-12, SI-08 |
 | PT-11 | Refund > remaining (fresh, after partial, while another `UNKNOWN`) | denied before dispatch; adapter call count 0 | P-11, SI-11 |
 | PT-12 | Extra members in propose and in P requests | `invalid_argument` / `malformed_request`; nothing sent | P-12, SI-16 |
 | PT-13 | From shop, **broker, authority, gateway**: route to 172.30.30.20, `pay-egress` membership, adapter socket, simpay admin; shop to DB; stolen key from another address | no route / not member / absent; simpay `401 source_address_not_allowed` | P-13, SI-01, SI-03 |
@@ -596,12 +625,12 @@ positive control** (shop holds `rk_sim_…`, reaches simpay directly; the attack
 | PT-15 | `UNKNOWN` beyond `resend_deadline` / `R_max` (test profile) | no create sent (adapter log); `operator_required` | P-15, SI-15 |
 | PT-16 | `lie_*`, `phantom_success`, `deny_but_commit` | never `SUCCEEDED` on a lie; `phantom_success` (not cached by simpay, `api.rs`) → `find` not_found → resend executes once; `deny_but_commit` → `find` → `SUCCEEDED` + alarm; ledger ≤ 1 | P-16, SI-15 |
 | PT-17 | `redirect` to a harness listener | `UNKNOWN`; listener sees 0 connections | P-17, SI-02 |
-| PT-18 | Oversized, slow drip, `malformed_json`, `header_injection`, `hostile_error_text` | bounded; `ambiguous` — except `header_injection/crlf_injection` (syntactically valid extra header fields on an exact 200, never read or followed) → `created`, confirmed by `refund.get` (PC-A-07); every other `header_injection` variant → `ambiguous/bad_headers`; no provider text anywhere (byte search) | P-18, SI-16 |
+| PT-18 | Oversized, slow drip, `malformed_json`, `header_injection`, `hostile_error_text` | bounded; `ambiguous` — except `header_injection/crlf_injection` (syntactically valid extra header fields on an exact 200, never read or followed) → `created`, confirmed by `refund.get` (PC-A-07); `hostile_error_text` (`400` with an unknown error code) → `refused/other_4xx` per §6.2, row `UNKNOWN` + alarm, resolved by lookup (Draft 3.3, DEMOP-F05); every other `header_injection` variant → `ambiguous` with any cause (`bare_cr` → `bad_headers`; `te_and_cl` may surface as `bad_headers` or `reset_after_send` depending on where the HTTP stack rejects it; Draft 3.3, DEMOP-F08); in every case one refund at most and no corrupted state (row resolves to the provider's outcome); no provider text anywhere (byte search) | P-18, SI-16 |
 | PT-19 | Listening sockets in adapter and broker namespaces | none | P-19 (N/A) |
 | PT-20 | Owner/status change after approval; update of an immutable `orders` column | denied, no adapter call; trigger rejects | SI-10, SI-11 |
 | PT-21 | Crash broker after T1, after T2, after send; crash adapter mid-request; stall DB at T3 | no duplicate; ledger matches final state | SI-09, SI-15 |
 | PT-22 | Budget: 4th refund; over limit; 32 concurrent T1s; unconfigured currency; **two refunds across UTC midnight** | spent ≤ limit per day; 2× across midnight only | AR-05 |
-| PT-23 | `late_refund_failed` | settlement `failed`, alarm, encumbered | §7.3 |
+| PT-23 | `late_refund_failed` (refund `succeeded` at creation, `failed` afterwards); `failed` while `pending`; reversal after `settlement_watch_s` | post-success watch records settlement `failed`, anomaly `settlement_reversed`, alarm, amount encumbered, row `SUCCEEDED`, only `refund.get` calls (no create); `failed` final; no check after the window (Draft 3.3, DEMOP-F06) | §7.3 |
 | PT-24 | Wrong-uid peer on P both ways; adapter config with DNS name, two CAs, readable key file | closed + alarm; refuses start | §1, §2 |
 | PT-25 | Wrong CA, wrong SAN, TLS 1.2-only, plain HTTP | `FAILED/not_sent`; ledger 0 | §5 |
 | PT-26 | Derivation vectors for `idem_key`, `reference`, `idem_kid`; resend fingerprint equal to first | vectors match; no `params_mismatch` | §3.3, OQ-10 |
@@ -609,8 +638,8 @@ positive control** (shop holds `rk_sim_…`, reaches simpay directly; the attack
 | PT-28 | Restore drill (§10) | non-final rows → `UNKNOWN`; no duplicate | SI-09 |
 | PT-29 | **Broker-compromise suite** on P (test client with broker uid): no grant; grant for another op; read grant; other `wid`/`aud`; `cfm = 0`; foreign key; valid grant whose order now has another owner; same grant 20× (sequential and concurrent); grant older than `R_max`; expired never-executed grant younger than `R_max` | all refused, nothing sent — except: same grant 20× → ledger 1; expired-but-young grant → one refund (published residual) | PA-01..03, SI-05, SI-06 |
 | PT-30 | `orders`: second row with an existing `charge_id`; cross-tenant charge; operator-role insert attempted from shop, broker and adapter | unique violation; rejected; no path (connection refused / permission denied) | PA-04, SI-10 |
-| PT-31 | §2 inputs: registry, config, CA, key, `K_idem` writable by or present in the broker; broker attempts `UPDATE`, `SELECT … FOR UPDATE` on `nodkey.orders`, `ALTER ROLE`, `GRANT`, `CREATE` in any schema, `CREATE TEMP`, a shadowing `orders` view; `pg-adapter` absent in the broker; adapter role over TCP | adapter refuses start; DB permission denied / path absent / `pg_hba` reject | PA-03, PA-15..17 |
-| PT-32 | Broker clock set back past a row's deadline; retention configured above simpay's; `margin ≥ retention`; `R_max` violating §3.1 | no resend after the real window (adapter refuses); refusals at start | PA-05, PA-13 |
+| PT-31 | §2 inputs: registry, config, CA, key, `K_idem` writable by or present in the broker; broker attempts `UPDATE`, `SELECT … FOR UPDATE` on `nodkey.orders`, `GRANT`, `CREATE` in any schema, `CREATE TEMP`, a shadowing `orders` view (also after `SET search_path = public, nodkey`); catalog check: no Nodkey role has `CREATE` on any schema or `CREATE`/`TEMPORARY` on any database, and every function in `nodkey`/`public` pins `search_path`; `pg-adapter` absent in the broker; adapter role over TCP | adapter refuses start; DB permission denied / catalog check empty / path absent / `pg_hba` reject. `ALTER ROLE` on the role's own session defaults is **not** expected to be refused (PostgreSQL permits it; §2, §10; Draft 3.3, DEMOP-F07) | PA-03, PA-15..17 |
+| PT-32 | Broker clock set back past a row's deadline; `R_max_s ≥ retention_s − resend_margin_s` for the **configured** `retention_s`; `margin ≥ retention`; `R_max` violating §3.1 | no resend after the real window (adapter refuses); refusals at start. A `retention_s` above the provider's actual retention is an operator statement the adapter cannot verify and is not a test case (§3.1, §10; Draft 3.3, DEMOP-F03) | PA-05, PA-13 |
 | PT-33 | Dispatcher vs reconciler under an injected 60 s T3 delay | at most one adapter call in flight per row; late T3 discarded; ledger 1 | PA-06 |
 | PT-34 | Reason oracle: proposals on a foreign order in each status, currency, busy and budget state | always `not_permitted` | PA-07 |
 | PT-35 | HTTP edge: `1xx` then 200; 65 headers; non-ASCII header byte; short `Content-Length`; chunked trailers; list of 3 or `has_more` | classified `ambiguous`/as specified; never `created` from malformed input | PA-10 |
@@ -667,3 +696,15 @@ positive control** (shop holds `rk_sim_…`, reaches simpay directly; the attack
 | Confirmation compares the reference; `provider_refund_id` unique; one settlement rule for both paths; `grant` → `not_permitted` | BP-08, BP-09, BP-11 |
 | Operator files: owner root, parents root-owned, one checked read | PC-A-03 |
 | PT-18 `crlf_injection` → `created`; PT-36, PT-39 extended; PT-43, PT-44 added; §10 residuals (activation time, lost key, id probing) | PC-A-07, PC-A-09 |
+
+## 15. Changes from Draft 3.2 (Draft 3.3)
+
+Resolves the Demo P conformance findings in `tests/demop/FINDINGS.md`.
+
+| Change | Source |
+|---|---|
+| `retention_s` stated as an operator statement the adapter cannot verify (§3.1, §10); PT-32 tests the start-up rule against the configured value only | DEMOP-F03 |
+| PT-10: duplicate key → `malformed_request` (framing), not `invalid_argument` | DEMOP-F04 |
+| PT-18: `hostile_error_text` → `refused/other_4xx` (as §6.2 already specified); `te_and_cl` → any `ambiguous` cause; one refund at most and no corrupted state in every case | DEMOP-F05, DEMOP-F08 |
+| Post-success settlement watch: `succeeded` rows re-checked with `refund.get` (lookup only) until `dispatched_at + settlement_watch_s` (broker config, default 30 days, 1 h ..= 90 days); a reversal → `settlement = failed`, anomaly `settlement_reversed`, alarm, encumbered; §7.4 and the DB guard allow `succeeded → failed`; residual for reversals after the window; PT-23 extended | DEMOP-F06 |
+| PA-17 restated: the control is schema-qualified SQL, pinned function `search_path`, and no `CREATE`/`TEMPORARY` for any Nodkey role on any schema or database (incl. `postgres`, `template1`); per-role `search_path = ''` is defence in depth, since a role can `ALTER ROLE` its own session defaults; PT-31 tests exactly that | DEMOP-F07 |

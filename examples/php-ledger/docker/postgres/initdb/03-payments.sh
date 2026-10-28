@@ -3,7 +3,11 @@
 # the broker-owned per-charge state, payment effects, budgets and refund denial reasons.
 # Runs once after 01-ledger.sh and 02-effects-v2.sh, as the postgres OS user, over the local socket.
 #
-# Name resolution (PA-17): every Nodkey role gets search_path = '' and every broker statement is
+# Name resolution (PA-17, Draft 3.3): the control is that every broker/adapter statement is
+# schema-qualified, every function pins its search_path, and no Nodkey role has CREATE on any
+# schema or CREATE/TEMPORARY on any database, so no shadowing object can exist. The per-role
+# `search_path = ''` below is defence in depth only: PostgreSQL lets a role ALTER ROLE its own
+# session defaults (DEMOP-F07). Every Nodkey role gets search_path = '' and every broker statement is
 # schema-qualified (`public.<ledger and v2 tables>`, `nodkey.<payments tables>`). The existing
 # ledger and v2 tables stay in `public`, so Demo 1 and Demo 2 (which do not run this file) are
 # unchanged; their trigger functions are pinned to `pg_catalog, public` here so they still resolve
@@ -30,6 +34,9 @@ CREATE ROLE nodkey_payments_adapter NOLOGIN NOINHERIT;
 CREATE ROLE nodkey_shop_operator NOLOGIN NOINHERIT;
 -- Owner of the counter check (BP-02): may read the two tables it compares, nothing else.
 CREATE ROLE nodkey_payments_checker NOLOGIN NOINHERIT;
+-- PA-17 (Draft 3.3): no Nodkey role may create objects in any database of the cluster, so the
+-- default PUBLIC CREATE/TEMPORARY on the maintenance databases is removed too (`ledger` below).
+REVOKE CREATE, TEMPORARY ON DATABASE postgres, template1 FROM PUBLIC;
 SQL
 role_login nodkey_payments_adapter /run/secrets/db_adapter_password
 role_login nodkey_shop_operator /run/secrets/db_operator_password
@@ -181,10 +188,13 @@ BEGIN
     IF OLD.state = 'FAILED' THEN
         RAISE EXCEPTION 'payment_effect: FAILED is final';
     END IF;
+    -- SUCCEEDED changes only the settlement: pending -> any; succeeded -> failed (a reversal seen
+    -- by the post-success watch, payments-adapter-v1 Draft 3.3 §7.3); failed is final.
     IF OLD.state = 'SUCCEEDED' AND (NEW.state <> 'SUCCEEDED'
          OR NEW.provider_refund_id IS DISTINCT FROM OLD.provider_refund_id
-         OR (OLD.settlement <> 'pending' AND NEW.settlement IS DISTINCT FROM OLD.settlement)) THEN
-        RAISE EXCEPTION 'payment_effect: SUCCEEDED changes only a pending settlement';
+         OR (OLD.settlement <> 'pending' AND NEW.settlement IS DISTINCT FROM OLD.settlement
+             AND NOT (OLD.settlement = 'succeeded' AND NEW.settlement = 'failed'))) THEN
+        RAISE EXCEPTION 'payment_effect: SUCCEEDED changes only a pending settlement, or succeeded to failed';
     END IF;
     IF NEW.state <> OLD.state AND NOT (
             (OLD.state = 'RESERVED'   AND NEW.state IN ('DISPATCHED','FAILED'))

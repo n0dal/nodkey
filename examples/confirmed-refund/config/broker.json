@@ -6,7 +6,7 @@
  "limits":{"pending_per_wid":64,"pending_per_approver":32,"proposals_per_min":240,"proposal_burst":120,"status_per_min":2400,"pending_lifetime_s":120,"reads_per_min":600,"db_conns_per_wid":2},
  "gateway":{"socket_path":"/run/nodkey/gw-broker/broker.sock","uid":10005},
  "authority":{"socket_path":"/run/nodkey/au-broker/broker.sock","uid":10004},
- "payments":{"adapter_socket":"/run/nodkey/br-pay/adapter.sock","adapter_uid":10006,"R_max_s":180,"max_resends":5,"adapter_total_ms":5000,
+ "payments":{"adapter_socket":"/run/nodkey/br-pay/adapter.sock","adapter_uid":10006,"R_max_s":180,"max_resends":5,"adapter_total_ms":5000,"settlement_watch_s":2592000,
    "budget":{"max_count_per_day":3,"limits_minor":{"USD":20000,"EUR":20000,"JPY":20000}}},
  "workloads":[
   {"wid":"spiffe://nodkey.demo/workload/shop","display_name":"Demo shop (self-service refunds)","socket_path":"/run/nodkey/wl/shop/broker.sock","uid":10001,

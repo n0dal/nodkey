@@ -78,7 +78,12 @@ It also needs the effect-protocol-v2 Draft 3.1 `payments.refund` declaration, wh
   - `charge_refund_state` (per-charge lock and counters, checked at commit);
   - `payment_effect`, `refund_budget`, `refund_denial`.
 
-  Every Nodkey role has an empty `search_path`, and every broker statement is schema-qualified.
+  Every broker statement is schema-qualified, every function pins its `search_path`, and no Nodkey
+  role can create objects in any schema or database (`CREATE`/`TEMPORARY` revoked). Each role's default
+  `search_path` is empty, but that is defence in depth only: a role can change its own session defaults.
+- Settlement: `pending` rows are polled with `refund.get`; `succeeded` rows stay under a lookup-only
+  post-success watch until `dispatched_at + payments.settlement_watch_s` (default 30 days). A later
+  `failed` is recorded with anomaly `settlement_reversed` and an alarm; the amount stays encumbered.
 - Propose resolves `charge_id` from `orders` (or `unresolved`) into the record.
 - T1 runs consumption, the ordered W14 checks, the budget, encumbrance and `RESERVED` in one
   transaction.

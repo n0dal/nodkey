@@ -9,7 +9,8 @@
 //!   under the same lease.
 //! - **Recovery and reconciliation** ([`Broker::payments_tick`]): stale `RESERVED` →
 //!   `FAILED/not_dispatched`; `DISPATCHED` with an expired lease → `UNKNOWN/lost_response`;
-//!   lookup-first reconciliation of `UNKNOWN`; settlement polling.
+//!   lookup-first reconciliation of `UNKNOWN`; settlement polling and the post-success
+//!   settlement watch (lookup only).
 //!
 //! Every adapter call on a row is made by the holder of that row's lease, taken by a committed CAS
 //! before the call (PA-06). Lock order: `pending_effect` → `refund_budget` →
@@ -61,6 +62,22 @@ pub fn backoff_s(round: u32) -> u64 {
 pub const LOOKUP_ONLY_PERIOD_S: u64 = 86_400;
 pub const LOOKUP_ONLY_WINDOW_S: u64 = 7 * 86_400;
 pub const SETTLEMENT_WINDOW_S: u64 = 30 * 86_400;
+
+/// Cadence of the post-success settlement watch (§7.3): 10 s, 1 min, 5 min, 30 min, then daily.
+pub fn watch_backoff_s(round: u32) -> u64 {
+    if round <= 3 {
+        backoff_s(round)
+    } else {
+        LOOKUP_ONLY_PERIOD_S
+    }
+}
+
+/// Next check of a `SUCCEEDED` row whose settlement is `succeeded` (§7.3 post-success watch):
+/// `None` once `now` has reached `dispatched_at + watch_s`.
+pub fn watch_next(now: u64, dispatched_at: u64, watch_s: u64, round: u32) -> Option<u64> {
+    (now < dispatched_at.saturating_add(watch_s))
+        .then(|| now.saturating_add(watch_backoff_s(round)))
+}
 
 pub fn utc_day(now: u64) -> i32 {
     i32::try_from(now / 86_400).unwrap_or(i32::MAX)
@@ -489,6 +506,8 @@ pub struct EffectRow {
     pub resend_stopped: bool,
     pub provider_refund_id: Option<String>,
     pub reason: Option<String>,
+    /// `pending`, `succeeded` or `failed` on `SUCCEEDED` rows; `None` otherwise.
+    pub settlement: Option<String>,
     /// The derived reference from the first adapter result (audit; checked once known, BP-08).
     pub reference: Option<String>,
     pub grant_text: String,
@@ -510,7 +529,7 @@ async fn effect_row(c: &impl GenericClient, pid: &[u8; 16]) -> Result<Option<Eff
         .query_opt(
             "SELECT e.charge_id, e.amount_minor, e.currency, e.idem_kid, e.state, e.resends, e.reconcile_rounds, \
              e.resend_deadline, e.dispatched_at, e.resend_stopped, e.provider_refund_id, e.reason, p.grant_bytes, \
-             e.reference \
+             e.reference, e.settlement \
              FROM nodkey.payment_effect e JOIN public.pending_effect p ON p.pending_id = e.pending_id \
              WHERE e.pending_id = $1",
             &[&pid.as_slice()],
@@ -535,6 +554,7 @@ async fn effect_row(c: &impl GenericClient, pid: &[u8; 16]) -> Result<Option<Eff
         provider_refund_id: r.try_get(10).map_err(unavailable)?,
         reason: r.try_get(11).map_err(unavailable)?,
         reference: r.try_get(13).map_err(unavailable)?,
+        settlement: r.try_get(14).map_err(unavailable)?,
         grant_text: encode_transport(&grant),
     }))
 }
@@ -837,6 +857,7 @@ impl Broker {
         let to = to.clone();
         let reference = reference.filter(|r| !r.is_empty()).map(str::to_owned);
         let extra = extra.to_owned();
+        let watch_s = rt.cfg.settlement_watch_s;
         let conn = self.conn().await?;
         Self::run(conn, async move |c: &mut Client| {
             let tx = c.transaction().await.map_err(dbf("begin"))?;
@@ -853,8 +874,16 @@ impl Broker {
                 PayTo::Failed { reason } => ("FAILED", Some(*reason), true, None, None),
                 PayTo::Unknown { reason } => ("UNKNOWN", Some(*reason), false, None, None),
             };
-            let next_check = (state == "UNKNOWN").then(|| to_i64(now + backoff_s(0)))
-                .or_else(|| (state == "SUCCEEDED" && settlement == Some("pending")).then(|| to_i64(now + backoff_s(0))));
+            // UNKNOWN: reconciler; SUCCEEDED pending: settlement polling; SUCCEEDED succeeded:
+            // post-success watch while the window is open (§7.3); settlement failed: final.
+            let next_check = match (state, settlement) {
+                ("UNKNOWN", _) | ("SUCCEEDED", Some("pending")) => Some(now + backoff_s(0)),
+                ("SUCCEEDED", Some("succeeded")) => {
+                    watch_next(now, row.dispatched_at.unwrap_or(now), watch_s, 0)
+                }
+                _ => None,
+            }
+            .map(to_i64);
             // $9 is always referenced so that its type is known.
             let lease_cond = if lease { " AND lease_owner = $9" } else { " AND $9::bytea IS NOT NULL" };
             let sql = format!(
@@ -1254,7 +1283,12 @@ impl Broker {
         Ok(PayOutcome::StillUnknown)
     }
 
-    /// Settlement polling for `SUCCEEDED` rows with `settlement = pending` (§7.3).
+    /// Settlement polling (§7.3), lookup only (`refund.get`; never `refund.create`):
+    /// - `settlement = pending`: until `succeeded` or `failed`, for up to [`SETTLEMENT_WINDOW_S`];
+    /// - `settlement = succeeded` (post-success watch): until `dispatched_at +
+    ///   settlement_watch_s`. A later `failed` from the provider is recorded (`settlement =
+    ///   failed`, anomaly `settlement_reversed`), alarmed, and the amount stays encumbered; the
+    ///   row stays `SUCCEEDED` (§7.4). Any other answer changes nothing.
     pub async fn poll_settlement(&self, pid: [u8; 16]) -> Result<PayOutcome, Fail> {
         let rt = self.rt()?;
         let Some(h) = rt.is_ready() else {
@@ -1275,9 +1309,16 @@ impl Broker {
         let Some(id) = row.provider_refund_id.clone() else {
             return Ok(PayOutcome::Skipped);
         };
+        let old: &'static str = match row.settlement.as_deref() {
+            Some("pending") => "pending",
+            Some("succeeded") => "succeeded",
+            // `failed` is final (§7.4); nothing to watch.
+            _ => return Ok(PayOutcome::Skipped),
+        };
         let now = (self.clock)();
         let since = row.dispatched_at.unwrap_or(now);
         let rounds = u32::try_from(row.rounds).unwrap_or(u32::MAX);
+        let watch_s = rt.cfg.settlement_watch_s;
         let g = Held {
             row: &row,
             state: "SUCCEEDED",
@@ -1304,26 +1345,40 @@ impl Broker {
                 _ => None,
             }
         };
-        let (settlement, next): (Option<&str>, Option<u64>) = match status {
-            Some(RefundStatus::Succeeded) => (Some("succeeded"), None),
-            Some(RefundStatus::Failed) => {
-                alarm("refund_settlement_failed", &pid, json!({}));
-                (Some("failed"), None)
-            }
-            _ if now >= since.saturating_add(SETTLEMENT_WINDOW_S) => {
-                alarm("settlement_unresolved", &pid, json!({}));
-                (None, None)
-            }
-            _ => (None, Some(now + backoff_s(rounds + 1))),
-        };
+        let watch = |r: u32| watch_next(now, since, watch_s, r);
+        let (settlement, anomaly, next): (Option<&str>, Option<&str>, Option<u64>) =
+            match (old, status) {
+                ("pending", Some(RefundStatus::Succeeded)) => {
+                    (Some("succeeded"), None, watch(rounds + 1))
+                }
+                ("pending", Some(RefundStatus::Failed)) => {
+                    alarm("refund_settlement_failed", &pid, json!({}));
+                    (Some("failed"), None, None)
+                }
+                ("pending", _) if now >= since.saturating_add(SETTLEMENT_WINDOW_S) => {
+                    alarm("settlement_unresolved", &pid, json!({}));
+                    (None, None, None)
+                }
+                ("pending", _) => (None, None, Some(now + backoff_s(rounds + 1))),
+                // Post-success watch: the provider reports a refund it had settled as failed.
+                (_, Some(RefundStatus::Failed)) => {
+                    alarm(
+                        "refund_settlement_failed",
+                        &pid,
+                        json!({"previous": "succeeded", "anomaly": "settlement_reversed"}),
+                    );
+                    (Some("failed"), Some("settlement_reversed"), None)
+                }
+                (_, _) => (None, None, watch(rounds + 1)),
+            };
         let me = rt.me;
         let conn = self.conn().await?;
         Self::run(conn, async move |c: &mut Client| {
             c.execute(
                 "UPDATE nodkey.payment_effect SET settlement = COALESCE($3, settlement), next_check_at = $4, \
-                 reconcile_rounds = reconcile_rounds + 1, lease_until = $5 WHERE pending_id = $1 AND state = 'SUCCEEDED' \
-                 AND settlement = 'pending' AND lease_owner = $2",
-                &[&pid.as_slice(), &me.as_slice(), &settlement, &next.map(to_i64), &to_i64(now)],
+                 anomaly = COALESCE($7, anomaly), reconcile_rounds = reconcile_rounds + 1, lease_until = $5 \
+                 WHERE pending_id = $1 AND state = 'SUCCEEDED' AND settlement = $6 AND lease_owner = $2",
+                &[&pid.as_slice(), &me.as_slice(), &settlement, &next.map(to_i64), &to_i64(now), &old, &anomaly],
             )
             .await
             .map_err(dbf("settlement"))?;
@@ -1363,8 +1418,8 @@ impl Broker {
                 &[&to_i64(now), &BATCH]).await?)?;
             let due = ids(q("SELECT pending_id FROM nodkey.payment_effect WHERE state = 'UNKNOWN' AND next_check_at <= $1 \
                  AND (lease_until IS NULL OR lease_until < $1) ORDER BY next_check_at LIMIT $2", &[&to_i64(now), &BATCH]).await?)?;
-            let settle = ids(q("SELECT pending_id FROM nodkey.payment_effect WHERE state = 'SUCCEEDED' AND settlement = 'pending' \
-                 AND next_check_at <= $1 AND (lease_until IS NULL OR lease_until < $1) LIMIT $2", &[&to_i64(now), &BATCH]).await?)?;
+            let settle = ids(q("SELECT pending_id FROM nodkey.payment_effect WHERE state = 'SUCCEEDED' \
+                 AND settlement IN ('pending','succeeded') AND next_check_at <= $1 AND (lease_until IS NULL OR lease_until < $1) LIMIT $2", &[&to_i64(now), &BATCH]).await?)?;
             Ok((stale, lost, due, settle))
         })
         .await?;
@@ -1538,5 +1593,23 @@ mod tests {
         );
         assert_eq!(utc_day(86_399), 0);
         assert_eq!(utc_day(86_400), 1);
+    }
+
+    /// §7.3 post-success watch: fast first checks, then daily, never past the window.
+    #[test]
+    fn settlement_watch_schedule() {
+        assert_eq!(
+            (0..6).map(watch_backoff_s).collect::<Vec<_>>(),
+            vec![10, 60, 300, 1800, 86_400, 86_400]
+        );
+        let w = 30 * 86_400;
+        assert_eq!(watch_next(1000, 1000, w, 0), Some(1010));
+        assert_eq!(
+            watch_next(1000 + w - 1, 1000, w, 9),
+            Some(1000 + w - 1 + 86_400)
+        );
+        assert_eq!(watch_next(1000 + w, 1000, w, 0), None);
+        assert_eq!(watch_next(u64::MAX, 1000, w, 0), None);
+        assert_eq!(watch_next(5, u64::MAX, w, 0), Some(15));
     }
 }

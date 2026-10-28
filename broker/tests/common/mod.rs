@@ -103,7 +103,7 @@ pub async fn connect(cfg: tokio_postgres::Config) -> Client {
     client
 }
 
-static CREATE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub static CREATE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// A fresh database copied from the initialized `ledger` template.
 pub async fn fresh_db() -> String {

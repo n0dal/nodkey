@@ -118,6 +118,9 @@ struct FakeState {
     /// grant texts received with an in-progress override for idem.status.
     in_progress: HashSet<String>,
     settlement: HashMap<String, &'static str>,
+    /// Status reported for refunds without an entry in `settlement` (default: as created,
+    /// `pending`).
+    default_status: Option<&'static str>,
     ops: Vec<String>,
     /// `idem_kid` of every non-hello call, in order.
     kids: Vec<String>,
@@ -258,7 +261,7 @@ impl Fake {
                 Some(Ok(match st.ledger.get(&grant) {
                     Some(r) => {
                         let mut r = r.clone();
-                        if let Some(s) = st.settlement.get(&grant) {
+                        if let Some(s) = st.settlement.get(&grant).or(st.default_status.as_ref()) {
                             r["status"] = json!(s);
                         }
                         json!({"class":"found","refunds":[r],"anomalies":[]})
@@ -272,7 +275,7 @@ impl Fake {
                 Some(Ok(match st.ledger.get(&grant).filter(|r| r["id"] == id) {
                     Some(r) => {
                         let mut r = r.clone();
-                        if let Some(s) = st.settlement.get(&grant) {
+                        if let Some(s) = st.settlement.get(&grant).or(st.default_status.as_ref()) {
                             r["status"] = json!(s);
                         }
                         json!({"class":"found","refunds":[r],"anomalies":[]})
@@ -1494,6 +1497,297 @@ async fn pt23_late_settlement_failure() {
     );
     assert_eq!(p.h.state(&a).await, "SUCCEEDED");
     let _ = encode_id(&[0; 16]);
+}
+
+/// Row columns read by the settlement tests.
+async fn settle_row(p: &P, pid: &str) -> (String, Option<String>, Option<String>, Option<i64>) {
+    let id = decode_id(pid).unwrap();
+    let r =
+        p.h.su
+            .query_one(
+                "SELECT state, settlement, anomaly, next_check_at FROM nodkey.payment_effect WHERE pending_id = $1",
+                &[&id.as_slice()],
+            )
+            .await
+            .unwrap();
+    (r.get(0), r.get(1), r.get(2), r.get(3))
+}
+
+fn set_provider_status(p: &P, status: &'static str) {
+    let mut st = p.fake.state.lock().unwrap();
+    let keys: Vec<String> = st.ledger.keys().cloned().collect();
+    assert!(!keys.is_empty() || status == "succeeded");
+    for k in keys {
+        st.settlement.insert(k, status);
+    }
+}
+
+fn ops_since(p: &P, n: usize) -> Vec<String> {
+    p.fake.state.lock().unwrap().ops[n..].to_vec()
+}
+
+/// DEMOP-F06 / §7.3 post-success watch: a refund whose settlement went pending → succeeded is
+/// still re-checked (lookup only); a later `failed` is recorded with anomaly
+/// `settlement_reversed`, the row stays `SUCCEEDED`, the amount stays encumbered, nothing is
+/// re-sent, and `failed` is final.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn f06_reversal_after_success_is_recorded_without_resend() {
+    let p = setup().await;
+    let a = p.reserve(1001, 100, "USD").await;
+    p.h.b.dispatch(decode_id(&a).unwrap()).await.unwrap();
+    assert_eq!(
+        settle_row(&p, &a).await.1.as_deref(),
+        Some("pending"),
+        "the fake creates pending refunds"
+    );
+    set_provider_status(&p, "succeeded");
+    p.tick_after(11).await;
+    let (state, settlement, anomaly, next) = settle_row(&p, &a).await;
+    assert_eq!(
+        (state.as_str(), settlement.as_deref(), anomaly),
+        ("SUCCEEDED", Some("succeeded"), None)
+    );
+    let next = next.expect("post-success watch scheduled");
+    assert_eq!(
+        next,
+        i64::try_from(p.h.now()).unwrap() + 60,
+        "watch round 1"
+    );
+    // Not due yet: no call.
+    let n0 = p.fake.state.lock().unwrap().ops.len();
+    p.tick_after(30).await;
+    assert!(!ops_since(&p, n0).iter().any(|o| o == "refund.get"));
+    // The provider reverses the settled refund.
+    set_provider_status(&p, "failed");
+    p.tick_after(31).await;
+    let (state, settlement, anomaly, next) = settle_row(&p, &a).await;
+    assert_eq!(
+        (
+            state.as_str(),
+            settlement.as_deref(),
+            anomaly.as_deref(),
+            next
+        ),
+        (
+            "SUCCEEDED",
+            Some("failed"),
+            Some("settlement_reversed"),
+            None
+        )
+    );
+    assert_eq!(
+        p.counters("ch_order1001aa").await,
+        (100, 0, 0),
+        "still encumbered"
+    );
+    assert_eq!(p.h.state(&a).await, "SUCCEEDED");
+    let calls = ops_since(&p, n0);
+    assert!(calls.iter().any(|o| o == "refund.get"), "{calls:?}");
+    assert!(
+        calls
+            .iter()
+            .all(|o| o == "refund.get" || o == "adapter.hello"),
+        "lookup only: {calls:?}"
+    );
+    assert_eq!(
+        (p.fake.creates(), p.fake.effects()),
+        (1, 1),
+        "never re-dispatched"
+    );
+    // `failed` is final: no further checks, and the provider cannot "un-fail" it.
+    set_provider_status(&p, "succeeded");
+    let n1 = p.fake.state.lock().unwrap().ops.len();
+    for _ in 0..3 {
+        p.tick_after(2 * 86_400).await;
+    }
+    assert!(!ops_since(&p, n1).iter().any(|o| o == "refund.get"));
+    assert_eq!(settle_row(&p, &a).await.1.as_deref(), Some("failed"));
+    // The DB guard enforces the same: failed is final, succeeded never goes back to pending.
+    let id = decode_id(&a).unwrap();
+    for to in ["succeeded", "pending"] {
+        assert!(
+            p.h.su
+                .execute(
+                    "UPDATE nodkey.payment_effect SET settlement = $2 WHERE pending_id = $1",
+                    &[&id.as_slice(), &to],
+                )
+                .await
+                .is_err(),
+            "failed -> {to}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(p.sock.parent().unwrap());
+}
+
+/// DEMOP-F06: a refund confirmed `succeeded` at dispatch enters the watch at once; the watch
+/// ends at `dispatched_at + settlement_watch_s` (default 30 days) and a reversal reported after
+/// the window is not observed (published residual); `succeeded → pending` is refused by the DB.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn f06_watch_is_bounded() {
+    let p = setup().await;
+    let a = p.reserve(1001, 200, "USD").await;
+    // The provider reports the refund `succeeded` already on the confirming GET (like simpay).
+    p.fake.state.lock().unwrap().default_status = Some("succeeded");
+    let id = decode_id(&a).unwrap();
+    p.h.b.dispatch(id).await.unwrap();
+    let (_, settlement, _, next) = settle_row(&p, &a).await;
+    assert_eq!(settlement.as_deref(), Some("succeeded"));
+    assert_eq!(
+        next,
+        Some(i64::try_from(p.h.now()).unwrap() + 10),
+        "watch starts at dispatch"
+    );
+    p.tick_after(11).await;
+    let dispatched: i64 =
+        p.h.su
+            .query_one(
+                "SELECT dispatched_at FROM nodkey.payment_effect WHERE pending_id = $1",
+                &[&id.as_slice()],
+            )
+            .await
+            .unwrap()
+            .get(0);
+    assert_eq!(settle_row(&p, &a).await.1.as_deref(), Some("succeeded"));
+    // Walk the watch: checks keep happening while the window is open.
+    let n0 = p.fake.state.lock().unwrap().ops.len();
+    for _ in 0..10 {
+        p.tick_after(86_400).await;
+    }
+    let gets = ops_since(&p, n0)
+        .iter()
+        .filter(|o| *o == "refund.get")
+        .count();
+    assert!(gets >= 5, "watch keeps checking: {gets}");
+    // Jump past the window: one last round finds the window closed and stops.
+    let end = u64::try_from(dispatched).unwrap() + 30 * 86_400;
+    p.h.set_now(end + 1);
+    p.h.b.payments_tick().await.unwrap();
+    let (_, settlement, _, next) = settle_row(&p, &a).await;
+    assert_eq!((settlement.as_deref(), next), (Some("succeeded"), None));
+    set_provider_status(&p, "failed");
+    let n1 = p.fake.state.lock().unwrap().ops.len();
+    p.tick_after(86_400).await;
+    assert!(
+        !ops_since(&p, n1).iter().any(|o| o == "refund.get"),
+        "no check after the window"
+    );
+    assert_eq!(settle_row(&p, &a).await.1.as_deref(), Some("succeeded"));
+    assert_eq!(p.fake.creates(), 1);
+    assert!(
+        p.h.su
+            .execute(
+                "UPDATE nodkey.payment_effect SET settlement = 'pending' WHERE pending_id = $1",
+                &[&id.as_slice()],
+            )
+            .await
+            .is_err(),
+        "succeeded -> pending refused"
+    );
+    let _ = std::fs::remove_dir_all(p.sock.parent().unwrap());
+}
+
+/// DEMOP-F07 / PT-31 / PA-17: PostgreSQL lets any role `ALTER ROLE` its own session defaults,
+/// so `search_path` is not the control. The control is: every broker/adapter statement is
+/// schema-qualified, every function pins `search_path`, and no Nodkey login role has `CREATE`
+/// on any schema nor `CREATE` or `TEMPORARY` on any database, so no object that could shadow a
+/// qualified name can be created.
+#[tokio::test]
+#[ignore]
+async fn f07_no_create_or_temp_anywhere() {
+    let p = setup().await;
+    let env = pg_env();
+    let br = connect(pg_config(&p.h.db, "nodkey_broker", &env.broker_pw)).await;
+    // The residual, stated: the role can change its own default (rolled back here).
+    br.batch_execute("BEGIN; ALTER ROLE nodkey_broker SET search_path = 'public'; ROLLBACK;")
+        .await
+        .expect("PostgreSQL allows ALTER ROLE on one's own session defaults");
+    // Even with a non-empty session search_path, nothing can be created to shadow a name.
+    br.batch_execute("SET search_path = public, nodkey")
+        .await
+        .unwrap();
+    for sql in [
+        "CREATE VIEW public.orders AS SELECT 1 AS order_id",
+        "CREATE TABLE public.payment_effect (x int)",
+        "CREATE TEMP TABLE orders (x int)",
+        "CREATE FUNCTION public.nodkey_is_id(t text, n integer) RETURNS boolean LANGUAGE sql RETURN true",
+        "CREATE SCHEMA evil",
+    ] {
+        assert!(br.execute(sql, &[]).await.is_err(), "{sql}");
+    }
+    let roles = [
+        "nodkey_broker",
+        "nodkey_payments_adapter",
+        "nodkey_shop_operator",
+    ];
+    {
+        // Database privileges across the cluster; hold the creation lock so that no test
+        // database is observed between its CREATE and its REVOKE.
+        let _g = CREATE_LOCK.lock().await;
+        for r in roles {
+            let dbs: Vec<String> =
+                p.h.su
+                    .query(
+                        "SELECT datname FROM pg_catalog.pg_database \
+                         WHERE pg_catalog.has_database_privilege($1, oid, 'CREATE') \
+                            OR pg_catalog.has_database_privilege($1, oid, 'TEMPORARY')",
+                        &[&r],
+                    )
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|x| x.get(0))
+                    .collect();
+            assert!(dbs.is_empty(), "{r} has CREATE/TEMPORARY on {dbs:?}");
+        }
+    }
+    // Schema privileges in the broker's database and in the demo database `ledger`.
+    for db in [p.h.db.clone(), "ledger".to_owned()] {
+        let su = connect(pg_config(&db, "postgres", &env.super_pw)).await;
+        for r in roles {
+            let schemas: Vec<String> = su
+                .query(
+                    "SELECT nspname::text FROM pg_catalog.pg_namespace \
+                     WHERE pg_catalog.has_schema_privilege($1, oid, 'CREATE')",
+                    &[&r],
+                )
+                .await
+                .unwrap()
+                .iter()
+                .map(|x| x.get(0))
+                .collect();
+            assert!(schemas.is_empty(), "{db}: {r} has CREATE on {schemas:?}");
+            let attrs: (bool, bool, bool) = su
+                .query_one(
+                    "SELECT rolsuper, rolcreatedb, rolcreaterole FROM pg_catalog.pg_roles WHERE rolname = $1",
+                    &[&r],
+                )
+                .await
+                .map(|x| (x.get(0), x.get(1), x.get(2)))
+                .unwrap();
+            assert_eq!(attrs, (false, false, false), "{r}");
+        }
+        // Every function in the Nodkey schemas pins search_path.
+        let unpinned: Vec<String> = su
+            .query(
+                "SELECT p.oid::regprocedure::text FROM pg_catalog.pg_proc p \
+                 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+                 WHERE n.nspname IN ('public','nodkey') \
+                   AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}')) c WHERE c LIKE 'search_path=%')",
+                &[],
+            )
+            .await
+            .unwrap()
+            .iter()
+            .map(|x| x.get(0))
+            .collect();
+        assert!(
+            unpinned.is_empty(),
+            "{db}: functions without a pinned search_path: {unpinned:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(p.sock.parent().unwrap());
 }
 
 /// BP-02: operator updates of the trusted facts, made AS `nodkey_shop_operator` (not the

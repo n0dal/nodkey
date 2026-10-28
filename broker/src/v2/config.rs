@@ -116,6 +116,9 @@ pub struct PaymentsConfig {
     pub max_count_per_day: u32,
     /// Daily refund budget per (ten, sub, currency), in minor units.
     pub limits_minor: BTreeMap<String, u64>,
+    /// Post-success settlement watch (§7.3): a refund whose settlement is `succeeded` is
+    /// re-checked with `refund.get` until `dispatched_at + settlement_watch_s`.
+    pub settlement_watch_s: u64,
 }
 
 impl PaymentsConfig {
@@ -144,6 +147,8 @@ pub struct RawPayments {
     max_resends: u32,
     #[serde(default = "default_total_ms")]
     adapter_total_ms: u64,
+    #[serde(default = "default_settlement_watch_s")]
+    settlement_watch_s: u64,
     budget: RawBudget,
 }
 
@@ -159,6 +164,12 @@ fn default_resends() -> u32 {
 }
 fn default_total_ms() -> u64 {
     10_000
+}
+/// Bounds of the post-success settlement watch (§7.3, §9): 1 hour ..= 90 days, default 30 days.
+pub const SETTLEMENT_WATCH_MIN_S: u64 = 3_600;
+pub const SETTLEMENT_WATCH_MAX_S: u64 = 90 * 86_400;
+fn default_settlement_watch_s() -> u64 {
+    30 * 86_400
 }
 
 #[derive(Debug, Deserialize)]
@@ -434,6 +445,13 @@ impl V2Config {
                 {
                     return e("payments: max_resends 1..=20, adapter_total_ms 100..=60000".into());
                 }
+                if !(SETTLEMENT_WATCH_MIN_S..=SETTLEMENT_WATCH_MAX_S)
+                    .contains(&p.settlement_watch_s)
+                {
+                    return e(format!(
+                        "payments.settlement_watch_s must be {SETTLEMENT_WATCH_MIN_S}..={SETTLEMENT_WATCH_MAX_S}"
+                    ));
+                }
                 if !(1..=1000).contains(&p.budget.max_count_per_day) {
                     return e("payments.budget.max_count_per_day must be 1..=1000".into());
                 }
@@ -452,6 +470,7 @@ impl V2Config {
                     total_ms: p.adapter_total_ms,
                     max_count_per_day: p.budget.max_count_per_day,
                     limits_minor: p.budget.limits_minor.clone(),
+                    settlement_watch_s: p.settlement_watch_s,
                 })
             }
         };
@@ -825,6 +844,32 @@ pub mod tests {
         ];
         for b in bad {
             assert!(build(&b, true).is_err(), "should refuse: {b}");
+        }
+    }
+    /// §7.3 / §9: the post-success settlement watch is bounded (1 h ..= 90 days), default 30 days.
+    #[test]
+    fn settlement_watch_bounds() {
+        let with = |extra: &str| {
+            sample().replace(
+                r#" "workloads":["#,
+                &format!(
+                    r#" "payments":{{"adapter_socket":"/run/nodkey/br-pay/adapter.sock","adapter_uid":10006,"R_max_s":180{extra},
+   "budget":{{"max_count_per_day":3,"limits_minor":{{"USD":20000}}}}}},
+ "workloads":["#
+                ),
+            )
+        };
+        let c = build(&with(""), true).unwrap();
+        assert_eq!(c.payments.unwrap().settlement_watch_s, 30 * 86_400);
+        for ok in [SETTLEMENT_WATCH_MIN_S, SETTLEMENT_WATCH_MAX_S] {
+            let c = build(&with(&format!(r#","settlement_watch_s":{ok}"#)), true).unwrap();
+            assert_eq!(c.payments.unwrap().settlement_watch_s, ok);
+        }
+        for bad in ["0", "3599", "7776001", "-1", "1.5", "\"1\""] {
+            assert!(
+                build(&with(&format!(r#","settlement_watch_s":{bad}"#)), true).is_err(),
+                "should refuse settlement_watch_s {bad}"
+            );
         }
     }
 }
