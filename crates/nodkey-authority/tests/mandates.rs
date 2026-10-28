@@ -78,12 +78,42 @@ async fn setup(name: &str) -> (std::path::PathBuf, FakeBroker, Running) {
     (dir, broker, run)
 }
 
-/// Approves a template record (human path) and returns its pid (= mid).
+/// Approves a template record (human path); on success the fake broker reports the activation
+/// as executed (`SUCCEEDED`) and the authority confirms it (MD-7). Returns the gateway reply.
 async fn approve_template(broker: &FakeBroker, run: &Running, rec: Map<String, Value>) -> Value {
+    approve_template_as(broker, run, rec, Some("SUCCEEDED")).await
+}
+
+/// As [`approve_template`], with the broker's record state after an accepted delivery set to
+/// `activation` (`None`: left as the fake broker set it, i.e. not yet executed).
+async fn approve_template_as(
+    broker: &FakeBroker,
+    run: &Running,
+    rec: Map<String, Value>,
+    activation: Option<&str>,
+) -> Value {
     let pid = rec["pending_id"].as_str().unwrap().to_owned();
     let d = digest_of(&rec);
     broker.add(rec, "PENDING");
-    approve(&run.gateway_path, &pid, &d, ANA.0, ANA.1).await
+    let r = approve(&run.gateway_path, &pid, &d, ANA.0, ANA.1).await;
+    if is_ok(&r) {
+        if let Some(st) = activation {
+            set_state(broker, &pid, st);
+        }
+        run.authority.confirm_activations().await;
+    }
+    r
+}
+
+fn set_state(broker: &FakeBroker, pid: &str, st: &str) {
+    broker
+        .state
+        .lock()
+        .unwrap()
+        .records
+        .get_mut(pid)
+        .unwrap()
+        .state = st.to_owned();
 }
 
 async fn issue(broker: &FakeBroker, run: &Running, rec: Map<String, Value>) -> MandateOutcome {
@@ -363,5 +393,129 @@ async fn counters_durable_across_restart() {
         issue(&broker, &run, refund(&pid(), "c42", 104, 1, "EUR")).await,
         MandateOutcome::Declined,
         "count 2 reached"
+    );
+}
+
+/// MD-7 (fail closed): the authority treats a mandate as active only after the broker confirmed
+/// its activation. Unconfirmed (record still `APPROVED`): no `cfm = 2` grant, and no replacement
+/// template. Failed (`FAILED`/denied, e.g. the broker's no-replacement refusal): the mandate is
+/// inactive for good — no grants even if the broker later reports otherwise — and the key is
+/// released for a new template. A record that does not match the mandate row is a failure.
+/// Positive control: the same flow with `SUCCEEDED` issues.
+#[tokio::test]
+async fn activation_must_be_confirmed_by_the_broker() {
+    let (_d, broker, run) = setup("mnd-activation").await;
+    // Unconfirmed.
+    let mid = pid();
+    let r = approve_template_as(
+        &broker,
+        &run,
+        template(&mid, "c42", 3, 2500, 5000, 1, 3600),
+        None,
+    )
+    .await;
+    assert!(is_ok(&r), "{r}");
+    assert_eq!(broker.record_state(&mid), "APPROVED");
+    let m = PendingId::parse(&mid).unwrap();
+    assert_eq!(run.authority.activation(&m).await, None);
+    assert_eq!(
+        issue(&broker, &run, refund(&pid(), "c42", 101, 100, "EUR")).await,
+        MandateOutcome::Declined,
+        "no grant under an unconfirmed mandate"
+    );
+    assert_eq!(
+        err_code(
+            &approve_template_as(
+                &broker,
+                &run,
+                template(&pid(), "c42", 1, 100, 100, 1, 600),
+                None
+            )
+            .await
+        ),
+        Some("not_available"),
+        "an unconfirmed mandate still blocks replacement"
+    );
+    // Activation fails at the broker.
+    set_state(&broker, &mid, "FAILED");
+    assert_eq!(run.authority.confirm_activations().await, 1);
+    assert_eq!(run.authority.activation(&m).await, Some(false));
+    assert_eq!(
+        issue(&broker, &run, refund(&pid(), "c42", 101, 100, "EUR")).await,
+        MandateOutcome::Declined
+    );
+    // Settled: a later contrary broker report changes nothing.
+    set_state(&broker, &mid, "SUCCEEDED");
+    assert_eq!(run.authority.confirm_activations().await, 0);
+    assert_eq!(run.authority.activation(&m).await, Some(false));
+    assert_eq!(
+        issue(&broker, &run, refund(&pid(), "c42", 101, 100, "EUR")).await,
+        MandateOutcome::Declined
+    );
+    assert!(broker.state.lock().unwrap().mandated.is_empty());
+
+    // The failed mandate no longer blocks a new template (MD-7); positive control.
+    let second = pid();
+    let r = approve_template(
+        &broker,
+        &run,
+        template(&second, "c42", 3, 2500, 5000, 1, 3600),
+    )
+    .await;
+    assert!(is_ok(&r), "{r}");
+    let second_id = PendingId::parse(&second).unwrap();
+    assert_eq!(run.authority.activation(&second_id).await, Some(true));
+    assert_eq!(
+        issue(&broker, &run, refund(&pid(), "c42", 101, 100, "EUR")).await,
+        MandateOutcome::Issued,
+        "positive control: confirmed activation issues"
+    );
+}
+
+/// MD-7: a broker record whose digest does not match the mandate row is recorded as a failed
+/// activation, and the outcome survives a restart.
+#[tokio::test]
+async fn activation_mismatch_fails_closed_and_is_durable() {
+    let dir = tmpdir("mnd-act-durable");
+    let keys = make_key(&dir);
+    let broker = FakeBroker::start(&dir, &keys.registry_json).await;
+    let mid = pid();
+    let m = PendingId::parse(&mid).unwrap();
+    {
+        let run = start_authority(&dir, &keys, &broker.path, Opts::new()).await;
+        let r = approve_template_as(
+            &broker,
+            &run,
+            template(&mid, "c42", 3, 2500, 5000, 1, 3600),
+            None,
+        )
+        .await;
+        assert!(is_ok(&r), "{r}");
+        {
+            let mut st = broker.state.lock().unwrap();
+            let rec = st.records.get_mut(&mid).unwrap();
+            rec.state = "SUCCEEDED".into();
+            rec.digest_override = Some("00".repeat(32));
+        }
+        assert_eq!(run.authority.confirm_activations().await, 1);
+        assert_eq!(run.authority.activation(&m).await, Some(false));
+        run.task.abort();
+        drop(run);
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    broker
+        .state
+        .lock()
+        .unwrap()
+        .records
+        .get_mut(&mid)
+        .unwrap()
+        .digest_override = None;
+    let run = start_authority(&dir, &keys, &broker.path, Opts::new()).await;
+    assert_eq!(run.authority.activation(&m).await, Some(false));
+    assert_eq!(run.authority.confirm_activations().await, 0);
+    assert_eq!(
+        issue(&broker, &run, refund(&pid(), "c42", 101, 100, "EUR")).await,
+        MandateOutcome::Declined
     );
 }

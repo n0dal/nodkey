@@ -25,6 +25,9 @@
 //!   consumes and the params key for C6. The refund counters of a mandate are the count and sum of
 //!   its `mandated` refund rows, so they become durable in the **same** fsync'd line as the grant
 //!   and never release. A `mandate_revoke` record marks a mandate revoked (idempotent).
+//! - **Activation (MD-7, fail closed).** A `mandate_activation{mid, active}` record stores the
+//!   broker's activation outcome for a mandate, at most once. A mandate without a stored `true`
+//!   outcome is not active for mandated issuance.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -206,6 +209,8 @@ pub struct Store {
     /// `(mid, pkey)` of every `mandated` row (C6).
     uses: std::collections::HashSet<(PendingId, [u8; 32])>,
     revoked: std::collections::HashSet<PendingId>,
+    /// Broker-confirmed activation outcome per mandate (MD-7); absent = unconfirmed.
+    activation: HashMap<PendingId, bool>,
     poisoned: bool,
     /// Current file size in bytes.
     size: u64,
@@ -362,6 +367,7 @@ impl Store {
         let mut index: HashMap<PendingId, Issuance> = HashMap::new();
         let mut extras: HashMap<PendingId, Extra> = HashMap::new();
         let mut revoked = std::collections::HashSet::new();
+        let mut activation: HashMap<PendingId, bool> = HashMap::new();
         // `data[..complete]` is empty or ends with '\n': drop the empty slice after the final
         // newline. Any other empty line is corrupt (it fails the format check below).
         let mut lines: Vec<&[u8]> = data[..complete].split(|&b| b == b'\n').collect();
@@ -399,6 +405,22 @@ impl Store {
                     if !matches!(extras.get(&mid), Some(Extra::Mandate(_))) || !revoked.insert(mid)
                     {
                         return Err(corrupt("revocation of an unknown or revoked mandate"));
+                    }
+                }
+                Some("mandate_activation") => {
+                    if v.as_object().map(|o| o.len()) != Some(3) {
+                        return Err(corrupt("member set"));
+                    }
+                    let mid = PendingId::parse(&s(&v, "mid").map_err(|e| corrupt(&e))?)
+                        .map_err(|_| corrupt("mid"))?;
+                    let active = v
+                        .get("active")
+                        .and_then(Value::as_bool)
+                        .ok_or_else(|| corrupt("active"))?;
+                    if !matches!(extras.get(&mid), Some(Extra::Mandate(_)))
+                        || activation.insert(mid, active).is_some()
+                    {
+                        return Err(corrupt("activation of an unknown or settled mandate"));
                     }
                 }
                 Some("status") => {
@@ -439,6 +461,7 @@ impl Store {
             counters,
             uses,
             revoked,
+            activation,
             poisoned: false,
             size: complete as u64,
         })
@@ -535,6 +558,27 @@ impl Store {
 
     pub fn is_revoked(&self, mid: &PendingId) -> bool {
         self.revoked.contains(mid)
+    }
+
+    /// The broker-confirmed activation outcome of `mid` (MD-7): `None` while unconfirmed.
+    pub fn activation(&self, mid: &PendingId) -> Option<bool> {
+        self.activation.get(mid).copied()
+    }
+
+    /// Durably records the broker's activation outcome of `mid` (MD-7). Recorded once; repeating
+    /// the same outcome is a no-op, a different outcome is refused (`AlreadyFinal`).
+    pub fn set_activation(&mut self, mid: &PendingId, active: bool) -> Result<(), StoreError> {
+        if !matches!(self.extras.get(mid), Some(Extra::Mandate(_))) {
+            return Err(StoreError::Unknown);
+        }
+        match self.activation.get(mid) {
+            Some(&a) if a == active => return Ok(()),
+            Some(_) => return Err(StoreError::AlreadyFinal),
+            None => {}
+        }
+        self.append(&json!({"k": "mandate_activation", "mid": mid.to_text(), "active": active}))?;
+        self.activation.insert(*mid, active);
+        Ok(())
     }
 
     /// Durably marks a mandate revoked. Idempotent; `Unknown` if `mid` is not a mandate.

@@ -1,0 +1,24 @@
+[package]
+name = "demo-agent"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "Nodkey Demo A: deterministic scripted support agent (a fully obedient, prompt-injected stand-in). Untrusted test tool."
+publish = false
+
+# Each dependency is justified in README.md ("Dependencies").
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "io-util", "macros", "time", "process"] }
+serde_json = "1"
+
+[dev-dependencies]
+# End-to-end test: the agent drives the real MCP front against a fake broker socket W.
+nodkey-mcp-front = { path = "../../crates/nodkey-mcp-front" }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+debug = false
+strip = true

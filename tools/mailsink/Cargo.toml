@@ -1,0 +1,22 @@
+[package]
+name = "mailsink"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+description = "SIMULATED mail sink for Nodkey Demo A tests: reads the broker's outbox. Delivers no mail."
+publish = false
+
+# Each dependency is justified in README.md ("Dependencies").
+[dependencies]
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "net", "io-util", "macros", "time", "sync", "signal"] }
+serde_json = "1"
+httparse = "1"
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[profile.release]
+debug = false
+strip = true

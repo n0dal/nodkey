@@ -329,7 +329,7 @@ impl Authority {
                     // an active mandate for (wid, ten, sub).
                     if extra_terms.is_some()
                         && self
-                            .active_mandate(&store, &rec.wid, &rec.ten, &rec.approver_sub)
+                            .live_mandate(&store, &rec.wid, &rec.ten, &rec.approver_sub, false)
                             .is_some()
                     {
                         return Err(Refusal("a mandate is active for (wid, ten, sub)"));
@@ -634,14 +634,20 @@ impl Authority {
         Ok(Some((terms, valid)))
     }
 
-    /// The authority's own active mandate for `(wid, ten, sub)` (AI §4.4 step 2): not revoked, its
+    /// The authority's own mandate for `(wid, ten, sub)` (AI §4.4 step 2): not revoked, its
     /// grant not finally rejected or expired at the broker, `nbf ≤ now < exp`, `cfg` current.
-    fn active_mandate(
+    ///
+    /// MD-7 (fail closed): with `confirmed`, the broker's activation must also be confirmed (the
+    /// only form used for mandated issuance). Without it — the no-replacement check (AI-04) — a
+    /// mandate whose activation is still unconfirmed counts as live, and only a confirmed failed
+    /// activation releases the key.
+    fn live_mandate(
         &self,
         store: &Store,
         wid: &str,
         ten: &str,
         sub: &str,
+        confirmed: bool,
     ) -> Option<(PendingId, MandateTerms)> {
         let now = (self.clock)();
         let cfg = self.broker.config_digest();
@@ -653,6 +659,10 @@ impl Authority {
                     && r.sub == sub
                     && !store.is_revoked(&r.jti)
                     && !matches!(r.status, Status::Rejected | Status::Expired)
+                    && match store.activation(&r.jti) {
+                        Some(active) => active,
+                        None => !confirmed,
+                    }
                     && m.nbf <= now
                     && now < m.exp
                     && m.cfg == cfg
@@ -731,7 +741,7 @@ impl Authority {
         };
         // C2: the authority's own active mandate.
         let (mid, terms) = self
-            .active_mandate(&store, &rec.wid, &rec.ten, &rec.approver_sub)
+            .live_mandate(&store, &rec.wid, &rec.ten, &rec.approver_sub, true)
             .ok_or(Refusal("C2: no active mandate"))?;
         // C3, C4.
         let refund = if rec.op == t.refund_op {
@@ -835,6 +845,77 @@ impl Authority {
         Ok(())
     }
 
+    /// MD-7: settles the broker's activation outcome of every unsettled, unexpired mandate from the
+    /// template record's state (`pending.get`): `SUCCEEDED` = active; `FAILED`, `DENIED`, `EXPIRED`
+    /// = failed; any other state stays unconfirmed (inactive for issuance). A record that does not
+    /// match the mandate row (digest, workload, tenant, principal, operation) is recorded as failed,
+    /// with an alarm. Returns the number of outcomes recorded.
+    pub async fn confirm_activations(&self) -> usize {
+        let now = (self.clock)();
+        let todo: Vec<Issuance> = {
+            let store = self.store.lock().await;
+            store
+                .mandates()
+                .filter(|(r, m)| {
+                    store.activation(&r.jti).is_none()
+                        && !store.is_revoked(&r.jti)
+                        && !matches!(r.status, Status::Rejected | Status::Expired)
+                        && now < m.exp
+                })
+                .map(|(r, _)| r.clone())
+                .collect()
+        };
+        let mut n = 0;
+        for row in todo {
+            let fetched = match self.broker.pending_get(&row.jti).await {
+                Ok(f) => f,
+                Err(e) => {
+                    log::event(
+                        "mandate_activation_unconfirmed",
+                        json!({"mid": row.jti.to_text(), "detail": format!("{e:?}")}),
+                    );
+                    continue;
+                }
+            };
+            let rec = &fetched.record;
+            let matches = fetched.broker_digest == row.digest
+                && rec.pending_id == row.jti
+                && rec.wid == row.wid
+                && rec.ten == row.ten
+                && rec.approver_sub == row.sub
+                && rec.op == row.op;
+            let outcome = if !matches {
+                log::alarm(
+                    "mandate_activation_mismatch",
+                    json!({"mid": row.jti.to_text()}),
+                );
+                Some(false)
+            } else {
+                match fetched.state.as_str() {
+                    "SUCCEEDED" => Some(true),
+                    "FAILED" | "DENIED" | "EXPIRED" => Some(false),
+                    _ => None,
+                }
+            };
+            let Some(active) = outcome else { continue };
+            let mut store = self.store.lock().await;
+            match store.set_activation(&row.jti, active) {
+                Ok(()) => {
+                    n += 1;
+                    log::event(
+                        "mandate_activation",
+                        json!({"mid": row.jti.to_text(), "active": active, "state": fetched.state}),
+                    );
+                }
+                Err(e) => log::alarm(
+                    "mandate_activation_store_failed",
+                    json!({"mid": row.jti.to_text(), "detail": format!("{e:?}")}),
+                ),
+            }
+        }
+        n
+    }
+
     /// The mandate loop (AI §4.4): `mandate.candidates` every `MANDATE_POLL`, then one issuance
     /// attempt per candidate. Runs only when a mandate template is configured.
     pub async fn mandate_loop(self: Arc<Self>) {
@@ -848,6 +929,7 @@ impl Authority {
             return;
         }
         loop {
+            self.confirm_activations().await;
             match self.broker.mandate_candidates().await {
                 Ok(ids) => {
                     for pid in ids {
@@ -967,6 +1049,11 @@ impl Authority {
     }
 
     /// Test and operator helper: the mandate extra of `jti`'s row.
+    /// The stored activation outcome of mandate `mid` (MD-7); `None` while unconfirmed.
+    pub async fn activation(&self, mid: &PendingId) -> Option<bool> {
+        self.store.lock().await.activation(mid)
+    }
+
     pub async fn store_extra(&self, jti: &PendingId) -> Option<Extra> {
         self.store.lock().await.extra(jti).cloned()
     }

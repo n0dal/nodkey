@@ -174,11 +174,16 @@ or other; its parent directory must satisfy the same owner and write rules (AU-R
 - Socket I `mandate.revoke{mid, subject}`: `mandate_revoke` log record; idempotent; `not_available` for
   an unknown `mid` or another subject.
 
-Gaps: MD-7 — a template grant finally rejected or expired at the broker is not an active mandate here;
-but if the broker accepted it and activation then failed (`FAILED/denied`), the authority's record stays
-active until `exp` (no message reports it), blocking a new template approval for that key and producing
-`cfm = 2` grants the broker rejects; `/mandates` cannot revoke it (the broker does not list it).
-MD-8 — `revoked_before` is broker-only; the authority's C2 checks state, window and `cfg` only.
+- **Activation (MD-7, fail closed; orchestrator ruling).** A mandate is active for mandated issuance
+  only after the broker confirms activation: the mandate loop reads the template record with
+  `pending.get` and durably records `mandate_activation{mid, active}` once — `SUCCEEDED` = active;
+  `FAILED`, `DENIED`, `EXPIRED`, or a record not matching the mandate row (digest, `wid`, `ten`, `sub`,
+  `op`) = failed (alarm on mismatch). Unconfirmed or failed: no `cfm = 2` grant (C2 fails). An
+  unconfirmed mandate still blocks a new template for its key (AI-04); a failed one does not. The
+  outcome is never changed later. Tests: `tests/mandates.rs` `activation_*`.
+
+Gaps: MD-7 (above) — closed by the reading above; it relies on `pending.get` returning final
+records, which the broker does. MD-8 — `revoked_before` is broker-only; the authority's C2 checks state, window and `cfg` only.
 
 ## Display facts (AU-R-01)
 
