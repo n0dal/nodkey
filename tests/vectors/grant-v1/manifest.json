@@ -1,7 +1,7 @@
 {
   "format": "nodkey.grant-v1.vectors",
   "spec": "docs/specs/grant-v1.md",
-  "spec_draft": 2,
+  "spec_draft": 4,
   "warning": "TEST-ONLY. Every key below is a published RFC 8032 test key. Never deploy a registry containing them.",
   "constants": {
     "typ": "application/nodkey-grant+cbor",
@@ -496,7 +496,7 @@
       "id": "ENV-01-oversized-2049",
       "kind": "grant",
       "category": "envelope",
-      "description": "Validly signed grant of 2049 bytes (limit 2048; padded with unknown key 20); rejected before decoding.",
+      "description": "Validly signed grant of 2049 bytes (limit 2048; padded with a long bstr under key 20, invalid in this grant); rejected before decoding.",
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-01-oversized-2049.hex",
@@ -523,7 +523,7 @@
       "id": "ENV-02-at-size-limit-2048",
       "kind": "grant",
       "category": "envelope",
-      "description": "Validly signed grant of exactly 2048 bytes passes the size check; fails later on its padding key 20.",
+      "description": "Validly signed grant of exactly 2048 bytes passes the size check; fails later on its padding key 21 (unknown).",
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-02-at-size-limit-2048.hex",
@@ -3193,13 +3193,13 @@
       ]
     },
     {
-      "id": "PSCH-03-unknown-key-20",
+      "id": "PSCH-03-unknown-key-21",
       "kind": "grant",
       "category": "payload-schema",
-      "description": "Unknown top-level key 20.",
+      "description": "Unknown top-level key 21.",
       "registry": "registry.json",
       "operations": "operations.json",
-      "grant": "grants/PSCH-03-unknown-key-20.hex",
+      "grant": "grants/PSCH-03-unknown-key-21.hex",
       "grant_len": 329,
       "steps": [
         {
@@ -4544,7 +4544,7 @@
       "id": "PSCH-61-cfm-2",
       "kind": "grant",
       "category": "payload-schema",
-      "description": "cfm = 2.",
+      "description": "cfm = 2 without mid (20).",
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-61-cfm-2.hex",
@@ -5822,6 +5822,311 @@
             }
           },
           "expected": "grant_opv_unsupported"
+        }
+      ]
+    },
+    {
+      "id": "MND-01-mandated-valid",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "test.mandated (mandate_eligible) with cfm = 2 and a 16-byte mid.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-01-mandated-valid.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
+        }
+      ]
+    },
+    {
+      "id": "MND-02-mandated-transfer-not-eligible",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "cfm = 2 with mid on ledger.transfer, which requires confirmation but is not mandate_eligible.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-02-mandated-transfer-not-eligible.hex",
+      "grant_len": 345,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.transfer",
+            "args": {
+              "from": "alice",
+              "to": "bob",
+              "amount_cents": 12500
+            }
+          },
+          "expected": "grant_confirmation_required"
+        }
+      ]
+    },
+    {
+      "id": "MND-03-mandated-unconfirmed-op",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "cfm = 2 with mid on test.hold, a write without requires_confirmation (hence not mandate_eligible).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-03-mandated-unconfirmed-op.hex",
+      "grant_len": 339,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.hold",
+            "args": {
+              "account": "alice",
+              "amount_cents": 12500,
+              "currency": "EUR",
+              "memo": "rent"
+            }
+          },
+          "expected": "grant_confirmation_required"
+        }
+      ]
+    },
+    {
+      "id": "MND-04-mid-with-cfm-1",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "mid (20) present with cfm = 1.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-04-mid-with-cfm-1.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-05-mid-with-cfm-0",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "mid (20) present with cfm = 0.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-05-mid-with-cfm-0.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-06-mid-15-bytes",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "cfm = 2 with a mid of 15 bytes.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-06-mid-15-bytes.hex",
+      "grant_len": 329,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-07-mid-17-bytes",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "cfm = 2 with a mid of 17 bytes.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-07-mid-17-bytes.hex",
+      "grant_len": 331,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-08-mid-text",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "cfm = 2 with mid as a 16-byte tstr.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-08-mid-text.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-09-read-with-mid",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "Read grant carrying mid (20).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-09-read-with-mid.hex",
+      "grant_len": 320,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "ledger.get_balance",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-10-cfm-3",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "cfm = 3 (undefined), no mid.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-10-cfm-3.hex",
+      "grant_len": 312,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_payload_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-11-mid-altered",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "Payload field 20 (mid) altered after signing (one bit).",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-11-mid-altered.hex",
+      "grant_len": 330,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "grant_signature_invalid"
+        }
+      ]
+    },
+    {
+      "id": "MND-12-mandated-op-human-confirmed",
+      "kind": "grant",
+      "category": "mandate",
+      "description": "test.mandated with cfm = 1 and no mid: human approval remains valid on a mandate_eligible operation.",
+      "registry": "registry.json",
+      "operations": "operations.json",
+      "grant": "grants/MND-12-mandated-op-human-confirmed.hex",
+      "grant_len": 312,
+      "steps": [
+        {
+          "now": 1792886410,
+          "broker_id": "nodkey.broker.ledger-test",
+          "peer_wid": "spiffe://nodkey.test/workload/app1",
+          "revoked_before": [],
+          "request": {
+            "op": "test.mandated",
+            "args": {
+              "account": "alice"
+            }
+          },
+          "expected": "ACCEPT"
         }
       ]
     },
@@ -8240,6 +8545,46 @@
       "description": "Declaration with two kind members.",
       "operations": "operations/OPS-19-duplicate-member.json",
       "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-21-mandate-eligible-on-read",
+      "kind": "operations",
+      "category": "operations",
+      "description": "mandate_eligible: true on the read operation ledger.get_balance.",
+      "operations": "operations/OPS-21-mandate-eligible-on-read.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-22-mandate-eligible-unconfirmed-write",
+      "kind": "operations",
+      "category": "operations",
+      "description": "mandate_eligible: true on test.hold, a write without requires_confirmation.",
+      "operations": "operations/OPS-22-mandate-eligible-unconfirmed-write.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-23-mandate-eligible-non-boolean",
+      "kind": "operations",
+      "category": "operations",
+      "description": "mandate_eligible given as the string \"true\".",
+      "operations": "operations/OPS-23-mandate-eligible-non-boolean.json",
+      "expected": "ops_declaration_invalid"
+    },
+    {
+      "id": "OPS-24-mandate-eligible-confirmed-write",
+      "kind": "operations",
+      "category": "operations",
+      "description": "mandate_eligible: true also on ledger.transfer (a write with requires_confirmation).",
+      "operations": "operations/OPS-24-mandate-eligible-confirmed-write.json",
+      "expected": "LOAD_OK"
+    },
+    {
+      "id": "OPS-25-mandate-eligible-absent",
+      "kind": "operations",
+      "category": "operations",
+      "description": "No operation carries mandate_eligible (member removed from test.mandated; absent = false).",
+      "operations": "operations/OPS-25-mandate-eligible-absent.json",
+      "expected": "LOAD_OK"
     },
     {
       "id": "TRN-01-canonical",

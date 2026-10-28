@@ -7,7 +7,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use crate::cbor::{self, Value};
 use crate::error::BuildError;
 use crate::ops::ParamValue;
-use crate::payload::{self, GrantKind};
+use crate::payload::{self, Confirmation, GrantKind};
 use crate::registry::{ALG_ED25519, derive_kid};
 use crate::verify::{external_aad, sig_structure};
 use crate::{MAX_GRANT_BYTES, MAX_SKEW, MAX_TTL, TYP};
@@ -25,7 +25,7 @@ enum Body {
         opv: u16,
         res: BTreeMap<u8, ParamValue>,
         con: BTreeMap<u8, ConEntry>,
-        cfm: bool,
+        cfm: Confirmation,
     },
     Read {
         rop: BTreeMap<String, u16>,
@@ -72,7 +72,7 @@ impl GrantBuilder {
             opv,
             res: BTreeMap::new(),
             con: BTreeMap::new(),
-            cfm: false,
+            cfm: Confirmation::None,
         })
     }
 
@@ -152,9 +152,27 @@ impl GrantBuilder {
     }
     /// Write grants: `cfm = 1` — only when the user approved exactly these values on the auth
     /// origin (spec §9, D-2).
+    /// `confirmed(false)` sets `cfm = 0`. Either call replaces an earlier [`Self::mandated`].
     pub fn confirmed(mut self, cfm: bool) -> Self {
         match &mut self.body {
-            Body::Write { cfm: c, .. } => *c = cfm,
+            Body::Write { cfm: c, .. } => {
+                *c = if cfm {
+                    Confirmation::User
+                } else {
+                    Confirmation::None
+                }
+            }
+            Body::Read { .. } => self.misuse = Some("write-grant field set on a read grant"),
+        }
+        self
+    }
+    /// Write grants (Draft 4): `cfm = 2` with key 20 `mid` — only for a `mandate_eligible`
+    /// operation whose effect the Authority found within the active mandate `mid` on its **own**
+    /// mandate record and counters, never on a caller's word (spec §9). Replaces an earlier
+    /// [`Self::confirmed`].
+    pub fn mandated(mut self, mid: [u8; 16]) -> Self {
+        match &mut self.body {
+            Body::Write { cfm: c, .. } => *c = Confirmation::Mandate { mid },
             Body::Read { .. } => self.misuse = Some("write-grant field set on a read grant"),
         }
         self
@@ -239,8 +257,11 @@ impl GrantBuilder {
                     (u(payload::K_CON), Value::Map(con)),
                     (u(payload::K_USE), Value::Uint(1)),
                     (u(payload::K_KND), Value::Uint(1)),
-                    (u(payload::K_CFM), Value::Uint(u64::from(*cfm))),
+                    (u(payload::K_CFM), Value::Uint(u64::from(cfm.cfm()))),
                 ]);
+                if let Confirmation::Mandate { mid } = cfm {
+                    m.push((u(payload::K_MID), Value::Bytes(mid)));
+                }
             }
             Body::Read { rop } => {
                 let rop = rop

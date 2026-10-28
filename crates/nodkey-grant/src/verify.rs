@@ -1,4 +1,4 @@
-//! The verification procedure of spec §7 (Draft 2).
+//! The verification procedure of spec §7 (Draft 4).
 //!
 //! - [`verify`] runs steps 1c–9. Failures there are *unverified*: nothing is consumed or recorded.
 //! - A verified write grant ([`WriteGrant`]) gives the broker its consumption record (W10,
@@ -12,7 +12,7 @@ use ed25519_dalek::Signature;
 use crate::cbor::{self, Value};
 use crate::error::GrantError;
 use crate::ops::{Binding, OpKind, Operations, ParamDecl, ParamValue, Params, Request, Scalar};
-use crate::payload::{self, Body, Constraint, GrantKind, Payload};
+use crate::payload::{self, Body, Confirmation, Constraint, GrantKind, Payload};
 use crate::registry::{KeyEntry, KeyStatus, Registry};
 use crate::text::is_id;
 use crate::{AAD_TAG, MAX_GRANT_BYTES, MAX_SKEW, MAX_TTL, TYP};
@@ -150,7 +150,7 @@ pub struct WriteGrant<'a> {
     identity: GrantIdentity,
     op: String,
     opv: u16,
-    cfm: bool,
+    cfm: Confirmation,
     res: Vec<(u8, Scalar)>,
     con: Vec<(u8, Constraint)>,
     request: &'a Request,
@@ -173,6 +173,8 @@ pub struct ReadGrant<'a> {
 pub struct Authorized<'a> {
     identity: GrantIdentity,
     opv: u16,
+    /// `Some` for write grants, `None` for read grants.
+    confirmation: Option<Confirmation>,
     request: &'a Request,
 }
 
@@ -189,6 +191,17 @@ impl Authorized<'_> {
     }
     pub fn opv(&self) -> u16 {
         self.opv
+    }
+    /// Write grants: the signed confirmation marker (`cfm`, and `mid` for `cfm = 2`). `None` for
+    /// read grants.
+    pub fn confirmation(&self) -> Option<Confirmation> {
+        self.confirmation
+    }
+    /// The mandate id of a `cfm = 2` write grant. When `Some`, the broker MUST check the mandate
+    /// with this `mid` (active, terms, counters) as a W14 precondition before any effect; this
+    /// crate does not (spec W11d, Draft 4).
+    pub fn mandate_id(&self) -> Option<[u8; 16]> {
+        self.confirmation.and_then(|c| c.mandate_id())
     }
     /// The exact parameters that were checked and hashed.
     pub fn params(&self) -> &Params {
@@ -419,6 +432,17 @@ impl<'a> WriteGrant<'a> {
         &self.identity
     }
 
+    /// The signed confirmation marker (`cfm`, and `mid` for `cfm = 2`). Available before W10 so
+    /// that a broker can lock the mandate row in its documented lock order.
+    pub fn confirmation(&self) -> Confirmation {
+        self.cfm
+    }
+
+    /// The mandate id of a `cfm = 2` grant (see [`Authorized::mandate_id`]).
+    pub fn mandate_id(&self) -> Option<[u8; 16]> {
+        self.cfm.mandate_id()
+    }
+
     /// W10: the row the broker inserts as the **first statement** of the effect transaction
     /// (unique key `(iss, jti)`), followed by `SAVEPOINT decision`. On conflict: same
     /// `request_hash` → return the stored outcome; different → `grant_replayed`, row unchanged.
@@ -452,8 +476,19 @@ impl<'a> WriteGrant<'a> {
         if self.opv != decl.opv {
             return Err(OpvUnsupported);
         }
-        // W11d
-        if decl.requires_confirmation && !self.cfm {
+        // W11d (Draft 4): cfm = 2 only for mandate_eligible operations; where confirmation is
+        // required, cfm = 1, or cfm = 2 on a mandate_eligible operation.
+        let confirmed = match self.cfm {
+            Confirmation::None => false,
+            Confirmation::User => true,
+            Confirmation::Mandate { .. } => {
+                if !decl.mandate_eligible {
+                    return Err(ConfirmationRequired);
+                }
+                true
+            }
+        };
+        if decl.requires_confirmation && !confirmed {
             return Err(ConfirmationRequired);
         }
         // W12a: key sets, classes and declared types.
@@ -520,6 +555,7 @@ impl<'a> WriteGrant<'a> {
         Ok(Authorized {
             identity: self.identity,
             opv: self.opv,
+            confirmation: Some(self.cfm),
             request: req,
         })
     }
@@ -565,6 +601,7 @@ impl<'a> ReadGrant<'a> {
         Ok(Authorized {
             identity: self.identity,
             opv,
+            confirmation: None,
             request: self.request,
         })
     }

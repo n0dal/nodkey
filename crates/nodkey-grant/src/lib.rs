@@ -1,4 +1,4 @@
-//! Nodkey-Grant v1 (spec Draft 2): strict verifier and canonical issuer for
+//! Nodkey-Grant v1 (spec Draft 4): strict verifier and canonical issuer for
 //! `docs/specs/grant-v1.md`.
 //!
 //! - [`Registry::load`] — key registry (spec §8) with every load-time check.
@@ -8,7 +8,7 @@
 //! - [`verify`] — spec §7.2 steps 1c–9, then [`WriteGrant::decide`] (W11–W13, after the broker's
 //!   W10 insert of [`WriteGrant::consumption`]) or [`ReadGrant::decide`] (R11, R13). The caller
 //!   obligations are listed in the crate README.
-//! - [`verify_retransmission`] — payments adapter only (payments-adapter-v1 Draft 2 §3.1):
+//! - [`verify_retransmission`] — payments adapter only (payments-adapter-v1 §3.1, §16):
 //!   non-consuming check of a stored write grant with an age cap instead of `exp`. Separate
 //!   context, result and error types; never use it on the broker path. [`verify_binding`] is the
 //!   lookup-only variant (no age cap) with its own result type, [`BindingVerified`].
@@ -39,7 +39,7 @@ pub use issue::GrantBuilder;
 pub use ops::{
     Binding, OpKind, OperationDecl, Operations, ParamDecl, ParamType, ParamValue, Params, Request,
 };
-pub use payload::GrantKind;
+pub use payload::{Confirmation, GrantKind};
 pub use registry::{ALG_ED25519, KeyEntry, KeyStatus, Registry, derive_kid};
 pub use retransmit::{
     BindingVerified, CLOCK_FLOOR, RMax, RetransmissionAuthorized, RetransmissionContext,

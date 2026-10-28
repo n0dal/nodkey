@@ -113,8 +113,11 @@ pub struct OperationDecl {
     pub kind: OpKind,
     /// The single supported schema version (1..=65535).
     pub opv: u16,
-    /// Write ops only: the grant must carry `cfm = 1`.
+    /// Write ops only: the grant must carry `cfm = 1`, or `cfm = 2` if `mandate_eligible`.
     pub requires_confirmation: bool,
+    /// Draft 4: a `cfm = 2` (mandate-issued) grant is acceptable for this operation. Only for
+    /// write operations with `requires_confirmation`. JSON member optional (absent = `false`).
+    pub mandate_eligible: bool,
     pub params: Vec<ParamDecl>,
 }
 
@@ -149,6 +152,11 @@ impl Operations {
             }
             if d.kind == OpKind::Read && d.requires_confirmation {
                 return Err(e("requires_confirmation on a read operation"));
+            }
+            if d.mandate_eligible && (d.kind != OpKind::Write || !d.requires_confirmation) {
+                return Err(e(
+                    "mandate_eligible only on a write operation with requires_confirmation",
+                ));
             }
             let mut names = BTreeSet::new();
             let mut res_keys = BTreeSet::new();
@@ -252,6 +260,7 @@ impl Operations {
                 kind,
                 opv,
                 requires_confirmation: o.requires_confirmation,
+                mandate_eligible: o.mandate_eligible.unwrap_or(false),
                 params,
             });
         }
@@ -286,6 +295,11 @@ impl Operations {
     }
 }
 
+/// An optional member that, when present, must be a boolean (`null` is not "absent").
+fn present_bool<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    bool::deserialize(d).map(Some)
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawOps<'a> {
@@ -305,6 +319,9 @@ struct RawOp<'a> {
     #[serde(borrow)]
     opv: &'a RawValue,
     requires_confirmation: bool,
+    /// Draft 4, optional. Present means a JSON boolean: `null` and every other type are refused.
+    #[serde(default, deserialize_with = "present_bool")]
+    mandate_eligible: Option<bool>,
     #[serde(borrow)]
     params: Vec<RawParam<'a>>,
 }

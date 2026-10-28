@@ -1,4 +1,4 @@
-//! Runs every vector of `tests/vectors/grant-v1/manifest.json` (spec Draft 2): grant vectors
+//! Runs every vector of `tests/vectors/grant-v1/manifest.json` (spec Draft 4): grant vectors
 //! (every step), registry, operation-declaration and transport vectors, and the request-hash
 //! examples. Each must give exactly the expected result.
 
@@ -26,7 +26,7 @@ struct Counts {
 fn all_vectors() {
     let m = manifest();
     assert_eq!(m["format"], "nodkey.grant-v1.vectors");
-    assert_eq!(m["spec_draft"], 2);
+    assert_eq!(m["spec_draft"], 4);
     let c = &m["constants"];
     assert_eq!(c["typ"], TYP);
     assert_eq!(c["external_aad_tag"], AAD_TAG);
@@ -163,7 +163,8 @@ fn all_vectors() {
     println!("{n:?}, failures: {}", failures.len());
     println!("requests rejected by the strict parser (run unvalidated): {unvalidated:#?}");
     assert!(failures.is_empty(), "failures:\n{}", failures.join("\n"));
-    // Counts stated in spec §12.1; guards against a silently truncated manifest.
+    // Draft 2 counts (spec §12.1) plus the Draft 4 additions of spec §17 (MND-01..12, one step
+    // each; OPS-21..25); guards against a silently truncated manifest.
     assert_eq!(
         (
             n.grant,
@@ -173,7 +174,7 @@ fn all_vectors() {
             n.transport,
             n.request_hash
         ),
-        (280, 293, 26, 19, 11, 3)
+        (292, 305, 26, 24, 11, 3)
     );
     // Only the vectors that deliberately carry ill-formed requests bypass the strict parser:
     // CON-20..23 (README), and CON-24, whose request is also outside the declaration (its grant

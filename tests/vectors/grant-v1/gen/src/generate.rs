@@ -149,6 +149,14 @@ pub fn envelope(prot: &[u8], unprot_raw: &[u8], payload: &[u8], sig: &[u8]) -> V
     v
 }
 
+/// Deterministic TEST-ONLY mandate id (stands for the `jti` of a mandate's own grant).
+fn test_mid() -> [u8; 16] {
+    let mut h = Sha256::new();
+    h.update(b"nodkey.test.mid\x00");
+    h.update(b"MND");
+    h.finalize()[..16].try_into().unwrap()
+}
+
 fn con_exact(v: Vec<u8>) -> Vec<u8> {
     array(&[uint(0), v])
 }
@@ -217,6 +225,11 @@ impl G {
             map(&[(uint(0), con_bound(50_000)), (uint(1), con_exact(tstr("EUR")))]),
             0,
         )
+    }
+
+    /// Test-only mandate-eligible write op (Draft 4): `cfm = 2` with the mandate id `mid` (key 20).
+    fn mandated(id: &str) -> G {
+        G::base(id, "A", ISS, "test.mandated", map(&[(uint(0), tstr("alice"))]), map(&[]), 2).set(20, bstr(&test_mid()))
     }
 
     /// Read grant (knd = 2) for the given set of read operations (all opv 1 unless stated).
@@ -321,6 +334,9 @@ fn bulk_req(vals: &[String]) -> Value {
         args.insert(format!("p{i}"), json!(v));
     }
     json!({"op": "test.bulk", "args": args})
+}
+fn mandated_req() -> Value {
+    json!({"op": "test.mandated", "args": {"account": "alice"}})
 }
 fn peek_req() -> Value {
     json!({"op": "test.peek", "args": {"account": "alice"}})
@@ -464,20 +480,20 @@ fn vectors() -> Vec<Vector> {
     // ---------------- Step 1-2: size and envelope structure
     let valid = G::transfer("ENV").build();
     let (vp, vpl, vs) = G::transfer("ENV").parts();
-    let pad_to = |target: usize, id: &str| -> Vec<u8> {
+    let pad_to = |target: usize, id: &str, key: u64| -> Vec<u8> {
         for n in 1500..2100 {
-            let g = G::transfer(id).set(20, bstr(&vec![0u8; n])).build();
+            let g = G::transfer(id).set(key, bstr(&vec![0u8; n])).build();
             if g.len() == target {
                 return g;
             }
         }
         panic!("no padding length hits {target}");
     };
-    o.one("ENV-01-oversized-2049", "envelope", "Validly signed grant of 2049 bytes (limit 2048; padded with unknown key 20); rejected before decoding.",
-        pad_to(2049, "ENV-01"), st("grant_too_large"));
+    o.one("ENV-01-oversized-2049", "envelope", "Validly signed grant of 2049 bytes (limit 2048; padded with a long bstr under key 20, invalid in this grant); rejected before decoding.",
+        pad_to(2049, "ENV-01", 20), st("grant_too_large"));
     o.one("ENV-02-at-size-limit-2048", "envelope",
-        "Validly signed grant of exactly 2048 bytes passes the size check; fails later on its padding key 20.",
-        pad_to(2048, "ENV-02"), st("grant_payload_invalid"));
+        "Validly signed grant of exactly 2048 bytes passes the size check; fails later on its padding key 21 (unknown).",
+        pad_to(2048, "ENV-02", 21), st("grant_payload_invalid"));
     o.one("ENV-03-empty", "envelope", "Zero-length input.", vec![], st("grant_malformed"));
     o.one("ENV-04-truncated", "envelope", "Valid grant with its last byte removed.", valid[..valid.len() - 1].to_vec(), st("grant_malformed"));
     o.one("ENV-05-trailing-byte", "envelope", "Valid grant followed by one 0x00 byte.", [valid.clone(), vec![0]].concat(), st("grant_malformed"));
@@ -750,7 +766,7 @@ fn vectors() -> Vec<Vector> {
         G::transfer("PSCH-01").build_raw(&array(&[uint(1)])), st("grant_payload_invalid"));
     o.one("PSCH-02-payload-uint", "payload-schema", "Payload is the integer 1.",
         G::transfer("PSCH-02").build_raw(&uint(1)), st("grant_payload_invalid"));
-    psch("PSCH-03-unknown-key-20", "Unknown top-level key 20.", G::transfer("PSCH-03").set(20, uint(0)), "grant_payload_invalid", &mut o);
+    psch("PSCH-03-unknown-key-21", "Unknown top-level key 21.", G::transfer("PSCH-03").set(21, uint(0)), "grant_payload_invalid", &mut o);
     psch("PSCH-04-reserved-key-15-epo", "Reserved key 15 (removed epo).", G::transfer("PSCH-04").set(15, uint(0)), "grant_payload_invalid", &mut o);
     psch("PSCH-05-reserved-key-16-rqh", "Reserved key 16 (removed rqh).", G::transfer("PSCH-05").set(16, bstr(&[0; 32])), "grant_payload_invalid", &mut o);
     {
@@ -803,7 +819,7 @@ fn vectors() -> Vec<Vector> {
     let rd = |id: &str| G::balance(id);
     let read_bad: Vec<(&str, &str, G)> = vec![
         ("PSCH-60-knd-3", "knd = 3 (undefined).", G::transfer("PSCH-60").set(17, uint(3))),
-        ("PSCH-61-cfm-2", "cfm = 2.", G::transfer("PSCH-61").set(18, uint(2))),
+        ("PSCH-61-cfm-2", "cfm = 2 without mid (20).", G::transfer("PSCH-61").set(18, uint(2))),
         ("PSCH-62-read-with-con", "Read grant carrying con (13).", rd("PSCH-62").set(13, map(&[]))),
         ("PSCH-63-read-with-cfm", "Read grant carrying cfm (18).", rd("PSCH-63").set(18, uint(1))),
         ("PSCH-64-read-with-op", "Read grant carrying op (10).", rd("PSCH-64").set(10, tstr("ledger.get_balance"))),
@@ -900,6 +916,42 @@ fn vectors() -> Vec<Vector> {
     o.one("OP-14-rop-unsupported-opv-not-requested", "operation",
         "Read grant lists get_balance:1 and list_transfers:9; request get_balance. Every rop entry is checked: whole grant rejected.",
         G::read("OP-14", &[("ledger.get_balance", 1), ("ledger.list_transfers", 9)]).build(), st("grant_opv_unsupported").req(balance_req()));
+
+    // ---------------- Draft 4: mandate-issued write grants (cfm = 2, mid)
+    let mnd = |id: &str, desc: &str, grant: Vec<u8>, step: Step, o: &mut Out| o.one(id, "mandate", desc, grant, step);
+    let mreq = || mandated_req();
+    mnd("MND-01-mandated-valid", "test.mandated (mandate_eligible) with cfm = 2 and a 16-byte mid.",
+        G::mandated("MND-01").build(), st("ACCEPT").req(mreq()), &mut o);
+    mnd("MND-02-mandated-transfer-not-eligible", "cfm = 2 with mid on ledger.transfer, which requires confirmation but is not mandate_eligible.",
+        G::transfer("MND-02").set(18, uint(2)).set(20, bstr(&test_mid())).build(), st("grant_confirmation_required"), &mut o);
+    mnd("MND-03-mandated-unconfirmed-op", "cfm = 2 with mid on test.hold, a write without requires_confirmation (hence not mandate_eligible).",
+        G::hold("MND-03").set(18, uint(2)).set(20, bstr(&test_mid())).build(),
+        st("grant_confirmation_required").req(hold_req(12_500, "EUR", "rent")), &mut o);
+    mnd("MND-04-mid-with-cfm-1", "mid (20) present with cfm = 1.",
+        G::mandated("MND-04").set(18, uint(1)).build(), st("grant_payload_invalid").req(mreq()), &mut o);
+    mnd("MND-05-mid-with-cfm-0", "mid (20) present with cfm = 0.",
+        G::mandated("MND-05").set(18, uint(0)).build(), st("grant_payload_invalid").req(mreq()), &mut o);
+    mnd("MND-06-mid-15-bytes", "cfm = 2 with a mid of 15 bytes.",
+        G::mandated("MND-06").set(20, bstr(&[7; 15])).build(), st("grant_payload_invalid").req(mreq()), &mut o);
+    mnd("MND-07-mid-17-bytes", "cfm = 2 with a mid of 17 bytes.",
+        G::mandated("MND-07").set(20, bstr(&[7; 17])).build(), st("grant_payload_invalid").req(mreq()), &mut o);
+    mnd("MND-08-mid-text", "cfm = 2 with mid as a 16-byte tstr.",
+        G::mandated("MND-08").set(20, tstr("0123456789abcdef")).build(), st("grant_payload_invalid").req(mreq()), &mut o);
+    mnd("MND-09-read-with-mid", "Read grant carrying mid (20).",
+        G::balance("MND-09").set(20, bstr(&test_mid())).build(), st("grant_payload_invalid").req(balance_req()), &mut o);
+    mnd("MND-10-cfm-3", "cfm = 3 (undefined), no mid.",
+        G::mandated("MND-10").set(18, uint(3)).del(20).build(), st("grant_payload_invalid").req(mreq()), &mut o);
+    {
+        let g = G::mandated("MND-11");
+        let (p, _, s) = g.parts();
+        let mut other = test_mid();
+        other[0] ^= 0x01;
+        let altered = g.clone().set(20, bstr(&other)).payload();
+        mnd("MND-11-mid-altered", "Payload field 20 (mid) altered after signing (one bit).",
+            envelope(&p, &[0xa0], &altered, &s), st("grant_signature_invalid").req(mreq()), &mut o);
+    }
+    mnd("MND-12-mandated-op-human-confirmed", "test.mandated with cfm = 1 and no mid: human approval remains valid on a mandate_eligible operation.",
+        G::mandated("MND-12").set(18, uint(1)).del(20).build(), st("ACCEPT").req(mreq()), &mut o);
 
     // ---------------- Step 11: resource and constraints
     o.one("CON-01-amount-exceeds-bound", "constraint", "test.hold: amount_cents = ceiling + 1.",
@@ -1287,6 +1339,9 @@ fn operations() -> Value {
         ]},
         {"op": "test.peek", "kind": "read", "opv": 1, "requires_confirmation": false, "params": [
             {"name": "account", "in": "request", "key": null, "class": "owner_scoped", "type": "account_id", "destination": false}
+        ]},
+        {"op": "test.mandated", "kind": "write", "opv": 1, "requires_confirmation": true, "mandate_eligible": true, "params": [
+            {"name": "account", "in": "res", "key": 0, "class": "exact", "type": "account_id", "destination": false}
         ]}
     ]})
 }
@@ -1342,6 +1397,26 @@ fn ops_vectors() -> Vec<(String, String, String, String)> {
     m("OPS-18-justification-on-exact", "Exact parameter carrying a justification.", &|v| v["operations"][0]["params"][1]["justification"] = json!("x"));
     let dup = pretty(&base).replacen("\"kind\": \"write\",", "\"kind\": \"read\",\n      \"kind\": \"write\",", 1);
     out.push(("OPS-19-duplicate-member".to_owned(), "Declaration with two kind members.".to_owned(), dup, "ops_declaration_invalid".to_owned()));
+    // Draft 4: mandate_eligible. OPS-20 stays reserved (spec section 6.3, binds-no-parameter rule).
+    // Index 6 is test.mandated, index 3 ledger.get_balance, index 1 test.hold, index 0 ledger.transfer.
+    let mut mx = |id: &str, desc: &str, exp: &str, f: &dyn Fn(&mut Value)| {
+        let mut v = base.clone();
+        f(&mut v);
+        out.push((id.to_owned(), desc.to_owned(), pretty(&v), exp.to_owned()));
+    };
+    const INV: &str = "ops_declaration_invalid";
+    mx("OPS-21-mandate-eligible-on-read", "mandate_eligible: true on the read operation ledger.get_balance.", INV,
+        &|v| v["operations"][3]["mandate_eligible"] = json!(true));
+    mx("OPS-22-mandate-eligible-unconfirmed-write", "mandate_eligible: true on test.hold, a write without requires_confirmation.", INV,
+        &|v| v["operations"][1]["mandate_eligible"] = json!(true));
+    mx("OPS-23-mandate-eligible-non-boolean", "mandate_eligible given as the string \"true\".", INV,
+        &|v| v["operations"][6]["mandate_eligible"] = json!("true"));
+    mx("OPS-24-mandate-eligible-confirmed-write", "mandate_eligible: true also on ledger.transfer (a write with requires_confirmation).", "LOAD_OK",
+        &|v| v["operations"][0]["mandate_eligible"] = json!(true));
+    mx("OPS-25-mandate-eligible-absent", "No operation carries mandate_eligible (member removed from test.mandated; absent = false).", "LOAD_OK",
+        &|v| {
+            v["operations"][6].as_object_mut().unwrap().remove("mandate_eligible");
+        });
     out
 }
 
@@ -1475,7 +1550,7 @@ pub fn run(dir: &Path) {
     let manifest = json!({
         "format": "nodkey.grant-v1.vectors",
         "spec": "docs/specs/grant-v1.md",
-        "spec_draft": 2,
+        "spec_draft": 4,
         "warning": "TEST-ONLY. Every key below is a published RFC 8032 test key. Never deploy a registry containing them.",
         "constants": {
             "typ": TYP,

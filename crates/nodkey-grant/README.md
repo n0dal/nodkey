@@ -2,13 +2,15 @@
 
 > **PROTOTYPE.** This crate is not suitable for production use.
 
-This crate verifies and issues **Nodkey-Grant v1** grants. It implements **spec Draft 2**
+This crate verifies and issues **Nodkey-Grant v1** grants. It implements **spec Draft 4**
 ([`docs/specs/grant-v1.md`](../../docs/specs/grant-v1.md)): restricted COSE_Sign1 with Ed25519 and a
-deterministic-CBOR payload.
+deterministic-CBOR payload. Draft 4 adds mandate-issued write grants (`cfm = 2` with key 20 `mid`) and
+the declaration member `mandate_eligible` (spec §17).
 
 It is a second implementation, independent of the vector generator in
 `tests/vectors/grant-v1/gen/`. It shares no code with the generator, and the generator was not read
-while writing it.
+while writing it up to Draft 3. The Draft 4 update was made by the author of the Draft 4 generator
+changes, so it is not independent for Draft 4 (SPEC_ISSUES.md, "Independence note").
 
 A valid grant is a necessary condition for an effect, never a sufficient one (SI-04).
 
@@ -92,6 +94,24 @@ The broker must meet these obligations. They cannot be enforced inside a library
    transaction, or bound the transaction time.
 8. **Concurrency, restart and replay-store restore** must be covered by integration tests
    (§12.2).
+9. **Mandate grants (`cfm = 2`, Draft 4).** The crate checks only the format (`mid` is exactly
+   16 bytes and present iff `cfm = 2`) and W11d (`cfm = 2` only for a `mandate_eligible`
+   operation). It does **not** know whether the mandate exists, is active, or has room in its
+   terms and counters. For every write grant whose `WriteGrant::mandate_id()` /
+   `Authorized::mandate_id()` is `Some(mid)`, the broker MUST, inside the effect transaction:
+   - lock and check its own mandate row for that `mid` (agent-interface-v1 §4.5: active, bound to
+     the grant's `wid`/`ten`/`sub`, terms, counters) as a **W14 precondition**, in the documented
+     lock order (for payments: record → mandate → budget, payments-adapter-v1 §16.4);
+   - treat a missing, revoked or exhausted mandate as a W14 denial: roll back to the savepoint,
+     record DENIED, commit (§7.3), exactly like any other precondition failure;
+   - update the mandate counters in the same transaction as the effect.
+   `mandate_id()` is `None` for `cfm = 0` and `cfm = 1`; a `cfm = 1` grant touches no mandate.
+   Declarations: set `mandate_eligible: true` only on operations the mandate design allows
+   (agent-interface-v1 §3); `Operations::new` refuses it on reads and on writes without
+   `requires_confirmation`.
+10. **Issuers.** `GrantBuilder::mandated(mid)` sets `cfm = 2` and `mid`. The Authority may call it
+    only after finding the effect within an active mandate on its **own** mandate record and
+    counters, never on a caller's word (spec §9).
 
 ### Payments adapter: `verify_retransmission`
 
@@ -104,7 +124,10 @@ The payments adapter calls this to (re)send an effect the broker already decided
 - it does **not** check `exp`. It requires `now − iat ≤ R_max` instead, where `RMax::new` enforces
   the start-up rule against provider retention and resend margin;
 - it evaluates the key window at `iat`;
-- it refuses while the clock reads below 2024-01-01.
+- it refuses while the clock reads below 2024-01-01;
+- it accepts `cfm = 1`, and `cfm = 2` (with `mid`) only when the adapter's declaration is
+  `mandate_eligible` (payments-adapter-v1 §16.2 for `payments.support_refund`; SPEC_ISSUES.md
+  D4-1). `confirmation()` / `mandate_id()` report it; the adapter does not evaluate the mandate.
 
 `idempotency_identity()` returns the `(iss, jti)` pair for the provider idempotency key. Every
 provider value comes from `params()`, the signed `res`/`con` values.
@@ -152,9 +175,9 @@ cargo fmt --check
 
 | Suite | Covers |
 |---|---|
-| `tests/conformance.rs` | Every vector in the manifest:<br>• 280 grant vectors (293 steps)<br>• 26 registry, 19 operation-declaration and 11 transport vectors<br>• 3 request-hash examples<br>W10 and the savepoint recording rule are simulated with an in-memory store. The test also asserts that only CON-20..24 bypass the strict request parser. |
-| `tests/roundtrip.rs` | • Builder → verify → decide<br>• Byte-exact reproduction of ACC-01<br>• Strict request parsing (GC-01)<br>• The consumption hash and `Authorized::params` match the validated request (GC-02)<br>• Builder refusals<br>• 300 randomized `test.hold` grants |
-| `tests/retransmission.rs` | `verify_retransmission` and `verify_binding`:<br>• age-cap boundaries, and an expired-but-young grant accepted while `verify` still says `grant_expired`<br>• future `iat`, and every binding or schema mismatch<br>• read grant, key revoked or unknown, key window at `iat`<br>• clock floor, the `R_max` start-up rule, and context refusals<br>• `verify_binding`: an old grant is accepted for lookup but refused for create; tampered, read and mismatched grants are rejected |
+| `tests/conformance.rs` | Every vector in the manifest (`spec_draft` 4):<br>• 292 grant vectors (305 steps), including MND-01..12<br>• 26 registry, 24 operation-declaration (incl. OPS-21..25) and 11 transport vectors<br>• 3 request-hash examples<br>W10 and the savepoint recording rule are simulated with an in-memory store. The test also asserts that only CON-20..24 bypass the strict request parser. |
+| `tests/roundtrip.rs` | • Builder → verify → decide<br>• Byte-exact reproduction of ACC-01<br>• Strict request parsing (GC-01)<br>• The consumption hash and `Authorized::params` match the validated request (GC-02)<br>• Builder refusals<br>• 300 randomized `test.hold` grants<br>• Draft 4: byte-exact MND-01, `mandate_id()` on verified grants, W11d on `ledger.transfer`, strict `mandate_eligible` member |
+| `tests/retransmission.rs` | `verify_retransmission` and `verify_binding`:<br>• age-cap boundaries, and an expired-but-young grant accepted while `verify` still says `grant_expired`<br>• future `iat`, and every binding or schema mismatch<br>• read grant, key revoked or unknown, key window at `iat`<br>• clock floor, the `R_max` start-up rule, and context refusals<br>• `verify_binding`: an old grant is accepted for lookup but refused for create; tampered, read and mismatched grants are rejected<br>• Draft 4: `cfm = 2` accepted only for a `mandate_eligible` declaration, with `mid` reported |
 | `tests/robustness.rs` | • Over 1.4 million truncated, mutated, extended and random variants of every vector<br>• Re-signed mutated payloads<br>The checks are no panics, and no mutation of an accepted grant is ever accepted. |
 
 Spec issues: [`SPEC_ISSUES.md`](SPEC_ISSUES.md).

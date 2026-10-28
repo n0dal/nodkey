@@ -1,11 +1,13 @@
-# Nodkey-Grant v1 test vectors (spec Draft 2; unchanged for Draft 3)
+# Nodkey-Grant v1 test vectors (spec Draft 4)
 
 > [!WARNING]
 > **TEST-ONLY KEYS.** Every signing key used here is a published RFC 8032 test key, and its secret seed
 > is public. The seeds are listed in `manifest.json`. A key registry containing any of these keys must
 > never be deployed.
 
-These are conformance vectors for [`docs/specs/grant-v1.md`](../../../docs/specs/grant-v1.md) Draft 2.
+These are conformance vectors for [`docs/specs/grant-v1.md`](../../../docs/specs/grant-v1.md) Draft 4
+(Draft 2 set plus the Draft 4 changes of spec §17: ENV-02 and PSCH-03 moved to key 21, MND-01..12,
+OPS-21..25; `operations.json` gains `test.mandated`).
 An implementation conforms if it produces exactly the expected result for every vector.
 
 ## Layout
@@ -38,7 +40,7 @@ The generator checks that each seed yields the public key given in the RFC.
 
 ```jsonc
 {
-  "format": "nodkey.grant-v1.vectors", "spec_draft": 2,
+  "format": "nodkey.grant-v1.vectors", "spec_draft": 4,
   "constants": { "typ", "external_aad_tag", "kid_label", "request_hash_label", "max_grant_bytes": 2048,
                  "max_transport_chars": 2731, "skew_seconds": 5, "max_ttl_seconds": 30 },
   "types": { "uint", "account_id", "currency", "text64", "text256" },   // grammars (spec §6.2)
@@ -93,7 +95,11 @@ be rejected by the strict rules of spec §3.5. A lax verifier such as OpenSSL ac
 The other operations exist only to exercise the format:
 - `test.hold`: bounded, exact and free parameters;
 - `test.bulk`: eight `text256` parameters, used to reach the 2048-byte limit;
-- `ledger.list_transfers` and `test.peek`: read operations; `test.peek` tests text-key ordering.
+- `ledger.list_transfers` and `test.peek`: read operations; `test.peek` tests text-key ordering;
+- `test.mandated` (Draft 4): a write with `requires_confirmation` and `mandate_eligible: true`, one exact
+  `res` parameter. Mandate grants carry `cfm = 2` and a TEST-ONLY 16-byte `mid` (key 20). The vectors
+  check only the grant format and W11d; whether the mandate is active and within its terms is a broker
+  precondition (W14) that the vectors do not cover.
 
 ## Categories
 
@@ -109,11 +115,12 @@ The other operations exist only to exercise the format:
 | ISS, TIME | 8 issuer, time window, lifetime from `iat` | 20 |
 | BIND | 9 audience, workload, tenant | 6 |
 | OP | W11 / R11 operation, kind, opv, confirmation | 12 |
+| MND | Draft 4 mandate grants: `cfm = 2`, `mid` shape, W11d eligibility, `mid` under the signature | 12 |
 | CON | W12 resource, constraints, declared types | 21 |
 | RPL | W10 replay sequences | 8 |
 | REV | W13 / R13 `revoked_before` | 9 |
 | REG | key-registry load | 26 |
-| OPS | operation-declaration load | 19 |
+| OPS | operation-declaration load (OPS-01..19, OPS-21..25; OPS-20 reserved) | 24 |
 | TRN | transport text | 11 |
 
 ## Regenerating and checking
@@ -148,4 +155,5 @@ An implementation that wants to reproduce a grant byte for byte should take `jti
 - concurrency, restart, and failure injection into denial recording (integration tests, spec §12.2);
 - registry reload;
 - read ownership and W14 preconditions;
-- the `broker_id` sharing rule.
+- the `broker_id` sharing rule;
+- mandate state (active, terms, counters) for `cfm = 2` grants (a W14 precondition).

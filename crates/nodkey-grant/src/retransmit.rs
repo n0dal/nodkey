@@ -10,7 +10,9 @@
 //! Checks, in order (first failure wins; the adapter answers `grant_refused` for all of them):
 //! clock floor; grant-v1 steps 1c–7 with the key window evaluated at `iat` (§3.1 "key validity at
 //! `iat`"); 8a issuer; 8b time order; 8c lifetime; 8d `iat`/`nbf ≤ now + skew`; **no 8e**; age;
-//! 9a audience; 9b workload; 9c tenant (see SPEC_ISSUES.md RX-1); kind = write; `cfm = 1`;
+//! 9a audience; 9b workload; 9c tenant (see SPEC_ISSUES.md RX-1); kind = write; `cfm = 1`, or
+//! `cfm = 2` with `mid` when the adapter's declaration is `mandate_eligible` (payments-adapter-v1
+//! §16.2, grant-v1 Draft 4; SPEC_ISSUES.md D4-1). The mandate itself is not evaluated here;
 //! `op`/`opv` equal the adapter's compiled-in operation; `res`/`con` exactly match its
 //! declaration (keys, class exact, declared types).
 //!
@@ -22,7 +24,7 @@ use std::fmt;
 
 use crate::error::GrantError;
 use crate::ops::{Binding, OpKind, OperationDecl, Operations, ParamValue, Params, Scalar};
-use crate::payload::{Body, Constraint};
+use crate::payload::{Body, Confirmation, Constraint};
 use crate::registry::Registry;
 use crate::verify::{BrokerId, KeyWindowAt, Limits, verify_signed};
 
@@ -154,6 +156,7 @@ struct Checked {
     exp: u64,
     ten: String,
     sub: String,
+    cfm: Confirmation,
     params: Params,
 }
 
@@ -189,6 +192,16 @@ macro_rules! claim_accessors {
         /// The signed `res`/`con` values by declared parameter name.
         pub fn params(&self) -> &Params {
             &self.c.params
+        }
+        /// The signed confirmation marker: [`Confirmation::User`], or
+        /// [`Confirmation::Mandate`] for a `mandate_eligible` operation (never `None`).
+        pub fn confirmation(&self) -> Confirmation {
+            self.c.cfm
+        }
+        /// The mandate id of a `cfm = 2` grant (audit only; the adapter does not evaluate the
+        /// mandate, payments-adapter-v1 §16.2).
+        pub fn mandate_id(&self) -> Option<[u8; 16]> {
+            self.c.cfm.mandate_id()
         }
     };
 }
@@ -309,10 +322,18 @@ fn adapter_check(
     else {
         return Err(KindMismatch.into());
     };
-    if !cfm {
-        return Err(ConfirmationRequired.into());
-    }
     let decl = ctx.decl;
+    // cfm = 1; or cfm = 2 (with mid, enforced at step 7b) only for a mandate_eligible
+    // operation. Same rule as W11d for a confirmed operation; also applied when the declaration
+    // does not set requires_confirmation, because the adapter's claim table always requires a
+    // confirmed (or mandated) write.
+    match cfm {
+        Confirmation::User => {}
+        Confirmation::Mandate { .. } if decl.mandate_eligible => {}
+        Confirmation::Mandate { .. } | Confirmation::None => {
+            return Err(ConfirmationRequired.into());
+        }
+    }
     if op != decl.name {
         return Err(OpMismatch.into());
     }
@@ -359,6 +380,7 @@ fn adapter_check(
         exp: p.exp,
         ten: p.ten,
         sub: p.sub,
+        cfm,
         params,
     })
 }

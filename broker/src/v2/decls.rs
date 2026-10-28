@@ -63,6 +63,7 @@ fn refund_v31() -> Option<OperationDecl> {
         kind: OpKind::Write,
         opv: 1,
         requires_confirmation: true,
+        mandate_eligible: false,
         params: vec![
             p("order_id", Resource(0), Uint, false),
             p("amount_minor", Exact(0), Uint, false),
@@ -123,6 +124,7 @@ pub fn expected(op: &str) -> Option<OperationDecl> {
         kind,
         opv: 1,
         requires_confirmation: rc,
+        mandate_eligible: false,
         params,
     })
 }

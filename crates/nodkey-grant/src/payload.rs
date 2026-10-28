@@ -13,6 +13,41 @@ pub enum GrantKind {
     Read,
 }
 
+/// The signed confirmation marker of a write grant: key 18 `cfm` and, for `cfm = 2`, key 20
+/// `mid` (spec §5.1, Draft 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirmation {
+    /// `cfm = 0`: not confirmed.
+    None,
+    /// `cfm = 1`: the user confirmed exactly the bound values on the auth origin.
+    User,
+    /// `cfm = 2`: issued by the Authority under the mandate `mid` without per-effect approval.
+    /// Valid only for `mandate_eligible` operations (W11d). The mandate itself (active, terms,
+    /// counters) is **not** checked by this crate: it is a W14 precondition of the broker.
+    Mandate {
+        /// The mandate id (the `jti` of the mandate's own grant), exactly 16 bytes.
+        mid: [u8; 16],
+    },
+}
+
+impl Confirmation {
+    /// The `cfm` value (0, 1 or 2).
+    pub fn cfm(&self) -> u8 {
+        match self {
+            Confirmation::None => 0,
+            Confirmation::User => 1,
+            Confirmation::Mandate { .. } => 2,
+        }
+    }
+    /// The mandate id, for `cfm = 2` only.
+    pub fn mandate_id(&self) -> Option<[u8; 16]> {
+        match self {
+            Confirmation::Mandate { mid } => Some(*mid),
+            _ => None,
+        }
+    }
+}
+
 /// `con` entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Constraint {
@@ -29,7 +64,7 @@ pub(crate) enum Body {
         res: Vec<(u8, Scalar)>,
         /// Ascending key order.
         con: Vec<(u8, Constraint)>,
-        cfm: bool,
+        cfm: Confirmation,
     },
     Read {
         /// Map order (C8 order).
@@ -69,6 +104,10 @@ pub(crate) const K_USE: usize = 14;
 pub(crate) const K_KND: usize = 17;
 pub(crate) const K_CFM: usize = 18;
 pub(crate) const K_ROP: usize = 19;
+/// Draft 4: present exactly when `cfm = 2`.
+pub(crate) const K_MID: usize = 20;
+/// Keys 0..=20 are defined; every key from 21 on is unknown.
+const N_KEYS: usize = 21;
 
 const fn mask(keys: &[usize]) -> u32 {
     let mut m = 0u32;
@@ -174,12 +213,12 @@ pub(crate) fn parse(v: &Value<'_>) -> Result<Payload, GrantError> {
             }
         }
     }
-    // 7b: keys are uints < 20 (uniqueness is guaranteed by C8).
-    let mut slot: [Option<&Value<'_>>; 20] = [None; 20];
+    // 7b: keys are uints < 21 (uniqueness is guaranteed by C8).
+    let mut slot: [Option<&Value<'_>>; N_KEYS] = [None; N_KEYS];
     let mut present = 0u32;
     for (k, val) in entries {
         match k {
-            Value::Uint(n) if *n < 20 => {
+            Value::Uint(n) if *n < N_KEYS as u64 => {
                 slot[*n as usize] = Some(val);
                 present |= 1 << *n;
             }
@@ -191,7 +230,13 @@ pub(crate) fn parse(v: &Value<'_>) -> Result<Payload, GrantError> {
         Some(2) => GrantKind::Read,
         _ => return Err(INVALID),
     };
+    // Write grants: key 20 (`mid`) belongs to the key set exactly when `cfm` is the uint 2
+    // (spec §5.2, Draft 4). A `cfm` of any other value or type leaves 20 outside the set; the
+    // `cfm` value itself is checked below, so the result is `grant_payload_invalid` either way.
     let expected = match kind {
+        GrantKind::Write if matches!(slot[K_CFM], Some(Value::Uint(2))) => {
+            WRITE_KEYS | mask(&[K_MID])
+        }
         GrantKind::Write => WRITE_KEYS,
         GrantKind::Read => READ_KEYS,
     };
@@ -213,8 +258,14 @@ pub(crate) fn parse(v: &Value<'_>) -> Result<Payload, GrantError> {
                 return Err(INVALID);
             }
             let cfm = match uint(get(K_CFM)?)? {
-                0 => false,
-                1 => true,
+                0 => Confirmation::None,
+                1 => Confirmation::User,
+                2 => match get(K_MID)? {
+                    Value::Bytes(b) => Confirmation::Mandate {
+                        mid: <[u8; 16]>::try_from(*b).map_err(|_| INVALID)?,
+                    },
+                    _ => return Err(INVALID),
+                },
                 _ => return Err(INVALID),
             };
             Body::Write {

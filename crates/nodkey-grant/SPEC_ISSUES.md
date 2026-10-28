@@ -1,8 +1,14 @@
 # Spec issues found while implementing `nodkey-grant`
 
 These were found while building this crate as an independent second implementation of
-[`docs/specs/grant-v1.md`](../../docs/specs/grant-v1.md). The vector generator was not read. The
-crate now implements **Draft 2**.
+[`docs/specs/grant-v1.md`](../../docs/specs/grant-v1.md). The crate now implements **Draft 4**.
+
+**Independence note (Draft 4 update).** The Draft 4 changes to this crate were made by the same
+person who, immediately before, implemented the Draft 4 vectors in the generator and its reference
+checker. The crate code was written from the spec text without consulting the generator source
+during that work, but the author had read it earlier in the same session. For Draft 4 the crate
+is therefore **not** an independent implementation; an independent review of the D4 items below
+and of the MND/OPS-21..25 vectors is recommended.
 
 ## Draft 1 issues: all resolved in Draft 2
 
@@ -42,3 +48,13 @@ is kept for history.
 | RX-4 | Low | §3.1 | The table lists `aud` as a separate claim check. With grant-v1 the audience is also bound in `external_aad`, so a grant for another `aud` fails at signature verification (step 5), before any claim check. The outcome is the same (`grant_refused`). | Both checks run. | None needed; consider noting it. |
 | RX-5 | Low | §3.1 | The order of the age check relative to 9a–9c, and the error codes used, are unspecified. Every failure maps to `grant_refused`, so the order only affects audit logs. | Order: clock floor, 1c–7, 4d at `iat`, 8a–8d, age, 9a–9c, kind, `cfm`, `op`, `opv`, `res`/`con`. | State the order, or explicitly leave it unspecified. |
 | RX-6 | Low | §3.1 | `charge_id` is declared `text64`, and the broker may store the reserved value `unresolved` (effect-protocol-v2 Draft 3.1). The grammar `^ch_[A-Za-z0-9]{8,64}$` (§7.1) is not part of the declaration, so the verifier accepts any `text64`. | The adapter's order-view check (§3.2) catches it (`charge_id` must equal the `orders` row). | Give `charge_id` a closed type, or require that `unresolved` is never signed. |
+
+## Draft 4 (mandate grants) — readings to be confirmed
+
+| Id | Severity | Where | Issue | Reading used here | Proposed fix |
+|---|---|---|---|---|---|
+| D4-1 | Medium | payments-adapter-v1 §3.1, §16.2; grant-v1 W11d | The adapter claim tables fix `cfm` per operation (`payments.refund`: `1`; `payments.support_refund`: `1` or `2` with `mid`). `verify_retransmission`/`verify_binding` are generic over the adapter's compiled-in declaration and do not know operation names. | `cfm = 1` is always accepted; `cfm = 2` is accepted iff the declaration has `mandate_eligible: true`; `cfm = 0` → `grant_confirmation_required` (unchanged). This equals the claim tables if the adapter's compiled-in declarations carry the same `mandate_eligible` flags as agent-interface-v1 §3 (`payments.support_refund` true, `payments.refund` false). | State in payments-adapter-v1 §3.1 that the `cfm` rule follows the declaration's `mandate_eligible`, or give the adapter an explicit per-op `cfm` set. |
+| D4-2 | Low | §6.1 `mandate_eligible` | "boolean, OPTIONAL (absent = `false`)"; §6.3 refuses a "non-boolean" value. JSON `null` is not addressed (no vector). | `null` is non-boolean: refused (`ops_declaration_invalid`). A duplicate member is refused like every other duplicate. | Say "present ⇒ JSON `true`/`false`; `null` refused", and add an OPS vector. |
+| D4-3 | Low | §5.2, step 7b | With `cfm` absent, non-uint or ≥ 3, it is unspecified whether key 20 is in the expected key set. | Key 20 is in the write key set only when `cfm` is the uint 2. Every other case is `grant_payload_invalid` regardless, so the verdict does not depend on the reading. | None needed. |
+| D4-4 | Low | §12.1, Status line | The spec still says the vectors are "not yet regenerated" and §12.1 gives the Draft 2 counts. The committed manifest is now `spec_draft: 4` with 292 grant vectors (305 steps) and 24 OPS vectors. | — | Update §12.1 and the status line. |
+| D4-5 | Low | W14, agent-interface-v1 §4.5 | The crate exposes `mid` (`WriteGrant::mandate_id`, `Authorized::mandate_id`) but cannot enforce that the broker checks the mandate before the effect. | Caller obligation 9 in the README. | None in this spec; covered by broker integration tests (AT-09 and following). |

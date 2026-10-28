@@ -4,9 +4,10 @@ mod common;
 
 use common::*;
 use nodkey_grant::{
-    Binding, BrokerId, CLOCK_FLOOR, GrantBuilder, GrantError, Limits, OpKind, OperationDecl,
-    Operations, ParamDecl, ParamType, ParamValue, Params, RMax, Registry, RetransmissionContext,
-    RetransmissionError, SigningKey, Verified, VerifyContext, verify, verify_retransmission,
+    Binding, BrokerId, CLOCK_FLOOR, Confirmation, GrantBuilder, GrantError, Limits, OpKind,
+    OperationDecl, Operations, ParamDecl, ParamType, ParamValue, Params, RMax, Registry,
+    RetransmissionContext, RetransmissionError, SigningKey, Verified, VerifyContext, verify,
+    verify_retransmission,
 };
 
 const SEED_B: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb";
@@ -35,6 +36,7 @@ fn ops() -> Operations {
         kind: OpKind::Write,
         opv: 1,
         requires_confirmation: true,
+        mandate_eligible: false,
         params: vec![
             p("order_id", Binding::Resource(0), ParamType::Uint),
             p("amount_minor", Binding::Exact(0), ParamType::Uint),
@@ -59,9 +61,16 @@ fn ops() -> Operations {
         kind: OpKind::Read,
         opv: 1,
         requires_confirmation: false,
+        mandate_eligible: false,
         params: vec![p("order_id", Binding::OwnerScoped, ParamType::Uint)],
     };
-    Operations::new(vec![refund, other, bounded, read]).unwrap()
+    // Draft 4: a mandate_eligible variant (as payments.support_refund in payments-adapter-v1 §16).
+    let mandated = OperationDecl {
+        name: "payments.mandated".into(),
+        mandate_eligible: true,
+        ..refund.clone()
+    };
+    Operations::new(vec![refund, other, bounded, read, mandated]).unwrap()
 }
 
 struct Env {
@@ -519,6 +528,96 @@ mod binding {
                 Limits::default()
             )
             .is_none()
+        );
+    }
+}
+
+/// Draft 4 (grant-v1 §5.1, W11d; payments-adapter-v1 §16.2): `cfm = 2` with `mid` is accepted only
+/// for a `mandate_eligible` declaration, and `mid` is reported; `cfm = 1` stays valid there.
+mod mandate {
+    use super::*;
+    use GrantError::ConfirmationRequired;
+    use nodkey_grant::verify_binding;
+
+    const MID: [u8; 16] = [0x4d; 16];
+
+    fn mandated_ctx(e: &Env) -> RetransmissionContext<'_> {
+        RetransmissionContext::new(
+            &e.registry,
+            &e.bid,
+            SHOP,
+            &e.tenants,
+            &e.ops,
+            "payments.mandated",
+            Limits::default(),
+        )
+        .unwrap()
+    }
+
+    /// The claims of `refund`, for the mandate_eligible operation, with `cfm = 2` and `mid`.
+    fn mandated(iat: u64) -> GrantBuilder {
+        GrantBuilder::write("payments.mandated", 1)
+            .issuer(ISS)
+            .audience(BROKER)
+            .jti([9; 16])
+            .times(iat, iat, iat + 30)
+            .workload(SHOP)
+            .tenant("acme")
+            .subject("user:u-17")
+            .resource(0, ParamValue::Uint(4711))
+            .exact(0, ParamValue::Uint(1250))
+            .exact(1, ParamValue::Text("EUR".into()))
+            .exact(2, ParamValue::Text("ch_ABCDEFGH12".into()))
+            .mandated(MID)
+    }
+
+    #[test]
+    fn mandate_grant_on_eligible_op_is_accepted_with_mid() {
+        let e = env();
+        let g = mandated(IAT).sign(&key(SEED_A)).unwrap();
+        let a = verify_retransmission(&mandated_ctx(&e), &g, IAT + 10, rmax()).unwrap();
+        assert_eq!(a.confirmation(), Confirmation::Mandate { mid: MID });
+        assert_eq!(a.mandate_id(), Some(MID));
+        let b = verify_binding(&mandated_ctx(&e), &g, IAT + 10 * RMAX).unwrap();
+        assert_eq!(b.mandate_id(), Some(MID));
+        // Human confirmation remains valid on a mandate_eligible operation.
+        let g1 = mandated(IAT).confirmed(true).sign(&key(SEED_A)).unwrap();
+        let a1 = verify_retransmission(&mandated_ctx(&e), &g1, IAT + 10, rmax()).unwrap();
+        assert_eq!(
+            (a1.confirmation(), a1.mandate_id()),
+            (Confirmation::User, None)
+        );
+        // cfm = 0 is refused there too.
+        let g0 = mandated(IAT).confirmed(false).sign(&key(SEED_A)).unwrap();
+        assert_eq!(
+            verify_retransmission(&mandated_ctx(&e), &g0, IAT + 10, rmax()).map(|_| ()),
+            grant_err(ConfirmationRequired)
+        );
+    }
+
+    #[test]
+    fn mandate_grant_on_non_eligible_op_is_refused() {
+        let e = env();
+        // payments.refund is not mandate_eligible (payments-adapter-v1 §3.1: cfm = 1 only).
+        let g = refund(IAT).mandated(MID).sign(&key(SEED_A)).unwrap();
+        assert_eq!(
+            verify_retransmission(&ctx(&e), &g, IAT + 10, rmax()).map(|_| ()),
+            grant_err(ConfirmationRequired)
+        );
+        assert_eq!(
+            verify_binding(&ctx(&e), &g, IAT + 10).map(|_| ()),
+            grant_err(ConfirmationRequired)
+        );
+        let a = verify_retransmission(
+            &ctx(&e),
+            &refund(IAT).sign(&key(SEED_A)).unwrap(),
+            IAT + 10,
+            rmax(),
+        )
+        .unwrap();
+        assert_eq!(
+            (a.confirmation(), a.mandate_id()),
+            (Confirmation::User, None)
         );
     }
 }

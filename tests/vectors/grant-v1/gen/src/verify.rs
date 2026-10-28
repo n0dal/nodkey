@@ -289,6 +289,7 @@ pub struct OpDecl {
     pub kind: String,
     pub opv: u64,
     pub confirm: bool,
+    pub mandate_eligible: bool,
     pub params: Vec<Param>,
 }
 
@@ -304,14 +305,20 @@ pub fn load_operations(text: &str) -> Result<Vec<OpDecl>, &'static str> {
     for o in arr {
         let o = o.as_object().ok_or(BAD)?;
         const OF: [&str; 5] = ["op", "kind", "opv", "requires_confirmation", "params"];
-        if o.len() != OF.len() || !OF.iter().all(|f| o.contains_key(*f)) {
+        // Draft 4: `mandate_eligible` is the only optional member.
+        let n_opt = usize::from(o.contains_key("mandate_eligible"));
+        if o.len() != OF.len() + n_opt || !OF.iter().all(|f| o.contains_key(*f)) {
             return Err(BAD);
         }
         let op = o["op"].as_str().filter(|s| op_name_ok(s)).ok_or(BAD)?;
         let kind = o["kind"].as_str().filter(|k| matches!(*k, "write" | "read")).ok_or(BAD)?;
         let opv = o["opv"].as_u64().filter(|v| (1..=65535).contains(v)).ok_or(BAD)?;
         let confirm = o["requires_confirmation"].as_bool().ok_or(BAD)?;
-        if out.iter().any(|d| d.op == op) || (confirm && kind != "write") {
+        let mandate_eligible = match o.get("mandate_eligible") {
+            None => false,
+            Some(v) => v.as_bool().ok_or(BAD)?,
+        };
+        if out.iter().any(|d| d.op == op) || (confirm && kind != "write") || (mandate_eligible && (kind != "write" || !confirm)) {
             return Err(BAD);
         }
         let mut params: Vec<Param> = Vec::new();
@@ -370,7 +377,7 @@ pub fn load_operations(text: &str) -> Result<Vec<OpDecl>, &'static str> {
         if kind == "write" && !params.iter().any(|p| p.key.is_some()) {
             return Err(BAD);
         }
-        out.push(OpDecl { op: op.to_owned(), kind: kind.to_owned(), opv, confirm, params });
+        out.push(OpDecl { op: op.to_owned(), kind: kind.to_owned(), opv, confirm, mandate_eligible, params });
     }
     Ok(out)
 }
@@ -436,7 +443,8 @@ pub fn request_hash(op: &str, args: &BTreeMap<String, ReqVal>) -> [u8; 32] {
 // ---------------------------------------------------------------- payload (spec §5)
 
 enum Kind {
-    Write { op: String, opv: u64, res: Vec<(u64, Item)>, con: Vec<(u64, u64, Item)>, cfm: bool },
+    /// `cfm`: 0 = not confirmed, 1 = user confirmed, 2 = mandate-issued (Draft 4; `mid` then present and checked).
+    Write { op: String, opv: u64, res: Vec<(u64, Item)>, con: Vec<(u64, u64, Item)>, cfm: u64 },
     Read { rop: Vec<(String, u64)> },
 }
 
@@ -487,6 +495,10 @@ fn parse_payload(map: &[(Item, Item)]) -> Result<Payload, &'static str> {
     };
     let mut want: Vec<u64> = COMMON_KEYS.to_vec();
     want.extend(if knd == 1 { WRITE_KEYS.to_vec() } else { READ_KEYS.to_vec() });
+    // Draft 4: key 20 (`mid`) belongs to the write key set exactly when cfm = 2.
+    if knd == 1 && matches!(f.get(&18), Some(Item::Uint(2))) {
+        want.push(20);
+    }
     want.sort();
     if f.keys().copied().collect::<Vec<_>>() != want {
         return Err(BAD);
@@ -554,10 +566,12 @@ fn parse_payload(map: &[(Item, Item)]) -> Result<Payload, &'static str> {
             return Err(BAD);
         }
         let cfm = match uint(18)? {
-            0 => false,
-            1 => true,
+            c @ 0..=2 => c,
             _ => return Err(BAD),
         };
+        if cfm == 2 && !matches!(f[&20], Item::Bytes(b) if b.len() == 16) {
+            return Err(BAD);
+        }
         Kind::Write { op, opv, res, con, cfm }
     } else {
         let rop = match f[&19] {
@@ -769,7 +783,8 @@ fn process_inner(g: &[u8], req: &Request, ctx: &Ctx, env: &Env, store: &mut Stor
         if decl.opv != opv {
             return Err("grant_opv_unsupported");
         }
-        if decl.confirm && !cfm {
+        // W11d (Draft 4).
+        if (cfm == 2 && !decl.mandate_eligible) || (decl.confirm && !(cfm == 1 || (cfm == 2 && decl.mandate_eligible))) {
             return Err("grant_confirmation_required");
         }
         // W12a: res/con shape against the declaration.

@@ -203,6 +203,23 @@
       ]
     },
     {
+      "op": "test.mandated",
+      "kind": "write",
+      "opv": 1,
+      "requires_confirmation": true,
+      "mandate_eligible": true,
+      "params": [
+        {
+          "name": "account",
+          "in": "res",
+          "key": 0,
+          "class": "exact",
+          "type": "account_id",
+          "destination": false
+        }
+      ]
+    },
+    {
       "op": "ledger.transfer",
       "kind": "write",
       "opv": 1,

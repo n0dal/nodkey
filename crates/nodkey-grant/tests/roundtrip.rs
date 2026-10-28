@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use common::*;
 use nodkey_grant::{
-    Authorized, GrantBuilder, GrantError, GrantKind, Limits, Operations, ParamValue, Params,
-    Registry, Request, RequestError, Verified, VerifyContext, WriteGrant, decode_transport,
+    Authorized, Confirmation, GrantBuilder, GrantError, GrantKind, Limits, Operations, ParamValue,
+    Params, Registry, Request, RequestError, Verified, VerifyContext, WriteGrant, decode_transport,
     encode_transport, verify,
 };
 
@@ -359,4 +359,105 @@ fn property_random_test_hold_grants() {
             GrantError::Expired
         );
     }
+}
+
+/// Draft 4: the builder reproduces MND-01 byte for byte (`jti` and `mid` taken from the grant),
+/// and the verified grant exposes the mandate id the broker must check at W14.
+#[test]
+fn mandate_grant_round_trip_and_mnd01_bytes() {
+    let e = env();
+    let want = hex(&read("grants/MND-01-mandated-valid.hex"));
+    let at = want.windows(2).position(|w| w == [0x03, 0x50]).unwrap() + 2;
+    let jti: [u8; 16] = want[at..at + 16].try_into().unwrap();
+    // Key 20 (0x14) with a 16-byte bstr (0x50) is the last payload entry, before the signature.
+    let m = want.len() - 64 - 2 - 16;
+    assert_eq!(&want[m - 2..m], &[0x14, 0x50]);
+    let mid: [u8; 16] = want[m..m + 16].try_into().unwrap();
+    let b = |cfm: GrantBuilder| {
+        cfm.issuer("nodkey.authority.test")
+            .audience(BROKER)
+            .jti(jti)
+            .times(IAT, IAT, IAT + 30)
+            .workload(APP1)
+            .tenant("acme")
+            .subject("user:u-17")
+            .resource(0, ParamValue::Text("alice".into()))
+    };
+    let got = b(GrantBuilder::write("test.mandated", 1).mandated(mid))
+        .sign(&signing_key(SEED_A))
+        .unwrap();
+    assert_eq!(got, want);
+
+    let req = e
+        .ops
+        .parse_request(
+            "test.mandated",
+            Params::from([("account".into(), ParamValue::Text("alice".into()))]),
+        )
+        .unwrap();
+    let w = write(&e, &got, IAT + 10, &req);
+    assert_eq!(w.mandate_id(), Some(mid));
+    let a = w.decide(&[]).unwrap();
+    assert_eq!(a.confirmation(), Some(Confirmation::Mandate { mid }));
+    assert_eq!(a.mandate_id(), Some(mid));
+
+    // cfm = 1 on the same operation: accepted, no mandate id.
+    let g1 = b(GrantBuilder::write("test.mandated", 1)
+        .mandated(mid)
+        .confirmed(true))
+    .sign(&signing_key(SEED_A))
+    .unwrap();
+    let a1 = decide_write(&e, &g1, IAT + 10, &req).unwrap();
+    assert_eq!(
+        (a1.confirmation(), a1.mandate_id()),
+        (Some(Confirmation::User), None)
+    );
+
+    // cfm = 2 on ledger.transfer (confirmation required, not mandate_eligible): W11d.
+    let gt = transfer_grant([8; 16], IAT + 30)
+        .mandated(mid)
+        .sign(&signing_key(SEED_A))
+        .unwrap();
+    let rt = e
+        .ops
+        .parse_request("ledger.transfer", transfer("bob", 12500))
+        .unwrap();
+    assert_eq!(
+        decide_write(&e, &gt, IAT + 10, &rt).unwrap_err(),
+        GrantError::ConfirmationRequired
+    );
+}
+
+/// Draft 4 declaration rules beyond the vectors: `mandate_eligible` must be a JSON boolean when
+/// present (`null` is not "absent"), and may appear only once.
+#[test]
+fn mandate_eligible_member_is_strict() {
+    let base = read("operations.json");
+    assert!(base.contains("\"mandate_eligible\": true"));
+    let null = base.replacen(
+        "\"mandate_eligible\": true",
+        "\"mandate_eligible\": null",
+        1,
+    );
+    assert!(Operations::load(&null).is_err());
+    let dup = base.replacen(
+        "\"mandate_eligible\": true",
+        "\"mandate_eligible\": true, \"mandate_eligible\": true",
+        1,
+    );
+    assert!(Operations::load(&dup).is_err());
+    let explicit_false = base.replacen(
+        "\"mandate_eligible\": true",
+        "\"mandate_eligible\": false",
+        1,
+    );
+    let ops = Operations::load(&explicit_false).unwrap();
+    assert!(!ops.get("test.mandated").unwrap().mandate_eligible);
+    assert!(
+        Operations::load(&base)
+            .unwrap()
+            .get("test.mandated")
+            .unwrap()
+            .mandate_eligible
+    );
 }

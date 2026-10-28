@@ -35,6 +35,7 @@ pub fn operations() -> Operations {
         kind: OpKind::Write,
         opv: OPV,
         requires_confirmation: true,
+        mandate_eligible: false,
         params: vec![
             p("order_id", Binding::Resource(0), ParamType::Uint),
             p("amount_minor", Binding::Exact(0), ParamType::Uint),
