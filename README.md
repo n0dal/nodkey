@@ -1,15 +1,10 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-dark.png">
-  <img src="assets/readme/hero-light.png" width="100%" alt="Nodkey logo: a key whose round handle contains a checkmark. Tagline: Your nod is the key. A diagram shows three steps: a workload proposes, a human nods (approves), the broker executes. Labelled research prototype.">
-</picture>
-
 # Nodkey
 
-**Your nod is the key.**
+**Human approval for the actions your AI agent takes, enforced outside the agent.**
 
-An AI agent or an app proposes consequential actions such as payments, refunds, or messages. An
-action executes only after a human approves exactly that action, or when it fits a bounded mandate the
-human set earlier. A separate broker holds the provider credentials; the app never does.
+![Terminal recording: a prompt-injected support agent's tool calls and Nodkey's responses. A EUR 20.00 refund inside the approved mandate executes; a EUR 5,000.00 refund on another customer's order goes to the approver, is denied, and nothing runs; an email to x@evil.example is rejected; a message to the ticket's own customer executes, a stated limit.](assets/readme/demo.gif)
+
+<sub>Recorded results of one local Demo A run on 2026-10-30 (simulated provider; the agent and the approver are scripted), replayed by [`assets/readme/demo.tape`](assets/readme/demo.tape); source: [`tests/demoa`](tests/demoa/run.sh), [`examples/agent-support`](examples/agent-support/README.md).</sub>
 
 [Why](#why) · [Demos](#demos) · [5-minute demo](#5-minute-demo-demo-a) · [Requirements](#requirements) · [Limits](#limits) · [Repository map](#repository-map) · [Security](#security-and-contributing) · [License](#license)
 
@@ -18,6 +13,10 @@ human set earlier. A separate broker holds the provider credentials; the app nev
 > [!WARNING]
 > **Research prototype. Not for production.** All security reviews were performed by AI agents; no
 > independent human audit has been done. See [LIMITATIONS.md](LIMITATIONS.md).
+
+An AI agent or an app proposes consequential actions such as payments, refunds, or messages. An
+action executes only after a human approves exactly that action, or when it fits a bounded mandate the
+human set earlier. A separate broker holds the provider credentials; the app never does.
 
 > **Compromise of computation must not imply compromise of authority.**
 
