@@ -1,6 +1,19 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-dark.png">
+  <img src="assets/readme/hero-light.png" width="100%" alt="Nodkey logo: a key whose round handle contains a checkmark. Tagline: Your nod is the key. A diagram shows three steps: a workload proposes, a human nods (approves), the broker executes. Labelled research prototype.">
+</picture>
+
 # Nodkey
 
-*Your nod is the key.*
+**Your nod is the key.**
+
+An AI agent or an app proposes consequential actions such as payments, refunds, or messages. An
+action executes only after a human approves exactly that action, or when it fits a bounded mandate the
+human set earlier. A separate broker holds the provider credentials; the app never does.
+
+[Why](#why) · [Demos](#demos) · [5-minute demo](#5-minute-demo-demo-a) · [Requirements](#requirements) · [Limits](#limits) · [Repository map](#repository-map) · [Security](#security-and-contributing) · [License](#license)
+
+---
 
 > [!WARNING]
 > **Research prototype. Not for production.** All security reviews were performed by AI agents; no
