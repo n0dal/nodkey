@@ -8,7 +8,9 @@
 
 Report suspected vulnerabilities **privately**. Do not open a public issue.
 
-Contact: **SECURITY CONTACT TO BE SET BY THE OWNER BEFORE PUBLICATION**
+Use GitHub private vulnerability reporting: open the repository's **Security** tab and choose
+**Report a vulnerability**, or go directly to
+<https://github.com/n0dal/nodkey/security/advisories/new>.
 
 Please include the affected component and version (commit), the deployment profile or demo, steps to
 reproduce, and the security invariant ([SECURITY_INVARIANTS.md](docs/SECURITY_INVARIANTS.md)) you
