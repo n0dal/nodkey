@@ -449,9 +449,9 @@ findings marked Phase 3.
 
 ## Resolution (2026-10-24, architecture revision rev. 2)
 
-Rulings by the orchestrator; changes drafted by the design author. The project is now named
-**Nodkey**: revised documents use the new name and `nodkey` identifier prefixes. Nothing below has
-been tested.
+Rulings by the orchestrator; changes drafted by the design author. Revised documents
+replace the provisional name and use project-specific identifier prefixes (now `nodkey`). Nothing
+below has been tested.
 
 | Finding | Disposition | Where addressed |
 |---|---|---|

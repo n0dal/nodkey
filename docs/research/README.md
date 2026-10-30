@@ -4,7 +4,7 @@ Research notes rank below accepted ADRs and specifications (see [source-of-truth
 Each note separates **established facts** (cited) from **hypotheses**. Notes are point-in-time
 (2026-10-24) and were not hands-on evaluations unless stated.
 
-> **Naming:** notes are kept as written. "PBE" / "Proof-Bound Execution" and "Nodkey" are earlier names of the project now called **Nodkey** (renamed 2026-10-30); crate, path, and protocol names in these notes (for example `nodkey-grant`, `nodkey.grant.v1`) now read `nodkey-*` / `nodkey.*`.
+> **Naming:** notes are kept as written. "PBE" / "Proof-Bound Execution" is the provisional working name of the project now called **Nodkey** (name chosen 2026-10-30).
 
 | Note | Topic | Key finding |
 |---|---|---|
