@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:SG;src:url("fonts/SchibstedGrotesk[wght].ttf")}
+@font-face{font-family:JB;src:url("fonts/JetBrainsMono[wght].ttf")}
+*{box-sizing:border-box}
+html,body{margin:0;overflow:hidden;-webkit-font-smoothing:antialiased;font-kerning:normal}
+html,body{width:1600px;height:560px;background:#0F1114;color:#ECEBE6}
+.brand{position:absolute;left:96px;top:72px;display:flex;align-items:center;gap:14px}
+.brand img.w{height:36px}
+h1{position:absolute;left:96px;top:166px;width:944px;margin:0;
+  font:600 58px/1.04 SG;letter-spacing:-0.022em;font-feature-settings:"ss01" 0}
+.meta{position:absolute;left:96px;bottom:68px;font:500 12.5px/1 JB;letter-spacing:.12em;
+  text-transform:uppercase;color:#9599A1}
+.meta b{color:#ECEBE6;font-weight:500}
+.rule{position:absolute;left:1112px;top:0;bottom:0;width:2px;background:#8B9BFF}
+.side{position:absolute;top:72px;font:400 13px/1.75 JB;color:#9599A1;width:392px}
+.side h2{margin:0 0 14px;font:500 11.5px/1 JB;letter-spacing:.14em;text-transform:uppercase;color:#8B9BFF}
+.side .v{color:#ECEBE6}
+.l{left:auto;right:516px;text-align:right;width:auto}
+.r{left:1142px}
+.bot{top:auto;bottom:68px}
+</style></head><body>
+<div class="brand"><img class="w" src="../brand/nodkey-wordmark-dark.svg" alt="Nodkey"></div>
+<h1>Human approval for the actions your AI agent takes, enforced outside the agent.</h1>
+<div class="meta"><b>Research prototype</b> &nbsp;&middot;&nbsp; Apache-2.0 &nbsp;&middot;&nbsp; Rust</div>
+<div class="rule"></div>
+<div class="side l bot"><h2 style="color:#9599A1">Workload</h2>
+credentials <span class="v">none</span><br>
+network route <span class="v">none</span><br>
+can <span class="v">propose</span></div>
+<div class="side r bot"><h2>Authority</h2>
+credentials <span class="v">broker only</span><br>
+executes <span class="v">with a single-use grant</span><br>
+grant from <span class="v">approval or mandate</span></div>
+</body></html>

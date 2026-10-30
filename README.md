@@ -1,10 +1,11 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-dark.png">
+  <img src="assets/readme/hero-light.png" width="100%" alt="Nodkey: human approval for the actions your AI agent takes, enforced outside the agent. A vertical line marks the trust boundary. On the workload side: no credentials, no network route, can only propose. On the authority side: credentials held by the broker only, execution needs a single-use grant, the grant comes from an approval or a mandate.">
+</picture>
+
 # Nodkey
 
 **Human approval for the actions your AI agent takes, enforced outside the agent.**
-
-![Terminal recording: a prompt-injected support agent's tool calls and Nodkey's responses. A EUR 20.00 refund inside the approved mandate executes; a EUR 5,000.00 refund on another customer's order goes to the approver, is denied, and nothing runs; an email to x@evil.example is rejected; a message to the ticket's own customer executes, a stated limit.](assets/readme/demo.gif)
-
-<sub>Recorded results of one local Demo A run on 2026-10-30 (simulated provider; the agent and the approver are scripted), replayed by [`assets/readme/demo.tape`](assets/readme/demo.tape); source: [`tests/demoa`](tests/demoa/run.sh), [`examples/agent-support`](examples/agent-support/README.md).</sub>
 
 [Why](#why) · [Demos](#demos) · [5-minute demo](#5-minute-demo-demo-a) · [Requirements](#requirements) · [Limits](#limits) · [Repository map](#repository-map) · [Security](#security-and-contributing) · [License](#license)
 
@@ -13,6 +14,10 @@
 > [!WARNING]
 > **Research prototype. Not for production.** All security reviews were performed by AI agents; no
 > independent human audit has been done. See [LIMITATIONS.md](LIMITATIONS.md).
+
+![Terminal recording: a prompt-injected support agent's tool calls and Nodkey's responses. A EUR 20.00 refund inside the approved mandate executes; a EUR 5,000.00 refund on another customer's order goes to the approver, is denied, and nothing runs; an email to x@evil.example is rejected; a message to the ticket's own customer executes, a stated limit.](assets/readme/demo.gif)
+
+<sub>Recorded results of one local Demo A run on 2026-10-30 (simulated provider; the agent and the approver are scripted), replayed by [`assets/readme/demo.tape`](assets/readme/demo.tape); source: [`tests/demoa`](tests/demoa/run.sh), [`examples/agent-support`](examples/agent-support/README.md).</sub>
 
 An AI agent or an app proposes consequential actions such as payments, refunds, or messages. An
 action executes only after a human approves exactly that action, or when it fits a bounded mandate the
@@ -35,15 +40,12 @@ workload holds no credential and has no network route to the protected resource,
 proposals, not authority. Nodkey limits the *consequences* of compromise; it does not prevent
 compromise or prompt injection ([VISION.md](docs/VISION.md), [THREAT_MODEL.md](docs/THREAT_MODEL.md)).
 
-```mermaid
-flowchart LR
-  W["Workload: app or AI agent<br/>(untrusted, no credentials,<br/>no network)"] -->|1 propose| B
-  B["Broker<br/>(holds provider credentials)"] -->|2 pending record| G
-  H(["Human"]) -->|3 approve exact values,<br/>or a bounded mandate| G
-  G["Gateway, auth origin<br/>(confirmation page)"] -->|4 approval| A["Authority<br/>(signing key, no network)"]
-  A -->|5 single-use signed grant| B
-  B -->|6 execute once| P["Provider<br/>(simulated in the demos)"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/readme/diagram-dark.svg">
+  <img src="assets/readme/diagram-light.svg" width="100%" alt="Propose, confirm, execute. 1: the workload (an app or AI agent; untrusted, no credentials, no network; it reaches only the broker socket) proposes an action to the broker, which holds the provider credentials. 2: the broker sends a pending record to the gateway. 3: a person approves the exact values, or a bounded mandate, on the gateway auth origin. 4: the gateway passes the approval to the authority (signing key, no network). 5: the authority returns a single-use signed grant to the broker. 6: the broker executes once at the provider (simulated in the demos).">
+</picture>
+
+<sub>Propose, confirm, execute: the workload proposes, a person approves, and the broker executes once with a single-use grant. PNG versions: [light](assets/readme/diagram-light.png), [dark](assets/readme/diagram-dark.png).</sub>
 
 Simplified. The real flow has more checks, for example a payments adapter that verifies grants again
 before contacting the provider. See [ARCHITECTURE.md](docs/ARCHITECTURE.md) and
