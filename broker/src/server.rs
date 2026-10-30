@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Per-workload Unix-socket listeners, framing, and request handling.
 //!
 //! Workload identity is the socket a connection arrives on (each socket lives in a volume

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Error codes. Each variant maps 1:1 to a code of spec §7.2 (grants) or §8.3 (registry); the
 //! `as_str()` strings are stable and are what the broker writes to its audit log. They are
 //! broker-facing only: the workload receives the generic `grant_denied` (spec §7.4).

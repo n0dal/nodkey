@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The admin (control-plane) listener: fault plan, clock, settlement transitions,
 //! webhook endpoints and replays, ledger inspection, snapshots.
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Strict JSON pre-validation.
 //!
 //! `serde_json` silently keeps the *last* value when an object contains the same key twice

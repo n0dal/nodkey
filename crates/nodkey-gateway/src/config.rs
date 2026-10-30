@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Gateway configuration (strict JSON, administrator-only file). Every rule that can be checked at
 //! start-up is checked here; the gateway refuses to start otherwise.
 

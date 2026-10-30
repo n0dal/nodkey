@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Issuer side (spec §9): builds canonical grants and refuses to sign non-conforming ones.
 
 use std::collections::BTreeMap;

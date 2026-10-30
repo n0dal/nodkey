@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Auth-origin behaviour that needs no login (runs with and without `test-login`).
 
 mod common;

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! v2 Unix-socket listeners (spec §1.2): one socket per workload (W), one for the gateway (G),
 //! one for the authority (A). Every connection's `SO_PEERCRED` uid must equal the uid configured
 //! for that socket; otherwise the connection is answered `unauthenticated` and closed. The socket

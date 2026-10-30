@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! T28/T37: the authority's digest code against tests/vectors/effect-v2/digest-vectors.json
 //! (DG-01..DG-12), which were produced by an independent generator and cross-checked in Python.
 

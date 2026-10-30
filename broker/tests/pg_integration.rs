@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! PostgreSQL integration tests for protocol v2. Run with `tests/run-pg-integration.sh`
 //! (they are `#[ignore]` so that a plain `cargo test` does not need a database).
 //! Each test uses its own database copied from the initialized `ledger` template.

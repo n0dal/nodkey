@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Sessions, test login, confirmation page, approval token, provenance and read grants
 //! (effect-protocol-v2 §7, SI-18/20/21). Needs `--features test-login`.
 #![cfg(feature = "test-login")]

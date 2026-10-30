@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # =================================================================================================
 #  Demo 2 — confirmed transfers (effect protocol v2 Draft 2: propose -> confirm -> execute).
 #  INTENTIONALLY VULNERABLE, LOCAL ONLY: the PHP app exposes POST /debug/eval (remote code

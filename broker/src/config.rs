@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Broker configuration (trusted, operator-supplied) and the per-workload operation check.
 //!
 //! The configuration file is parsed with the same strictness as requests (duplicate keys and

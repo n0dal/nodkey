@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The authority's durable issuance store (effect-protocol-v2 §4.2 step 4).
 //!
 //! `issuance(jti = pending_id PRIMARY KEY, digest, ten, sub, wid, op, signed_at, grant, status)`

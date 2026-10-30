@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Client for socket A (authority → broker): `config.digest`, `pending.get`, `grant.deliver`.
 //!
 //! One connection, one request in flight at a time. The broker's identity is checked with

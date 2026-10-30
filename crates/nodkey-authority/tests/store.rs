@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Issuance store: durability, exactly-once and corruption handling across reopen (restart).
 
 mod common;

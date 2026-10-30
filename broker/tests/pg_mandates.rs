@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! PostgreSQL integration tests for the broker side of mandates (agent-interface-v1 Draft 2 §3–§4,
 //! effect-protocol-v2 Draft 4 §12, ADR-0006 Amendment 3). A fake authority signs with the RFC 8032
 //! TEST 1 key (it may sign anything, which is how these tests check that the **broker's** own

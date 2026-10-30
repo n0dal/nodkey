@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Nodkey payments adapter (PROTOTYPE): payments-adapter-v1 Draft 3 against the simpay
 //! simulator.
 //!

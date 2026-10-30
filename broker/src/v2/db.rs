@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! A small bounded PostgreSQL connection pool: a fixed number of connections, a semaphore
 //! bounding concurrent users, and bounded waits. A connection that saw an error is discarded so
 //! the server rolls back whatever it had open.

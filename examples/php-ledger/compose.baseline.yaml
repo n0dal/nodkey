@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # BASELINE profile = a conventional deployment, used as the POSITIVE CONTROL for the probes.
 # The app holds its own DB credentials (env) and sits on the DB network, as most PHP apps do.
 # Attacks are EXPECTED TO SUCCEED here. INTENTIONALLY VULNERABLE; bound to 127.0.0.1 only.

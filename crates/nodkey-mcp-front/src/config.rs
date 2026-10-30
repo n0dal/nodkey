@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Front configuration (`nodkey.mcp-front.v1`) and the operation declarations it reads.
 //!
 //! Nothing here is secret. The configuration names the agent's two sockets, the uids to check on

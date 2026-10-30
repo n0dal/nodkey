@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! PT-25: TLS policy. Wrong CA, wrong SAN, expired certificate, plain HTTP, a TLS 1.2-only
 //! server, refused connect and a stalled handshake are all `not_sent` (no request byte written),
 //! and the ledger stays at 0.

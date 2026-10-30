@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Issuer round trips (GrantBuilder -> sign -> verify), byte-exact reproduction of a committed
 //! vector, API-binding tests for review findings GC-01/GC-02, and randomized property checks
 //! (deterministic PRNG, no proptest dependency).

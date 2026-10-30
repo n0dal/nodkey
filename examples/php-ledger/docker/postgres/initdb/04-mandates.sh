@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # Mandates and agent operations (docs/specs/agent-interface-v1.md Draft 2 §3, §4; effect-protocol-v2
 # Draft 4 §12; ADR-0006 Amendment 3). Runs once after 01–03, as the postgres OS user. Additive only:
 # Demo 1, Demo 2 and Demo P do not mount this file and the broker touches none of these objects

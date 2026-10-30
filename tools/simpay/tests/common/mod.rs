@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Shared helpers: in-process server on ephemeral ports, a raw HTTP client that can
 //! observe dropped connections and malformed responses, and a webhook receiver.
 #![allow(dead_code)]

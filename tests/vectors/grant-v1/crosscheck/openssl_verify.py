@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+
 """Independent signature cross-check for the Nodkey-Grant v1 vectors.
 
 Uses a code path separate from the Rust generator: a small Python-stdlib CBOR reader for the

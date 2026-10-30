@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! simpay — a SIMULATED payment provider for Nodkey Demo P tests.
 //!
 //! It is not a real payment API, it moves no money, and it is not trusted by Nodkey:

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! In-memory server-side state: sessions, approval tokens, login states and app hand-off codes.
 //!
 //! **Phase 3 limitation:** everything here is lost on restart (every user is logged out and every

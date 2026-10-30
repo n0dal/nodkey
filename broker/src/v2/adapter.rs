@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Socket P client: broker → payments adapter (payments-adapter-v1 Draft 3 §1, §4).
 //!
 //! - One request per connection, effect-protocol-v2 framing (strict JSON line ≤ 8 KiB).

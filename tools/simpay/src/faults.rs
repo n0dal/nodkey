@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Deterministic fault plan.
 //!
 //! A plan is an ordered list of rules. Each fault kind belongs to one *stage* of request

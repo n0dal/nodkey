@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! nodkey-broker library: protocol v1 (Demo 1 only) and protocol v2
 //! (`docs/specs/effect-protocol-v2.md`, propose → confirm → execute).
 //!

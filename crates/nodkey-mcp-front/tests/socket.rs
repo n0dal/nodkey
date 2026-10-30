@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The front on a real `mcp.sock` and the stdio shim as a subprocess (agent-interface-v1 §2.2):
 //! framing, peer-uid refusal (AI-11), oversize lines, concurrency, broker uid check.
 

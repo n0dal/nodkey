@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+
 """Second code path for the effect-v2 pending-effect digest vectors (spec section 3.2).
 
 Python stdlib only. Shares no code with the Rust generator in gen/:

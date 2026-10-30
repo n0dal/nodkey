@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # simpay: SIMULATED payment provider for Nodkey Demo P tests. Not a real payment API.
 # Build:  docker build -t nodkey/simpay:dev tools/simpay/
 # Tests:  docker build --target test --progress=plain tools/simpay/

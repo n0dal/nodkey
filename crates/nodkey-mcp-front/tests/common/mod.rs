@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Test harness: a fake broker socket W and a running front on a real `mcp.sock`.
 #![allow(dead_code)]
 

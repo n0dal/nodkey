@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # nodkey-gateway for Demo 2, built WITH the `test-login` feature (R3B-11): a login without
 # credentials, for LOCAL development only. Never use this image outside the local demo.
 # Build context: REPOSITORY ROOT.

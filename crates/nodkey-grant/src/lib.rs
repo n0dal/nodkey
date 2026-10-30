@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Nodkey-Grant v1 (spec Draft 4): strict verifier and canonical issuer for
 //! `docs/specs/grant-v1.md`.
 //!

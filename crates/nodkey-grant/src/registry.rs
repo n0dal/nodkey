@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Key registry (spec §8): strict JSON loading with every load-time check of §8.3.
 
 use std::collections::BTreeMap;

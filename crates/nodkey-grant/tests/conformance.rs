@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Runs every vector of `tests/vectors/grant-v1/manifest.json` (spec Draft 4): grant vectors
 //! (every step), registry, operation-declaration and transport vectors, and the request-hash
 //! examples. Each must give exactly the expected result.

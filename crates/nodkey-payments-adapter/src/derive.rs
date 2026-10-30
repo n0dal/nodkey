@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Provider values derived from the verified grant with `K_idem` (payments-adapter-v1 §3.3):
 //!
 //! ```text

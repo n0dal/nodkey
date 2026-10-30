@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Fuzz target: payload decoding and schema/decision code behind the signature check.
 //!
 //! Input layout: byte 0 selects the request; the rest is a candidate COSE payload, which is

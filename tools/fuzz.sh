@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # Short cargo-fuzz pass for nodkey-grant, the broker (protocol v2 request lines) and the
 # payments adapter (provider-response classification). See docs/supply-chain.md.
 #

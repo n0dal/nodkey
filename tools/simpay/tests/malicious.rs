@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Malicious-provider mode (attacker G): the simulator lies, redirects, and emits
 //! oversized, malformed, or hostile responses. Ledger assertions show what really happened.
 

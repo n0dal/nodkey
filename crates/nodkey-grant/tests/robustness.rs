@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Fuzz-style smoke tests without `cargo fuzz`: the verifier is fed truncated, mutated, extended
 //! and random variants of every vector and must never panic. Mutated payloads are also re-signed
 //! with test key A so that the post-signature decoder and schema code is exercised.

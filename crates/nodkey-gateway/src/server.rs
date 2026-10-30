@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Listener, TLS, Host routing and the checks common to both origins.
 
 use std::convert::Infallible;

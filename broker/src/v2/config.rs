@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Protocol v2 broker configuration (trusted, operator-supplied) and the start-up refusals of
 //! effect protocol v2 §1.2, §2.1 and §2.4.
 //!

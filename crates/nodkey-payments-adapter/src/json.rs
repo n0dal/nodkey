@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Strict JSON pre-validation (payments-adapter-v1 §6.1; the broker's `strict_json` rules).
 //!
 //! Accepts exactly one JSON value (surrounding whitespace allowed) with no duplicate object keys at

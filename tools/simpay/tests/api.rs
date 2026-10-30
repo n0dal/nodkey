@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! API behaviour: authentication, restricted keys, access policy, refunds, lookups,
 //! idempotency, rate limits, HTTP strictness, determinism.
 

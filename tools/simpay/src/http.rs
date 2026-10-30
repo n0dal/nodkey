@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! A deliberately small HTTP/1.1 implementation over raw TCP.
 //!
 //! simpay writes responses byte-by-byte itself so that faults can produce what a

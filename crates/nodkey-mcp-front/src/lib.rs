@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Nodkey per-agent MCP front (agent-interface-v1 Draft 2 §2). **Prototype.**
 //!
 //! The front is **outside the TCB** and holds no secret: it translates MCP tool calls into

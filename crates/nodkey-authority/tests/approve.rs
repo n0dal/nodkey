@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Socket I `approve` against a fake broker (socket A) and a fake gateway (effect-protocol-v2
 //! §4.2–§4.3). Test ids refer to the spec's §8 test plan.
 

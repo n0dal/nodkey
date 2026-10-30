@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # INTENTIONALLY VULNERABLE DEMO IMAGE (contains a remote-code-execution endpoint). Local use only.
 # Build context: REPOSITORY ROOT. Same PHP runtime as Demo 2 (examples/confirmed-transfer).
 FROM php:8.4-fpm-alpine@sha256:a49524d3cec4a77d1807d0878e5bb38146116ae5489ec60c367aee53bb9b0699

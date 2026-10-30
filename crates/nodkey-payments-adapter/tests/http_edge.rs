@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! PT-35: byte-level HTTP edge cases from a scripted TLS 1.3 server that presents the pinned
 //! test CA's `simpay.test` certificate. Malformed input is never `created`.
 

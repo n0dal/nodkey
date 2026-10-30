@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! `refund.create` through socket P against a real simpay process over TLS with the pinned test
 //! CA: happy path, deduplicated resends, every create-relevant simpay fault and malicious kind
 //! (payments-adapter-v1 §11 PT-04/06..09/16..18/26/29), with simpay's admin ledger as ground truth.

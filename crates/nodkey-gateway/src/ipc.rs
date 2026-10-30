@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Clients for socket G (gateway → broker) and socket I (gateway → authority).
 //!
 //! Framing (spec §1.2): one strict JSON object per line, ≤ 8 KiB, one request per connection here.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Strict-JSON helpers (spec §8.2): integers must match `0|[1-9][0-9]*` and be ≤ 2^53 − 1.
 
 use serde_json::value::RawValue;

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # =================================================================================================
 #  Demo P — confirmed refunds through a SIMULATED payment provider (payments-adapter-v1 Draft 3,
 #  effect-protocol-v2 Draft 3.1). INTENTIONALLY VULNERABLE, LOCAL ONLY: the PHP shop exposes

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Socket I `read_grant` (effect-protocol-v2 §4.2, EP-05).
 
 mod common;

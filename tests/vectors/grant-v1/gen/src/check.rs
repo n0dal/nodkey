@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Runs every vector in a manifest through the reference verifier and compares the results.
 //! Reads only the manifest and the files it references (never the generator's internal data).
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The normative pending-effect digest (effect protocol v2 §3.2):
 //!
 //! `digest = SHA-256("nodkey.pending.v1" || 0x00 || dcbor(M))`

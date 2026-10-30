@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Method semantics of effect protocol v2 (Draft 2) for the three broker sockets, the execution
 //! transaction, and the recovery loop.
 //!

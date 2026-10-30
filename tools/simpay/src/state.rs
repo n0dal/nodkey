@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! In-memory store. Every mutation happens under one mutex, so an operation and its
 //! idempotency record commit atomically.
 

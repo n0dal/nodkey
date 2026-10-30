@@ -13,7 +13,8 @@
 
 > [!WARNING]
 > **Research prototype. Not for production.** All security reviews were performed by AI agents; no
-> independent human audit has been done. See [LIMITATIONS.md](LIMITATIONS.md).
+> independent human audit has been done. See [LIMITATIONS.md](LIMITATIONS.md) and
+> [DISCLAIMER.md](DISCLAIMER.md).
 
 ![Terminal recording: a prompt-injected support agent's tool calls and Nodkey's responses. A EUR 20.00 refund inside the approved mandate executes; a EUR 5,000.00 refund on another customer's order goes to the approver, is denied, and nothing runs; an email to x@evil.example is rejected; a message to the ticket's own customer executes, a stated limit.](assets/readme/demo.gif)
 
@@ -111,8 +112,9 @@ without passkeys. All providers are simulators. Many rows are NOT TESTED. Detail
 ## Security and contributing
 
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md). Contributions: see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party material is listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); see also [DISCLAIMER.md](DISCLAIMER.md).

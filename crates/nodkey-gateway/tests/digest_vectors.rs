@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! T28/T37 (gateway part): the gateway's digest code against tests/vectors/effect-v2.
 
 use nodkey_gateway::digest::{PendingRecord, check, encode_record};

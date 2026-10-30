@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Demo A scripted support agent (agent-interface-v1 Draft 2 §5).
 //!
 //! **Untrusted test tool.** It stands in for a fully prompt-injected model: it reads the whole

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Mandate pages on the auth origin (effect-protocol-v2 Draft 4 §12.6; agent-interface-v1 Draft 2
 //! §4.2, §4.7): the template confirmation page, the labelled message body, `/pending`,
 //! `/mandates` and the broker-first revoke with acknowledgement. Needs `--features test-login`.

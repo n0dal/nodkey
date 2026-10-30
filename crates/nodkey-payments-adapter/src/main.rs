@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! `nodkey-payments-adapter --config <file>` (PROTOTYPE).
 //!
 //! Refuses to start (exit 2) unless every payments-adapter-v1 §2/§9 check holds. Logs are JSON

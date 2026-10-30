@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Authority configuration, workload registrations, and start-up refusals (§1.2).
 //!
 //! All files are strict JSON (duplicate members rejected at any depth; unknown or missing members

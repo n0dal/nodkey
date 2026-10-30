@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Generates `digest-vectors.json` for effect protocol v2 §3.2 (pending-effect digest).
 //! Each vector gives the record as it appears in a broker JSON response, the dCBOR encoding of `M`
 //! (hex), and the SHA-256 digest (lowercase hex), or an expected rejection with its reason.

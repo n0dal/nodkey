@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! mailsink: a SIMULATED mail sink for Nodkey Demo A (agent-interface-v1 Draft 2 §3, §5).
 //!
 //! **It delivers no mail.** `messages.send` is an internal broker effect: one row in the

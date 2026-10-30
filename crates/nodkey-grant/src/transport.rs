@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Transport encoding (spec §2, steps 0–1c): canonical unpadded base64url (RFC 4648 §5).
 
 use crate::error::GrantError;

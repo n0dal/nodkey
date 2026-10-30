@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Nodkey authority (effect-protocol-v2 Draft 2, ADR-0011 Amendment 1).
 //!
 //! The only grant signer. No network: it listens on socket I for the gateway (`approve`,

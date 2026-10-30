@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The payment API listener (Stripe-shaped, simplified).
 
 use std::sync::Arc;

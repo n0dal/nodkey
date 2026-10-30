@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Shared test harness: loads `tests/vectors/grant-v1/manifest.json` and simulates the broker
 //! parts this crate does not own (the W10 replay store with an in-memory map, the savepoint
 //! recording rule of spec §7.3), as described in the vectors README.

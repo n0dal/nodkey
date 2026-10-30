@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Without the `test-login` feature the binary has no login at all (R3B-11), and a configuration
 //! that asks for the test login is refused at start-up.
 #![cfg(not(feature = "test-login"))]

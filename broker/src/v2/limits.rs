@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Per-workload token buckets (spec §2.5), driven by the broker clock (whole seconds). The key
 //! set is the configured workloads, so memory is bounded by configuration, not by requests.
 

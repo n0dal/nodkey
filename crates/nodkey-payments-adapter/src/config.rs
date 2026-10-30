@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Configuration (payments-adapter-v1 §9) and the start-up checks of the inputs the broker cannot
 //! write (§2). The adapter refuses to start unless every check holds and re-reads nothing at
 //! runtime (rotation = restart).

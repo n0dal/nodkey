@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # Creates the simulated ledger. Runs once, as the postgres OS user, over the local socket.
 set -eu
 BROKER_PW="$(cat /run/secrets/db_broker_password)"

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Socket P (payments-adapter-v1 §1, §4): the broker is the only client. One strict JSON request
 //! line per connection, at most `max_concurrent` connections, 2 s idle timeout, `SO_PEERCRED`
 //! uid = `broker_uid` (a mismatch closes without a response and raises an alarm).

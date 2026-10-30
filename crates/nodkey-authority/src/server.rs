@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Socket I (gateway → authority): `approve` and `read_grant` (effect-protocol-v2 §4.2), the
 //! delivery loop and start-up recovery.
 

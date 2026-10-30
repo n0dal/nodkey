@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Bounded results on socket P (payments-adapter-v1 §4) and the classification of provider
 //! responses (§6). Provider text (messages, `param`, headers, unknown members) never reaches any
 //! value built here: only closed enums, pattern-checked ids, integers and grant-derived values.

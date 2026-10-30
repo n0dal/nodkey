@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Broker side of mandates (agent-interface-v1 Draft 2 §3–§4; effect-protocol-v2 Draft 4 §12;
 //! ADR-0006 Amendment 3).
 //!

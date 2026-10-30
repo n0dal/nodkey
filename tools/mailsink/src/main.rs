@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! `mailsink [--admin <addr>] [--poll-ms <n>] [--container-bind]`
 //!
 //! Database connection: the tokio-postgres connection string in the environment variable

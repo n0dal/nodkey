@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # Demo A only (LOCAL DEMO): the SIMULATED mail sink's read-only role (tools/mailsink README,
 # "Deployment gap"). SELECT on public.outbox and nothing else; login only from the sink's address
 # (pg_hba.conf). Runs after 04-mandates.sh, as the postgres OS user.

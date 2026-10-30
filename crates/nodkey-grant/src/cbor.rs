@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Strict, bounded decoder and canonical encoder for the CBOR subset of spec §4.
 //!
 //! Accepted subset: unsigned integers (major 0), negative integers (major 1, only where the

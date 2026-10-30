@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Mandates at the authority (agent-interface-v1 Draft 2 §4.2 step 3, §4.4, §4.7; ADR-0006
 //! Amendment 3): the template approval records the mandate in the issuance row; mandated issuance
 //! checks the authority's **own** mandate and counters; no replacement; revocation; restart.

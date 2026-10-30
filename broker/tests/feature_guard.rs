@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Guard: the broker must never be built with nodkey-grant's test-only feature
 //! `conformance-unvalidated-requests` (it exposes `Request::unvalidated_for_conformance`, which
 //! bypasses strict request validation). Fails if any build of this package (normal or dev)

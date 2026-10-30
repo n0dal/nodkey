@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! nodkey-broker: PROTOTYPE effect broker.
 //!
 //! Usage:

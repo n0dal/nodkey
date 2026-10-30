@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Shared fixture for the grant fuzz targets: the published grant-v1 test vectors
 //! (tests/vectors/grant-v1), embedded at compile time.
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! `verify_retransmission` (payments-adapter-v1 Draft 2 §3.1): the adapter's non-consuming check.
 
 mod common;

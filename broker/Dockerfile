@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # The build context is the REPOSITORY ROOT (the broker depends on crates/nodkey-grant):
 # Build: docker build -f broker/Dockerfile -t nodkey/broker:dev .
 # Tests: docker build -f broker/Dockerfile --target test --progress=plain .

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Server-rendered auth-origin pages. No scripts; every dynamic value goes through [`esc`].
 
 use crate::digest::CheckedRecord;

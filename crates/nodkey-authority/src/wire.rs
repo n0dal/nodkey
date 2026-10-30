@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Framing and strict JSON shared by sockets I (gateway → authority) and A (authority → broker).
 //!
 //! effect-protocol-v2 §1.2: one strict JSON object per line; duplicate, unknown and wrongly typed

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Nodkey gateway (prototype, Phase 3): the only public HTTP listener and part of the TCB.
 //!
 //! - **App origin**: reverse proxy to the untrusted app web server with request/response header

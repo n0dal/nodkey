@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Pending-effect digest (effect-protocol-v2 §3.2), computed by the gateway itself from the render
 //! response it displays.
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Test harness: a real simpay process (built from `tools/simpay`, TLS with its `gen-test-ca`
 //! certificates), an in-process adapter served on a socket P in a temporary directory, a fake
 //! broker client, a grant issuer, scriptable TLS servers for byte-level HTTP faults, and a log

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! MCP 2026-07-28, tools only (agent-interface-v1 Draft 2 §2): message validation, the static
 //! tool catalogue, and the mapping of tool calls onto socket W.
 //!

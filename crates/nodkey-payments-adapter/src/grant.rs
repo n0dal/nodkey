@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Grant check in the adapter (payments-adapter-v1 §3.1).
 //!
 //! The adapter verifies the grant bytes itself with `nodkey_grant::verify_retransmission`

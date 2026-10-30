@@ -1,4 +1,7 @@
 <?php
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+//
 // =====================================================================================
 //  INTENTIONALLY VULNERABLE DEMO APPLICATION. LOCAL USE ONLY. NEVER EXPOSE TO A NETWORK.
 //  POST /debug/eval executes arbitrary PHP supplied by the client (remote code execution).

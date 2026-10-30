@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Strict JSON helpers: maps that reject duplicate keys, and uint/text scalars.
 //!
 //! `serde_json` maps keep the last of duplicate keys; derived structs already reject duplicate and

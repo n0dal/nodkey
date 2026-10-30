@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! mailsink admin endpoint and in-memory view (no database needed).
 
 use std::net::SocketAddr;

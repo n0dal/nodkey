@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! `simpay` binary. SIMULATED payment provider — not a real payment API.
 
 use std::path::PathBuf;

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Generates the Nodkey-Grant v1 test vectors. Output is fully deterministic: Ed25519 signatures
 //! are deterministic, `jti` values are derived from the vector id, and JSON key order is fixed.
 //!

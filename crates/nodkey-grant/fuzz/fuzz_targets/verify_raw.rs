@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Fuzz target: grant verification on arbitrary bytes.
 //!
 //! Input layout: byte 0 selects the request (see common::pick_request); byte 1 bit 0 selects

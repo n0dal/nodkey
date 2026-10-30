@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! v2 framing and envelope (spec §1.2, §2.2): one strict JSON object per line,
 //! `{"v":2,"id":…,"op":…,"args":{…}}`; duplicate, unknown and wrongly typed members are rejected.
 //! Error messages are static per code; details go to the audit log only.

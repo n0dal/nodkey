@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Fuzz target: protocol v2 request-line parsing (effect-protocol-v2 §2.1) and the pure argument
 //! decoders the socket handlers apply to `args` before any database access.
 //!

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! T29 / T46: the authority process is killed (SIGKILL) between signing and a delivery result,
 //! then restarted on the same issuance store. It must re-deliver the identical stored bytes and
 //! never sign a second grant for the same `jti`; past `exp` it must mark the row expired instead.

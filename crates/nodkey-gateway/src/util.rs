@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Small helpers: CSPRNG, canonical base64url, lowercase hex, time, HTML escaping, ID grammars.
 
 use std::time::{SystemTime, UNIX_EPOCH};

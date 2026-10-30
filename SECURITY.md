@@ -2,7 +2,8 @@
 
 > [!WARNING]
 > Nodkey is a research prototype and is not intended for production use. All security reviews so far
-> were performed by AI agents; no independent human audit has been done.
+> were performed by AI agents; no independent human audit has been done. See
+> [DISCLAIMER.md](DISCLAIMER.md).
 
 ## Reporting a vulnerability
 

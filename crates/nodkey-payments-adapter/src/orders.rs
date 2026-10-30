@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The adapter's own read-only view of `nodkey.orders` (payments-adapter-v1 §2, §3.2).
 //!
 //! Channel (PA-16): the adapter connects the PostgreSQL Unix socket in the `pg-adapter` volume

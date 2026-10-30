@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Minimal CBOR encoder (deterministic by construction unless the caller injects raw bytes) and a
 //! strict decoder implementing the Nodkey-Grant v1 decoding rules (spec §4.1):
 //! RFC 8949 §4.2.1 core deterministic encoding, definite lengths only, no major type 7

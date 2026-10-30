@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The orders view over a real PostgreSQL 17 (Docker), through the adapter's production
 //! connector (`PgUnixView`: connect the Unix socket, check the server's `SO_PEERCRED` uid, then
 //! `connect_raw` with SCRAM). On macOS a container's Unix socket cannot be mounted into the

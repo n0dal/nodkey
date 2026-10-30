@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Test harness: a fake upstream app, fake broker (socket G) and fake authority (socket I), a raw
 //! HTTP/1.1-over-TLS client, and a gateway started on 127.0.0.1:0 in the production `files` TLS mode
 //! with a test certificate (generated once per test process).

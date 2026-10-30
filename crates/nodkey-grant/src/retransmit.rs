@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Adapter-side, non-consuming verification of a stored write grant (payments-adapter-v1
 //! Draft 3 §3.1): `verify_retransmission` for (re)transmission of an effect the broker already
 //! decided (with the age cap), and `verify_binding` for lookup-only operations (no age cap).

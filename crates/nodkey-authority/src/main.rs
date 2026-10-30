@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! `nodkey-authority run --config <path> [--mounts-verified-externally]`
 //! `nodkey-authority keygen --out <path> --iss <issuer> [--not-before <unix>] [--not-after <unix>]`
 

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Structured logs: one JSON object per line on stdout. Callers pass only closed-enum values,
 //! integers, ids and correlation ids; never secrets, idempotency keys, provider text or headers.
 

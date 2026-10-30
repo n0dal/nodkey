@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Socket I wire format as defined by crates/nodkey-authority (README "Wire formats", AU-1, AU-6).
 //! A strict fake authority checks every request member exactly as that README states and answers
 //! with the authority's exact response shapes.

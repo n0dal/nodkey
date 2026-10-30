@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Character-class and hex helpers.
 
 /// Spec §5.1 ID: 1..=max bytes, each in 0x21..=0x7E.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! payments-adapter-v1 Draft 4 §16: `payments.support_refund` grants (PT-45..PT-47, PT-49). Every
 //! refusal is checked against a counting TLS server: nothing may reach the provider.
 

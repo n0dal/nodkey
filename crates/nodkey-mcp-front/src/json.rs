@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! A small strict JSON parser (RFC 8259) for messages that cross the front.
 //!
 //! Why not `serde_json::Value` directly: it keeps the last of duplicate members, and it loses the

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Protocol v2 (effect protocol v2 Draft 2): pending effects, approval via the authority, and
 //! execution of verified write grants in one transaction.
 //!

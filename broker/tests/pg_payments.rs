@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! PostgreSQL integration tests for the broker side of payments-adapter-v1 Draft 3, with a FAKE
 //! payments adapter on socket P that simulates the adapter outcomes (created, refused, busy,
 //! not_sent, ambiguous, lost response, slow response, lies) over a simulated provider ledger.

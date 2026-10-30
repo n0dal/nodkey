@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! PT-24 (process level): the binary refuses to start (exit 2, `refuse_start` log line) when an
 //! operator file is not owned by root (here: owned by the adapter's own uid), when the config is invalid, or when it is
 //! missing. Test files are necessarily owned by the test user, which is the adapter's uid here, so

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Fuzz target: provider-response decoding and classification (payments-adapter-v1 §6).
 //!
 //! Input layout: bytes 0-1 = HTTP status (big-endian u16); byte 2 flags: bit 0 = exactly one

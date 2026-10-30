@@ -1,4 +1,7 @@
 <?php
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+//
 // Minimal Nodkey broker client (prototype SDK). This client is a convenience, NOT an enforcement
 // boundary: all checks that matter happen in the broker. Attacker code in the workload can
 // bypass this file entirely and talk to the socket directly; the broker must (and does) assume so.

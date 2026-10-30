@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Integration-test harness: a real PostgreSQL (see `tests/run-pg-integration.sh`) initialized
 //! with the demo's own initdb scripts, one fresh database per test (copied from the `ledger`
 //! template), a controllable clock, a fake authority that signs with the RFC 8032 TEST 1 key

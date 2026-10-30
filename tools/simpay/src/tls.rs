@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Optional TLS for the API listener (rustls with the ring provider; no OpenSSL), and
 //! generation of a TEST-ONLY certificate authority for pinning in tests.
 //!

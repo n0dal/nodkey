@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The scripted agent end to end: agent → real MCP front (`nodkey-mcp-front`) on `mcp.sock` →
 //! a fake broker socket W that plays the §5 outcomes. This checks the agent's call order,
 //! arguments and recording, and the front's mapping; the outcomes themselves are the fake's, not

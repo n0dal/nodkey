@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Broker side of payments-adapter-v1 Draft 3 (§7, §8) and ADR-0012 rev. 2.
 //!
 //! - **T1** ([`refund_t1`]): inside the execution transaction, after W10 + savepoint + W11–W13,

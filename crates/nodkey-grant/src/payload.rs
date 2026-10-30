@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Payload schema (spec §5, §7.2 steps 7a–7b).
 
 use crate::MAX_TIME;

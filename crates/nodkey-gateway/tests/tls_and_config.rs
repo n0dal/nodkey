@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! TLS (files mode; dev self-signed with `dev-tls`), SNI/Host agreement, start-up refusals
 //! including the dev-mode gating of GW-R-04, IPC peer-uid checks.
 

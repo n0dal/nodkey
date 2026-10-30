@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Operation declarations (spec §6) and validated requests (spec §6.2, §7.1).
 
 use std::collections::{BTreeMap, BTreeSet};

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Simulated ledger backed by PostgreSQL. All statements are fixed and parameterised; the
 //! workload never supplies SQL text, table names, or credentials (SI-16).
 //!

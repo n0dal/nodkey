@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Operation declarations implemented by this broker (effect protocol v2 §5).
 //!
 //! The declarations are loaded from the operator's file in the grant-v1 §6.1 format (validated

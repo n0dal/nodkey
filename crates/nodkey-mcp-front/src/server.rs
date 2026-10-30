@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The `mcp.sock` listener (agent-interface-v1 §2.2): MCP stdio framing over a Unix socket.
 //!
 //! - **Peer uid check (AI-11, required control).** A connection whose `SO_PEERCRED` uid is not the

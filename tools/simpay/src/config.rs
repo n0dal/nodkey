@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Configuration, fixture loading, and the bind-address policy.
 //!
 //! Everything here is parsed strictly: unknown fields are rejected and every

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! The verification procedure of spec §7 (Draft 4).
 //!
 //! - [`verify`] runs steps 1c–9. Failures there are *unverified*: nothing is consumed or recorded.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Auth origin: login (test login only, behind the `test-login` feature and a config flag), logout,
 //! and the confirmation page contract of effect-protocol-v2 §7.
 

@@ -1,4 +1,7 @@
 # syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # Demo A agent-side image (LOCAL DEMO ONLY): the per-agent MCP front `nodkey-mcp`, the stdio
 # shim `nodkey-mcp-stdio` (crates/nodkey-mcp-front) and the scripted, fully prompt-injected
 # stand-in agent `demo-agent` (tools/demo-agent). Holds no secret. Build context: REPOSITORY ROOT.

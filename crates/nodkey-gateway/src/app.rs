@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! App origin: reverse proxy to the untrusted app web server, plus the reserved `/.nodkey/` paths
 //! (app-session hand-off and logout).
 //!

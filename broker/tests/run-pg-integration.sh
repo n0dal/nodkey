@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # Runs the broker's PostgreSQL integration tests (tests/pg_integration.rs, marked #[ignore]).
 # Starts a throwaway PostgreSQL (image pinned by digest) on 127.0.0.1, initialized with the demo's
 # own initdb scripts (01-ledger.sh … 04-mandates.sh), runs the ignored tests, removes it.

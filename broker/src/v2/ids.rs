@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Identifiers: `pending_id` and `receipt_id` are 16 bytes from the OS CSPRNG, written as
 //! canonical unpadded base64url (22 characters). Parsing is canonical: aliases with non-zero
 //! trailing bits are rejected, never normalized (spec §3.2 key 0).

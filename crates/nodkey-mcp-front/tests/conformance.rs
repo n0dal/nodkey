@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! MCP 2026-07-28 conformance for the subset used, strict rejection (AT-04, AT-05), and the
 //! call mapping of agent-interface-v1 §2.5, against a fake broker socket W.
 

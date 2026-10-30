@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! App-origin proxy: request/response filtering, cookies, Service-Worker, Host routing (SI-18,
 //! ADR-0003 profile item 2). Runs with and without the `test-login` feature.
 

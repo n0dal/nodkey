@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Socket P: the broker-compromise suite (PT-29), grant rules RX-1..RX-3 (PT-42), charge-id
 //! pattern (PT-41), age rule (PT-40, create side), order view (§3.2), strict framing (PT-12),
 //! peer uid (PT-24), connection limits, and the lookup gate. Every refusal is checked against a

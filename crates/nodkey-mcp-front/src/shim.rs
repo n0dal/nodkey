@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! `nodkey-mcp-stdio` (agent-interface-v1 §2.2): copies stdin → `mcp.sock` → stdout byte for
 //! byte. It holds no secret and parses nothing; it only counts bytes since the last `\n` to
 //! enforce the 64 KiB line cap, and stops (non-zero exit) when a line exceeds it.

@@ -85,5 +85,7 @@ query, so some failure cases there need an operator (payments-adapter-v1 §10).
 ## Other
 
 - The project name "Nodkey" has not been cleared as a trademark.
+- No warranty, no certification, not a compliance product, and no affiliation with the companies and
+  products named in this repository: see [DISCLAIMER.md](DISCLAIMER.md).
 - Several ADRs are still Proposed ([index](docs/decisions/README.md)); open questions are in
   [OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md).

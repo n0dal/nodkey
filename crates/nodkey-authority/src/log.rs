@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Structured JSON log lines on stdout. Callers never pass key material or grant bytes; fields
 //! are identifiers, digests, codes and static reasons only.
 

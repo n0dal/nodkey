@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-License-Identifier: Apache-2.0
+
 //! Signing-key file handling and dev key generation.
 //!
 //! Key file format: exactly 64 lowercase hex characters (the 32-byte Ed25519 secret seed of

@@ -1,4 +1,7 @@
 #!/bin/sh
+# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-License-Identifier: Apache-2.0
+#
 # Demo P / payments-adapter-v1 Draft 3 §2, §7: schema `nodkey` with the operator-owned orders,
 # the broker-owned per-charge state, payment effects, budgets and refund denial reasons.
 # Runs once after 01-ledger.sh and 02-effects-v2.sh, as the postgres OS user, over the local socket.
