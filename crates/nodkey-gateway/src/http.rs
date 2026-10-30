@@ -144,10 +144,7 @@ mod tests {
             ("cookie", "__host-NODKEY_session=y"),
         ]))
         .unwrap();
-        assert_eq!(
-            gateway_cookie(&c, "__Host-nodkey_session"),
-            Err(Malformed)
-        );
+        assert_eq!(gateway_cookie(&c, "__Host-nodkey_session"), Err(Malformed));
         let c = cookies(&hm(&[("cookie", "__host-nodkey_session=y")])).unwrap();
         assert_eq!(gateway_cookie(&c, "__Host-nodkey_session"), Ok(None));
     }

@@ -287,62 +287,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nodkey-authority"
-version = "0.1.0"
-dependencies = [
- "getrandom 0.4.3",
- "nodkey-grant",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "zeroize",
-]
-
-[[package]]
-name = "nodkey-broker"
-version = "0.1.0"
-dependencies = [
- "nodkey-authority",
- "nodkey-gateway",
- "nodkey-grant",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-postgres",
-]
-
-[[package]]
-name = "nodkey-gateway"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "form_urlencoded",
- "getrandom 0.4.3",
- "nodkey-grant",
- "http-body-util",
- "hyper",
- "hyper-util",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tokio-rustls",
-]
-
-[[package]]
-name = "nodkey-grant"
-version = "0.1.0"
-dependencies = [
- "ed25519-dalek",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "hmac"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -511,6 +455,62 @@ dependencies = [
  "libc",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nodkey-authority"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.4.3",
+ "nodkey-grant",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "nodkey-broker"
+version = "0.1.0"
+dependencies = [
+ "nodkey-authority",
+ "nodkey-gateway",
+ "nodkey-grant",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
+name = "nodkey-gateway"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "form_urlencoded",
+ "getrandom 0.4.3",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nodkey-grant",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
+name = "nodkey-grant"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

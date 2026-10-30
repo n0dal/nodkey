@@ -287,7 +287,7 @@ impl GrantBuilder {
     pub fn sign(&self, key: &SigningKey) -> Result<Vec<u8>, BuildError> {
         let payload = self.payload()?;
         let kid = derive_kid(&key.verifying_key().to_bytes());
-        let mut protected = Vec::with_capacity(55);
+        let mut protected = Vec::with_capacity(53);
         cbor::encode(
             &Value::Map(vec![
                 (Value::Uint(1), Value::Nint((-1 - ALG_ED25519) as u64)),

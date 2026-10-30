@@ -703,11 +703,7 @@ async fn read_grant_delivery_and_provenance() {
         assert_eq!(get(h.addr, APP, path, &extra).await.status, 200);
         let w = h.world.lock().unwrap();
         assert!(
-            w.upstream
-                .last()
-                .unwrap()
-                .header("nodkey-grant")
-                .is_empty(),
+            w.upstream.last().unwrap().header("nodkey-grant").is_empty(),
             "{path} {prov:?}"
         );
     }

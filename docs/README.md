@@ -31,7 +31,7 @@ changes; current specs, ADRs, and invariants take precedence.
 | Directory | Contents |
 |---|---|
 | [research/](research/README.md) | Research notes (2026-10-24 onward): prior art, comparisons, research questions |
-| [reviews/](reviews/) | Design and code reviews with finding IDs and dispositions. All were performed by AI agents; none is an independent human audit |
+| [reviews/](reviews/) | Design and code reviews with finding IDs and dispositions. All were performed by AI agents; none is an independent human audit. Research notes and reviews are dated records kept as written: they use the earlier project names (including "Proof-Bound Execution" and the name used before 2026-10-30), and their crate, path, and protocol identifiers correspond to today's `nodkey-*` / `nodkey.*` names |
 
 ## Source-of-truth hierarchy
 

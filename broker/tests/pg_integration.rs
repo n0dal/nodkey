@@ -1206,9 +1206,8 @@ async fn sockets_and_authority_wire_format() {
     let rec = h.get(&pid).await;
     let g = nodkey_grant::decode_transport(Some(&sign_from_record(&rec, h.now(), KEY_A, |b| b)))
         .unwrap();
-    let bad =
-        nodkey_grant::decode_transport(Some(&sign_from_record(&rec, h.now(), KEY_B, |b| b)))
-            .unwrap();
+    let bad = nodkey_grant::decode_transport(Some(&sign_from_record(&rec, h.now(), KEY_B, |b| b)))
+        .unwrap();
     assert_eq!(
         client.deliver(&apid, &bad).await,
         Ok(DeliverResult::Rejected)

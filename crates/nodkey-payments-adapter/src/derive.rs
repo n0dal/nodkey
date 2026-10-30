@@ -140,7 +140,7 @@ mod tests {
         assert!(!format!("{d:?}").contains(&d.idem_key));
     }
 
-    const VEC_IDEM: &str = "ZNkON-JNapu9iPRL2rJFkozOus4Bp8uwzGaDsxkmnTg";
-    const VEC_REF: &str = "jnrQVG_OhLhhoTl64btbwH6Mpx3QIhG-VNAGUGZIxnQ";
+    const VEC_IDEM: &str = "uWnB81G9llZOd4WnLHlkO50_DE9PJNIJ6O5CXMrsJBY";
+    const VEC_REF: &str = "D6gacfRHuyXb61PPfEHdg3-dbxXO5__4qCv1q5nm3Uk";
     const VEC_KID: &str = "933007a5314c9534";
 }

@@ -1,6 +1,6 @@
 # Implementation Status
 
-**Project:** Nodkey (renamed from the provisional "Proof-Bound Execution" on 2026-10-25).
+**Project:** Nodkey (owner decision 2026-10-30; replaces the earlier working names, including the provisional "Proof-Bound Execution"; see OQ-02).
 
 **Maturity:** PROTOTYPE. Nothing in this repository is suitable for production use.
 
@@ -173,7 +173,7 @@ broker resistance to resource exhaustion and per-workload fairness (D1-07); the 
 ### 2026-10-24/25 — Phase 1: research and architecture
 - Five research notes, threat model, architecture, ADR-0001..0009, adversarial architecture review
   (20 findings, all dispositioned), invariants v0.2. Owner decisions: copyright holder "Henry Cuevas";
-  project name "Nodkey" (trademark clearance by counsel still required).
+  a project name (superseded on 2026-10-30 by "Nodkey"; trademark clearance by counsel still required).
 
 ### 2026-10-24 — Phase 0: repository initialization
 - Repository, knowledge base, internal (Git-ignored) agent orchestration, attribution disabled.

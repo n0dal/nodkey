@@ -9,11 +9,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use nodkey_gateway::config::{
-    self, Config, Limits, ReadRoute, SessionConfig, TlsConfig, Upstream,
-};
-use nodkey_gateway::util::{b64url, hex_lower, now_secs, random_bytes};
 use http_body_util::{BodyExt, Full};
+use nodkey_gateway::config::{self, Config, Limits, ReadRoute, SessionConfig, TlsConfig, Upstream};
+use nodkey_gateway::util::{b64url, hex_lower, now_secs, random_bytes};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream, UnixListener};
@@ -178,8 +176,7 @@ pub fn refund_record(pid: &str, sub: &str, amount: u64) -> Value {
 }
 
 pub fn digest_of(record: &Value) -> String {
-    let r: nodkey_gateway::digest::PendingRecord =
-        serde_json::from_value(record.clone()).unwrap();
+    let r: nodkey_gateway::digest::PendingRecord = serde_json::from_value(record.clone()).unwrap();
     hex_lower(&nodkey_gateway::digest::check(r).unwrap().digest)
 }
 
@@ -244,10 +241,7 @@ async fn fake_upstream(world: Shared) -> SocketAddr {
                                         "set-cookie",
                                         "__Host-nodkey_session=evil; Path=/; Secure; HttpOnly",
                                     ),
-                                    (
-                                        "set-cookie",
-                                        "__HOST-NODKEY_SESSION=evil2; Path=/; Secure",
-                                    ),
+                                    ("set-cookie", "__HOST-NODKEY_SESSION=evil2; Path=/; Secure"),
                                     ("set-cookie", "PHPSESSID=tossed; Domain=localhost; Path=/"),
                                     ("set-cookie", "tracking=1; Path=/"),
                                     ("service-worker-allowed", "/"),
@@ -460,9 +454,7 @@ pub async fn start_with(mutate: impl FnOnce(&mut Config)) -> Harness {
     let mut cfg = base_config(&dir, up);
     mutate(&mut cfg);
     let checked = config::check(cfg).expect("config");
-    let gw = nodkey_gateway::server::start(checked)
-        .await
-        .expect("start");
+    let gw = nodkey_gateway::server::start(checked).await.expect("start");
     Harness {
         addr: gw.addr,
         world,

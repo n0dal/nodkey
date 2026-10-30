@@ -627,9 +627,7 @@ async fn revoke(gw: &Gateway, req: &Req, mid: &str) -> Resp {
         let retry = gw.revoke_retry;
         tokio::spawn(async move {
             if !broker_ack && !revoke_until(&broker, &mid, &ten, &sub, exp, retry).await {
-                eprintln!(
-                    "nodkey-gateway: broker revocation of {mid} not acknowledged before exp"
-                );
+                eprintln!("nodkey-gateway: broker revocation of {mid} not acknowledged before exp");
                 return;
             }
             if !revoke_until(&authority, &mid, &ten, &sub, exp, retry).await {

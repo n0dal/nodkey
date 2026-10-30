@@ -49,12 +49,7 @@ fn startup_refusals() {
     c.app_origin = "http://app.localhost".into();
     assert!(check(c).is_err(), "scheme must match the TLS mode");
 
-    for bad in [
-        "__Host-nodkey_session",
-        "my_nodkey",
-        "__Secure-x",
-        "a b",
-    ] {
+    for bad in ["__Host-nodkey_session", "my_nodkey", "__Secure-x", "a b"] {
         let mut c = base();
         c.app_cookies = vec![bad.into()];
         assert!(check(c).is_err(), "app cookie {bad}");
@@ -194,8 +189,7 @@ async fn wrong_peer_uid_fails_closed() {
         ten: "acme",
         sub: "u",
     };
-    let r =
-        nodkey_gateway::ipc::read_grant(&peer, subj, WID, &["payments.get_order".into()]).await;
+    let r = nodkey_gateway::ipc::read_grant(&peer, subj, WID, &["payments.get_order".into()]).await;
     assert_eq!(
         r,
         Err(nodkey_gateway::ipc::IpcError::Transport(

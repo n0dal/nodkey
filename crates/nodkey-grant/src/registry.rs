@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn spec_example_kid() {
-        assert_eq!(kid_of(RFC8032_TEST1_PK), "4fcf41a3bf742ec7db96e0aaa5047e3a");
+        assert_eq!(kid_of(RFC8032_TEST1_PK), "c1044a5f9c337b6a1d0f01b9cc1fc9c9");
         let r = Registry::load(&doc(&[entry(RFC8032_TEST1_PK, &kid_of(RFC8032_TEST1_PK))]));
         assert_eq!(r.unwrap().len(), 1);
     }
@@ -251,8 +251,7 @@ mod tests {
             Registry::load(&doc(&[e])).unwrap_err().code,
             RegistryErrorCode::EntryInvalid
         );
-        let top =
-            r#"{"format":"nodkey.grant-keys.v1","format":"nodkey.grant-keys.v1","keys":[]}"#;
+        let top = r#"{"format":"nodkey.grant-keys.v1","format":"nodkey.grant-keys.v1","keys":[]}"#;
         assert_eq!(
             Registry::load(top).unwrap_err().code,
             RegistryErrorCode::EntryInvalid

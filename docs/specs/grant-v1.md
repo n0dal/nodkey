@@ -138,14 +138,14 @@ The protected header bstr MUST decode (§4, header rules) to a map with **exactl
 | 16 | `typ` | tstr | MUST equal `application/nodkey-grant+cbor` (RFC 9596). |
 
 Every other label is forbidden, including `crit` (2), content type (3), IV (5, 6), `x5chain` (33), and
-any private label. A conforming protected header therefore has the fixed 55-byte layout:
+any private label. A conforming protected header therefore has the fixed 53-byte layout:
 
 ```
 a3                                   map(3)
    01 32                             1: -19
    04 50 <kid: 16 bytes>             4: h'…'
-   10 78 1f                          16: text(31)
-      6170706c69636174696f6e2f676c6569706e69722d6772616e742b63626f72   "application/nodkey-grant+cbor"
+   10 78 1d                          16: text(29)
+      6170706c69636174696f6e2f6e6f646b65792d6772616e742b63626f72   "application/nodkey-grant+cbor"
 ```
 
 `alg` −8 (polymorphic EdDSA), −7, 0, or any other integer is **not** an alias: it is rejected with
@@ -328,7 +328,7 @@ request_hash = SHA-256( "nodkey.rqh.v1" || 0x00 ||
 Example (vector manifest `request_hash_examples`): request `ledger.transfer {from: "alice", to: "bob",
 amount_cents: 12500}` encodes as `["ledger.transfer", {"to": "bob", "from": "alice", "amount_cents":
 12500}]` and hashes to
-`7d58c02dce96c8c1f0a0e6225ed8c15f61873e6fb14d27900844832aa4209279`.
+`c83e7f6c577ec48aac98cf24aa9bf03cfcf0c800b4aea0302604fe6219487086`.
 
 ## 6. Operation declarations
 
@@ -546,7 +546,7 @@ fraction, or exponent) with a value ≤ 2^53 − 1.
   "format": "nodkey.grant-keys.v1",
   "keys": [
     {
-      "kid": "4fcf41a3bf742ec7db96e0aaa5047e3a",
+      "kid": "c1044a5f9c337b6a1d0f01b9cc1fc9c9",
       "alg": "Ed25519",
       "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
       "iss": "nodkey.authority.test",

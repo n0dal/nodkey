@@ -33,7 +33,7 @@ pub const KEY_B: &str = "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6e
 
 pub fn registry_json(status: &str) -> String {
     format!(
-        r#"{{"format":"nodkey.grant-keys.v1","keys":[{{"kid":"4fcf41a3bf742ec7db96e0aaa5047e3a","alg":"Ed25519",
+        r#"{{"format":"nodkey.grant-keys.v1","keys":[{{"kid":"c1044a5f9c337b6a1d0f01b9cc1fc9c9","alg":"Ed25519",
         "public_key":"d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a","iss":"{ISS}",
         "purpose":"grant","not_before":1767225600,"not_after":1798761600,"status":"{status}"}}]}}"#
     )

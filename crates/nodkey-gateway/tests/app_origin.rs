@@ -185,13 +185,7 @@ async fn read_route_without_session_gets_no_grant() {
     assert_eq!(r.status, 200);
     let w = h.world.lock().unwrap();
     assert!(w.authority_calls.is_empty());
-    assert!(
-        w.upstream
-            .last()
-            .unwrap()
-            .header("nodkey-grant")
-            .is_empty()
-    );
+    assert!(w.upstream.last().unwrap().header("nodkey-grant").is_empty());
 }
 
 #[tokio::test]

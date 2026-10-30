@@ -239,9 +239,7 @@ pub fn check(cfg: Config) -> Result<Checked, String> {
         return Err("app_wid is not an ID".into());
     }
     for r in &cfg.read_routes {
-        if !r.path.starts_with('/')
-            || r.path.contains(['?', '#'])
-            || r.path.starts_with("/.nodkey")
+        if !r.path.starts_with('/') || r.path.contains(['?', '#']) || r.path.starts_with("/.nodkey")
         {
             return Err(format!("read route {:?}: bad path", r.path));
         }

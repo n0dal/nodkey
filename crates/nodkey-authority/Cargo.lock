@@ -128,29 +128,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nodkey-authority"
-version = "0.1.0"
-dependencies = [
- "getrandom",
- "nodkey-grant",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "zeroize",
-]
-
-[[package]]
-name = "nodkey-grant"
-version = "0.1.0"
-dependencies = [
- "ed25519-dalek",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -186,6 +163,29 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys",
+]
+
+[[package]]
+name = "nodkey-authority"
+version = "0.1.0"
+dependencies = [
+ "getrandom",
+ "nodkey-grant",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
+name = "nodkey-grant"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

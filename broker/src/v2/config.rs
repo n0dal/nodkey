@@ -1123,10 +1123,7 @@ pub mod tests {
                 r#""broker_id":"a b""#,
             ),
             s.replace(r#""profile":"phase3""#, r#""profile":"phase3","extra":1"#),
-            s.replace(
-                "/run/nodkey/gw-broker/broker.sock",
-                "relative/broker.sock",
-            ),
+            s.replace("/run/nodkey/gw-broker/broker.sock", "relative/broker.sock"),
         ];
         for b in bad {
             assert!(build(&b, true).is_err(), "should refuse: {b}");

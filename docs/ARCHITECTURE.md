@@ -5,7 +5,7 @@
 > [architecture review](reviews/2026-10-24-architecture-review.md) and the
 > [ADR-0003/0009 review](reviews/2026-10-25-adr-0003-0009-review.md). Reflects ADR-0001…0009 (see
 > [index](decisions/README.md) for status). Nothing is implemented or tested. The project name is
-> **Nodkey** (owner decision, 2026-10-24; replaces the provisional name, OQ-02 resolved).
+> **Nodkey** (owner decision, 2026-10-30; replaces earlier working names, OQ-02 resolved).
 
 Nodkey is privilege separation for application effects, in the lineage of OpenSSH privsep, the Chromium
 broker, and BeyondProd end-user context tickets ([research 01](research/01-prior-art.md)). The

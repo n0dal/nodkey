@@ -4,6 +4,8 @@ Research notes rank below accepted ADRs and specifications (see [source-of-truth
 Each note separates **established facts** (cited) from **hypotheses**. Notes are point-in-time
 (2026-10-24) and were not hands-on evaluations unless stated.
 
+> **Naming:** notes are kept as written. "PBE" / "Proof-Bound Execution" and "Nodkey" are earlier names of the project now called **Nodkey** (renamed 2026-10-30); crate, path, and protocol names in these notes (for example `nodkey-grant`, `nodkey.grant.v1`) now read `nodkey-*` / `nodkey.*`.
+
 | Note | Topic | Key finding |
 |---|---|---|
 | [01-prior-art.md](01-prior-art.md) | Prior art and competing systems | No surveyed open-source project combines credential-less containment, typed brokered effects, and per-effect authorization from trusted facts; each part has strong prior art (privsep, Chromium broker, credential injectors, PostgREST+RLS, BeyondProd). |

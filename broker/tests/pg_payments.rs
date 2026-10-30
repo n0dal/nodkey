@@ -75,8 +75,7 @@ fn build(db: &str, now: Arc<AtomicU64>, sock: &str, adapter_uid: u32) -> Broker 
     let raw = RawV2Config::parse(config(db, sock, adapter_uid).as_bytes()).unwrap();
     let cfg = V2Config::from_raw(raw, &ops, &names, 99_999, true).unwrap();
     nodkey_broker::v2::config::check_authority_workloads(AUTH_WL.as_bytes(), &cfg, &ops).unwrap();
-    let digest =
-        nodkey_broker::v2::config::config_digest(ops_text.as_bytes(), AUTH_WL.as_bytes());
+    let digest = nodkey_broker::v2::config::config_digest(ops_text.as_bytes(), AUTH_WL.as_bytes());
     let registry = Registry::load(&registry_json("active")).unwrap();
     let e = pg_env();
     let pool = Pool::from_config(pg_config(db, "nodkey_broker", &e.broker_pw), 8);
@@ -839,16 +838,15 @@ async fn pt22_budget() {
         p.h.b.dispatch(decode_id(&jpy).unwrap()).await.unwrap(),
         PayOutcome::Applied(PayTo::Succeeded { .. })
     ));
-    let spent: i64 = p
-        .h
-        .su
-        .query_one(
-            "SELECT sum(spent_minor)::bigint FROM nodkey.refund_budget WHERE currency = 'USD'",
-            &[],
-        )
-        .await
-        .unwrap()
-        .get(0);
+    let spent: i64 =
+        p.h.su
+            .query_one(
+                "SELECT sum(spent_minor)::bigint FROM nodkey.refund_budget WHERE currency = 'USD'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
     assert_eq!(spent, 100 + 101 + 102 + 20_000);
     // The budget never decreases.
     assert!(
@@ -1837,11 +1835,9 @@ async fn bp02_operator_updates_as_operator_role() {
     assert_eq!(st, "disputed");
     // A charge with an existing state row and an open effect.
     let a = p.reserve(1005, 100, "USD").await;
-    op.batch_execute(
-        "UPDATE nodkey.orders SET external_refunded_minor = 50 WHERE order_id = 1005",
-    )
-    .await
-    .unwrap();
+    op.batch_execute("UPDATE nodkey.orders SET external_refunded_minor = 50 WHERE order_id = 1005")
+        .await
+        .unwrap();
     p.h.b.dispatch(decode_id(&a).unwrap()).await.unwrap();
     assert_eq!(p.h.state(&a).await, "SUCCEEDED");
     op.batch_execute(

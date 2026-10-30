@@ -177,12 +177,19 @@ fn transport_decoder_never_panics() {
 /// Splits a vector shaped `d2 84 <protected bstr> a0 <payload bstr> <sig bstr>` and returns the
 /// payload, or `None` if the vector does not have that shape.
 fn payload_of(g: &[u8]) -> Option<Vec<u8>> {
-    if g.get(..4)? != [0xd2, 0x84, 0x58, 0x37] || *g.get(59)? != 0xa0 {
+    // Protected header: map(3) + alg (2) + kid (2 + 16) + typ label and text(1-byte length) head
+    // (3) + typ (spec §3.2).
+    let plen = 24 + TYP.len();
+    let at = 4 + plen; // offset of the unprotected header
+    if g.get(..4)? != [0xd2, 0x84, 0x58, plen as u8] || *g.get(at)? != 0xa0 {
         return None;
     }
-    let (len, start) = match *g.get(60)? {
-        0x58 => (*g.get(61)? as usize, 62),
-        0x59 => (u16::from_be_bytes([*g.get(61)?, *g.get(62)?]) as usize, 63),
+    let (len, start) = match *g.get(at + 1)? {
+        0x58 => (*g.get(at + 2)? as usize, at + 3),
+        0x59 => (
+            u16::from_be_bytes([*g.get(at + 2)?, *g.get(at + 3)?]) as usize,
+            at + 4,
+        ),
         _ => return None,
     };
     g.get(start..start + len).map(<[u8]>::to_vec)
@@ -194,7 +201,7 @@ fn sign_raw(key: &SigningKey, payload: &[u8]) -> Vec<u8> {
     let kid = derive_kid(&key.verifying_key().to_bytes());
     let mut protected = vec![0xa3, 0x01, 0x32, 0x04, 0x50];
     protected.extend_from_slice(&kid);
-    protected.extend_from_slice(&[0x10, 0x78, 0x1f]);
+    protected.extend_from_slice(&[0x10, 0x78, TYP.len() as u8]);
     protected.extend_from_slice(TYP.as_bytes());
     fn bstr(out: &mut Vec<u8>, b: &[u8]) {
         match b.len() {

@@ -222,10 +222,10 @@ impl Ledger {
                             &[],
                         )
                         .await;
-                    if let Err(e) = &ins {
-                        if e.code() == Some(&SqlState::UNDEFINED_TABLE) {
-                            return Ok(None);
-                        }
+                    if let Err(e) = &ins
+                        && e.code() == Some(&SqlState::UNDEFINED_TABLE)
+                    {
+                        return Ok(None);
                     }
                     ins.map_err(|e| w.failure("claim", e))?;
 

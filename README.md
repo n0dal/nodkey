@@ -1,5 +1,7 @@
 # Nodkey
 
+*Your nod is the key.*
+
 > [!WARNING]
 > **Research prototype. Not for production.** All security reviews were performed by AI agents; no
 > independent human audit has been done. See [LIMITATIONS.md](LIMITATIONS.md).

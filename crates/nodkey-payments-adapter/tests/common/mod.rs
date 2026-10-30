@@ -13,9 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use nodkey_grant::{
-    GrantBuilder, ParamValue, Registry, SigningKey, derive_kid, encode_transport,
-};
+use nodkey_grant::{GrantBuilder, ParamValue, Registry, SigningKey, derive_kid, encode_transport};
 use nodkey_payments_adapter::config::parse_config;
 use nodkey_payments_adapter::derive::IdemKey;
 use nodkey_payments_adapter::orders::{BoxFut, OrderRow, OrderView};

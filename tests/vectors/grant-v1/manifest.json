@@ -26,7 +26,7 @@
       "source": "RFC 8032 section 7.1 TEST 1",
       "secret_seed": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
       "public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
-      "kid": "4fcf41a3bf742ec7db96e0aaa5047e3a",
+      "kid": "c1044a5f9c337b6a1d0f01b9cc1fc9c9",
       "in_registry": true,
       "purpose": "the authority's active grant key; signs every valid user grant"
     },
@@ -35,7 +35,7 @@
       "source": "RFC 8032 section 7.1 TEST 2",
       "secret_seed": "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
       "public_key": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
-      "kid": "802e7b803bde0de9d26cfa321bfab4d5",
+      "kid": "c2d18f39f75aa630a438b0e26eac9b8c",
       "in_registry": false,
       "purpose": "NOT in the registry; wrong-key and unknown-kid cases"
     },
@@ -44,7 +44,7 @@
       "source": "RFC 8032 section 7.1 TEST 3",
       "secret_seed": "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
       "public_key": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
-      "kid": "71a5e20f927aef116cd029856cff6f04",
+      "kid": "e9b24960853b63385ae3215790097d99",
       "in_registry": true,
       "purpose": "registered with status revoked"
     },
@@ -53,7 +53,7 @@
       "source": "RFC 8032 section 7.1 TEST 1024",
       "secret_seed": "f5e5767cf153319517630f226876b86c8160cc583bc013744c6bf255f5cc0ee5",
       "public_key": "278117fc144c72340f67d0f2316e8386ceffbf2b2428c9c51fef7c597f1d426e",
-      "kid": "f54ef1d6a652135a724d2f133af93847",
+      "kid": "02ef07a9a40267cedb073f8b9aa32d8b",
       "in_registry": true,
       "purpose": "registered active but outside its validity window at the test time"
     },
@@ -62,7 +62,7 @@
       "source": "RFC 8032 section 7.1 TEST SHA(abc)",
       "secret_seed": "833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42",
       "public_key": "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf",
-      "kid": "e3b1cd9a74a3b174e6883283f00fd618",
+      "kid": "2fc69a419acda530646331cf7cb43409",
       "in_registry": true,
       "purpose": "a second active key of the same issuer (rotation overlap)"
     },
@@ -71,7 +71,7 @@
       "source": "RFC 8032 section 7.2 (Ed25519ctx test key, used here as a plain Ed25519 key)",
       "secret_seed": "0305334e381af78f141cb666f6199f57bc3495335a256a95bd2a55bf546663f6",
       "public_key": "dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
-      "kid": "62dde12c8cbe91ab974cf83f44b40208",
+      "kid": "f9d503d06def91cbd6c947f350ee8ebd",
       "in_registry": true,
       "purpose": "registered active but not yet inside its validity window at the test time"
     }
@@ -102,7 +102,7 @@
           "amount_cents": 12500
         }
       },
-      "request_hash": "7d58c02dce96c8c1f0a0e6225ed8c15f61873e6fb14d27900844832aa4209279"
+      "request_hash": "c83e7f6c577ec48aac98cf24aa9bf03cfcf0c800b4aea0302604fe6219487086"
     },
     {
       "request": {
@@ -114,7 +114,7 @@
           "memo": "rent"
         }
       },
-      "request_hash": "4c1422b1c953f9988bfe88d85f3fb2dbba7543de9ea1b63bb5d3fe523cfdc721"
+      "request_hash": "950243e32b0edda029616b33e19524de9b700727f3bcc1d91014a91a7fd6cb78"
     },
     {
       "request": {
@@ -123,7 +123,7 @@
           "account": "alice"
         }
       },
-      "request_hash": "c0d63b8cc345c1edbfa9fa472716fbf07e87aef4e63770b42cbf6b693a1bb1ee"
+      "request_hash": "9b24874ca4b985854c205cf2e10277ca1d1baa607a4aabf03c2b68a51955a9b4"
     }
   ],
   "vectors": [
@@ -135,7 +135,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-01-valid-transfer.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -162,7 +162,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-02-valid-read-grant.hex",
-      "grant_len": 302,
+      "grant_len": 294,
       "steps": [
         {
           "now": 1792886410,
@@ -187,7 +187,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-09-read-grant-multi-use.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -238,7 +238,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-03-amount-equals-bound.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -266,7 +266,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-04-free-param-any-value.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -294,7 +294,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-05-iat-before-nbf.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -321,7 +321,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-06-multi-tenant-workload.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -348,7 +348,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-07-other-audience-at-its-broker.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -375,7 +375,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-08-rotation-overlap-second-key.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -402,7 +402,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-10-rop-length-first-order.hex",
-      "grant_len": 313,
+      "grant_len": 305,
       "steps": [
         {
           "now": 1792886410,
@@ -451,14 +451,14 @@
             "op": "test.bulk",
             "args": {
               "account": "alice",
-              "p0": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "p1": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              "p2": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-              "p3": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-              "p4": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-              "p5": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-              "p6": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
-              "p7": "zzzzzz"
+              "p0": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "p1": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "p2": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "p3": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "p4": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "p5": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "p6": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+              "p7": ""
             }
           },
           "expected": "ACCEPT"
@@ -473,7 +473,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ACC-12-tenant-128-bytes.hex",
-      "grant_len": 453,
+      "grant_len": 445,
       "steps": [
         {
           "now": 1792886410,
@@ -581,7 +581,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-04-truncated.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -608,7 +608,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-05-trailing-byte.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -635,7 +635,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-06-untagged.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -662,7 +662,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-07-tag-17.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -689,7 +689,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-08-tag-98.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -716,7 +716,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-09-double-tag.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -743,7 +743,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-10-tag-non-minimal.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -770,7 +770,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-11-array-3.hex",
-      "grant_len": 261,
+      "grant_len": 253,
       "steps": [
         {
           "now": 1792886410,
@@ -797,7 +797,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-12-array-5.hex",
-      "grant_len": 393,
+      "grant_len": 385,
       "steps": [
         {
           "now": 1792886410,
@@ -824,7 +824,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-13-indefinite-array.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -851,7 +851,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-14-array-head-non-minimal.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -878,7 +878,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-15-payload-length-non-minimal.hex",
-      "grant_len": 334,
+      "grant_len": 326,
       "steps": [
         {
           "now": 1792886410,
@@ -905,7 +905,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-16-payload-indefinite-bstr.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -932,7 +932,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-17-signature-63-bytes.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -959,7 +959,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-18-signature-65-bytes.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -986,7 +986,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-19-payload-nil.hex",
-      "grant_len": 127,
+      "grant_len": 125,
       "steps": [
         {
           "now": 1792886410,
@@ -1013,7 +1013,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-20-unprotected-not-map.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1040,7 +1040,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-21-protected-not-bstr.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -1067,7 +1067,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-22-envelope-is-map.hex",
-      "grant_len": 60,
+      "grant_len": 58,
       "steps": [
         {
           "now": 1792886410,
@@ -1094,7 +1094,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ENV-23-huge-declared-length.hex",
-      "grant_len": 69,
+      "grant_len": 67,
       "steps": [
         {
           "now": 1792886410,
@@ -1121,7 +1121,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-01-alg-in-unprotected.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -1148,7 +1148,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-02-kid-only-in-unprotected.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1175,7 +1175,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-03-missing-typ.hex",
-      "grant_len": 292,
+      "grant_len": 286,
       "steps": [
         {
           "now": 1792886410,
@@ -1202,7 +1202,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-04-missing-kid.hex",
-      "grant_len": 309,
+      "grant_len": 301,
       "steps": [
         {
           "now": 1792886410,
@@ -1229,7 +1229,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-05-missing-alg.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -1256,7 +1256,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-06-extra-crit.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -1283,7 +1283,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-07-extra-content-type.hex",
-      "grant_len": 345,
+      "grant_len": 337,
       "steps": [
         {
           "now": 1792886410,
@@ -1310,7 +1310,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-08-extra-unknown-label.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -1337,7 +1337,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-09-typ-receipt.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -1364,7 +1364,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-10-typ-generic-cose.hex",
-      "grant_len": 311,
+      "grant_len": 305,
       "steps": [
         {
           "now": 1792886410,
@@ -1391,7 +1391,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-11-typ-as-uint.hex",
-      "grant_len": 296,
+      "grant_len": 290,
       "steps": [
         {
           "now": 1792886410,
@@ -1418,7 +1418,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-12-kid-15-bytes.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -1445,7 +1445,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-13-kid-17-bytes.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -1472,7 +1472,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-14-kid-as-text.hex",
-      "grant_len": 344,
+      "grant_len": 336,
       "steps": [
         {
           "now": 1792886410,
@@ -1499,7 +1499,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-15-unsorted-labels.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1526,7 +1526,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-16-alg-non-minimal.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -1553,7 +1553,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-17-protected-empty-bstr.hex",
-      "grant_len": 271,
+      "grant_len": 265,
       "steps": [
         {
           "now": 1792886410,
@@ -1580,7 +1580,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-18-protected-empty-map.hex",
-      "grant_len": 272,
+      "grant_len": 266,
       "steps": [
         {
           "now": 1792886410,
@@ -1607,7 +1607,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-19-protected-trailing-byte.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -1634,7 +1634,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-20-alg-text.hex",
-      "grant_len": 332,
+      "grant_len": 324,
       "steps": [
         {
           "now": 1792886410,
@@ -1661,7 +1661,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-21-alg-minus-8.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1688,7 +1688,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-22-alg-minus-7.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1715,7 +1715,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/HDR-23-alg-zero.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1742,7 +1742,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/KEY-01-unknown-kid.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1769,7 +1769,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/KEY-02-unknown-kid-random.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1796,7 +1796,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/KEY-03-revoked-key.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1823,7 +1823,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/KEY-04-key-outside-window.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1850,7 +1850,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-01-wrong-key.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1877,7 +1877,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-02-kid-swapped-post-signing.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1904,7 +1904,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-03-signature-R-bitflip.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1931,7 +1931,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-04-signature-S-bitflip.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1958,7 +1958,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-05-malleable-S-plus-L.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -1985,7 +1985,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-06-signature-zero.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2012,7 +2012,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-07-signed-for-other-audience.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -2039,7 +2039,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-08-aad-wrong-domain-tag.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2066,7 +2066,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-09-aad-empty.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2093,7 +2093,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-10-aad-no-separator.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2120,7 +2120,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-11-cose-sign-context.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2147,7 +2147,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-12-raw-payload-signed.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2174,7 +2174,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-20-altered-ver.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2201,7 +2201,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-21-altered-iss.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2228,7 +2228,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-22-altered-aud.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2255,7 +2255,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-23-altered-jti.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2282,7 +2282,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-24-altered-iat.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2309,7 +2309,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-25-altered-nbf.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2336,7 +2336,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-26-altered-exp.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2363,7 +2363,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-27-altered-wid.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2390,7 +2390,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-28-altered-ten.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -2417,7 +2417,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-29-altered-sub.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2444,7 +2444,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-30-altered-op.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -2471,7 +2471,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-31-altered-opv.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2498,7 +2498,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-32-altered-res.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -2525,7 +2525,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-33-altered-con.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -2552,7 +2552,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-34-altered-use.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2579,7 +2579,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-37-altered-knd.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2606,7 +2606,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-38-altered-cfm.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2633,7 +2633,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-01-int-non-minimal.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -2660,7 +2660,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-02-text-length-non-minimal.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -2687,7 +2687,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-03-map-head-non-minimal.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -2714,7 +2714,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-04-keys-unsorted.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -2741,7 +2741,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-05-duplicate-key-exp.hex",
-      "grant_len": 333,
+      "grant_len": 325,
       "steps": [
         {
           "now": 1792886410,
@@ -2768,7 +2768,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-06-duplicate-key-con.hex",
-      "grant_len": 340,
+      "grant_len": 332,
       "steps": [
         {
           "now": 1792886410,
@@ -2795,7 +2795,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-07-indefinite-map.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -2822,7 +2822,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-08-indefinite-text.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -2849,7 +2849,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-09-indefinite-array-in-con.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -2876,7 +2876,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-10-float-exp.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -2903,7 +2903,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-11-half-float-use.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -2930,7 +2930,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-12-negative-int.hex",
-      "grant_len": 323,
+      "grant_len": 315,
       "steps": [
         {
           "now": 1792886410,
@@ -2957,7 +2957,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-13-tag-in-payload.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -2984,7 +2984,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-14-bool.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -3011,7 +3011,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-15-null.hex",
-      "grant_len": 320,
+      "grant_len": 312,
       "steps": [
         {
           "now": 1792886410,
@@ -3038,7 +3038,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-16-trailing-byte.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -3065,7 +3065,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-17-truncated.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -3092,7 +3092,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-18-invalid-utf8.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -3119,7 +3119,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-19-depth-4.hex",
-      "grant_len": 322,
+      "grant_len": 314,
       "steps": [
         {
           "now": 1792886410,
@@ -3146,7 +3146,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-01-payload-array.hex",
-      "grant_len": 129,
+      "grant_len": 127,
       "steps": [
         {
           "now": 1792886410,
@@ -3173,7 +3173,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-02-payload-uint.hex",
-      "grant_len": 128,
+      "grant_len": 126,
       "steps": [
         {
           "now": 1792886410,
@@ -3200,7 +3200,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-03-unknown-key-21.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -3227,7 +3227,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-04-reserved-key-15-epo.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -3254,7 +3254,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-05-reserved-key-16-rqh.hex",
-      "grant_len": 362,
+      "grant_len": 354,
       "steps": [
         {
           "now": 1792886410,
@@ -3281,7 +3281,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-06-text-key.hex",
-      "grant_len": 336,
+      "grant_len": 328,
       "steps": [
         {
           "now": 1792886410,
@@ -3308,7 +3308,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-10-missing-ver.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -3335,7 +3335,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-11-missing-iss.hex",
-      "grant_len": 302,
+      "grant_len": 296,
       "steps": [
         {
           "now": 1792886410,
@@ -3362,7 +3362,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-12-missing-aud.hex",
-      "grant_len": 297,
+      "grant_len": 291,
       "steps": [
         {
           "now": 1792886410,
@@ -3389,7 +3389,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-13-missing-jti.hex",
-      "grant_len": 309,
+      "grant_len": 301,
       "steps": [
         {
           "now": 1792886410,
@@ -3416,7 +3416,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-14-missing-iat.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -3443,7 +3443,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-15-missing-nbf.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -3470,7 +3470,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-16-missing-exp.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -3497,7 +3497,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-17-missing-wid.hex",
-      "grant_len": 288,
+      "grant_len": 282,
       "steps": [
         {
           "now": 1792886410,
@@ -3524,7 +3524,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-18-missing-ten.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -3551,7 +3551,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-19-missing-sub.hex",
-      "grant_len": 316,
+      "grant_len": 308,
       "steps": [
         {
           "now": 1792886410,
@@ -3578,7 +3578,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-20-missing-op.hex",
-      "grant_len": 310,
+      "grant_len": 302,
       "steps": [
         {
           "now": 1792886410,
@@ -3605,7 +3605,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-21-missing-opv.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -3632,7 +3632,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-22-missing-res.hex",
-      "grant_len": 318,
+      "grant_len": 310,
       "steps": [
         {
           "now": 1792886410,
@@ -3659,7 +3659,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-23-missing-con.hex",
-      "grant_len": 312,
+      "grant_len": 304,
       "steps": [
         {
           "now": 1792886410,
@@ -3686,7 +3686,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-24-missing-use.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -3713,7 +3713,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-25-missing-knd.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -3740,7 +3740,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-26-missing-cfm.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -3767,7 +3767,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-30-exp-text.hex",
-      "grant_len": 333,
+      "grant_len": 325,
       "steps": [
         {
           "now": 1792886410,
@@ -3794,7 +3794,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-31-iat-bytes.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -3821,7 +3821,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-32-jti-15-bytes.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -3848,7 +3848,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-33-jti-17-bytes.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -3875,7 +3875,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-34-jti-text.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -3902,7 +3902,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-35-ver-2.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -3929,7 +3929,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-36-ver-0.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -3956,7 +3956,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-37-ver-text.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -3983,7 +3983,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-38-use-0.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4010,7 +4010,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-39-use-2.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4037,7 +4037,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-40-op-uppercase.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4064,7 +4064,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-41-op-empty.hex",
-      "grant_len": 312,
+      "grant_len": 304,
       "steps": [
         {
           "now": 1792886410,
@@ -4091,7 +4091,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-42-ten-nul.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -4118,7 +4118,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-43-ten-non-ascii.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -4145,7 +4145,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-44-ten-empty.hex",
-      "grant_len": 323,
+      "grant_len": 315,
       "steps": [
         {
           "now": 1792886410,
@@ -4172,7 +4172,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-45-iss-space.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4199,7 +4199,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-46-sub-257.hex",
-      "grant_len": 578,
+      "grant_len": 570,
       "steps": [
         {
           "now": 1792886410,
@@ -4226,7 +4226,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-47-exp-2pow53.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -4253,7 +4253,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-48-opv-0.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4280,7 +4280,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-49-con-value-not-array.hex",
-      "grant_len": 319,
+      "grant_len": 311,
       "steps": [
         {
           "now": 1792886410,
@@ -4307,7 +4307,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-50-con-array-3.hex",
-      "grant_len": 322,
+      "grant_len": 314,
       "steps": [
         {
           "now": 1792886410,
@@ -4334,7 +4334,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-51-con-class-2.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -4361,7 +4361,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-52-con-bounded-text.hex",
-      "grant_len": 323,
+      "grant_len": 315,
       "steps": [
         {
           "now": 1792886410,
@@ -4388,7 +4388,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-53-res-value-bytes.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4415,7 +4415,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-54-res-key-16.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4442,7 +4442,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-55-con-key-text.hex",
-      "grant_len": 323,
+      "grant_len": 315,
       "steps": [
         {
           "now": 1792886410,
@@ -4469,7 +4469,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-56-res-value-control-char.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -4496,7 +4496,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-57-res-not-map.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -4523,7 +4523,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-60-knd-3.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4548,7 +4548,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-61-cfm-2.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4573,7 +4573,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-62-read-with-con.hex",
-      "grant_len": 304,
+      "grant_len": 296,
       "steps": [
         {
           "now": 1792886410,
@@ -4598,7 +4598,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-63-read-with-cfm.hex",
-      "grant_len": 304,
+      "grant_len": 296,
       "steps": [
         {
           "now": 1792886410,
@@ -4623,7 +4623,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-64-read-with-op.hex",
-      "grant_len": 322,
+      "grant_len": 314,
       "steps": [
         {
           "now": 1792886410,
@@ -4648,7 +4648,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-65-read-missing-rop.hex",
-      "grant_len": 280,
+      "grant_len": 272,
       "steps": [
         {
           "now": 1792886410,
@@ -4673,7 +4673,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-66-read-missing-jti.hex",
-      "grant_len": 284,
+      "grant_len": 276,
       "steps": [
         {
           "now": 1792886410,
@@ -4698,7 +4698,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-67-read-rop-empty.hex",
-      "grant_len": 282,
+      "grant_len": 274,
       "steps": [
         {
           "now": 1792886410,
@@ -4723,7 +4723,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-68-read-rop-uint-key.hex",
-      "grant_len": 284,
+      "grant_len": 276,
       "steps": [
         {
           "now": 1792886410,
@@ -4748,7 +4748,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-69-read-rop-opv-0.hex",
-      "grant_len": 302,
+      "grant_len": 294,
       "steps": [
         {
           "now": 1792886410,
@@ -4773,7 +4773,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-70-write-with-rop.hex",
-      "grant_len": 349,
+      "grant_len": 341,
       "steps": [
         {
           "now": 1792886410,
@@ -4798,7 +4798,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-71-write-knd-read-fields.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -4823,7 +4823,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ISS-01-issuer-of-other-key.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -4850,7 +4850,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/ISS-02-issuer-unknown.hex",
-      "grant_len": 318,
+      "grant_len": 312,
       "steps": [
         {
           "now": 1792886410,
@@ -4877,7 +4877,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-01-expired.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886535,
@@ -4904,7 +4904,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-02-expired-boundary.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886435,
@@ -4931,7 +4931,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-03-expiry-boundary-accept.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886434,
@@ -4958,7 +4958,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-04-not-yet-valid.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886300,
@@ -4985,7 +4985,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-05-not-yet-valid-boundary.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886394,
@@ -5012,7 +5012,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-06-nbf-boundary-accept.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886395,
@@ -5039,7 +5039,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-07-ttl-31.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5066,7 +5066,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-08-nbf-before-iat.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5093,7 +5093,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-09-exp-equals-nbf.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5120,7 +5120,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-10-exp-before-nbf.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5147,7 +5147,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-12-read-grant-expired.hex",
-      "grant_len": 302,
+      "grant_len": 294,
       "steps": [
         {
           "now": 1792886435,
@@ -5172,7 +5172,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-13-nbf-iat-equals-skew.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5199,7 +5199,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-14-nbf-iat-exceeds-skew.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5226,7 +5226,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-15-future-dated-issuance.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5253,7 +5253,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-16-nbf-far-beyond-iat.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1795478401,
@@ -5280,7 +5280,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-17-ttl-from-iat.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5307,7 +5307,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-18-iat-just-beyond-skew.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886394,
@@ -5334,7 +5334,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/TIME-11-long-ttl-far-future.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -5361,7 +5361,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/BIND-01-audience-field.hex",
-      "grant_len": 326,
+      "grant_len": 318,
       "steps": [
         {
           "now": 1792886410,
@@ -5388,7 +5388,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/BIND-02-workload-other-peer.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5415,7 +5415,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/BIND-03-workload-other-grant.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5442,7 +5442,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/BIND-04-tenant-not-registered.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -5469,7 +5469,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/BIND-05-tenant-unknown.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -5496,7 +5496,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/BIND-06-tenant-case.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5523,7 +5523,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-01-read-grant-for-write-op.hex",
-      "grant_len": 302,
+      "grant_len": 294,
       "steps": [
         {
           "now": 1792886410,
@@ -5550,7 +5550,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-07-read-grant-lists-write-op.hex",
-      "grant_len": 319,
+      "grant_len": 311,
       "steps": [
         {
           "now": 1792886410,
@@ -5577,7 +5577,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-08-read-grant-lists-write-op-read-request.hex",
-      "grant_len": 319,
+      "grant_len": 311,
       "steps": [
         {
           "now": 1792886410,
@@ -5602,7 +5602,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-09-write-grant-for-read-op.hex",
-      "grant_len": 317,
+      "grant_len": 309,
       "steps": [
         {
           "now": 1792886410,
@@ -5627,7 +5627,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-10-read-op-not-in-set.hex",
-      "grant_len": 305,
+      "grant_len": 297,
       "steps": [
         {
           "now": 1792886410,
@@ -5652,7 +5652,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-11-read-undeclared-op-in-set.hex",
-      "grant_len": 316,
+      "grant_len": 308,
       "steps": [
         {
           "now": 1792886410,
@@ -5677,7 +5677,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-12-read-opv-unsupported.hex",
-      "grant_len": 302,
+      "grant_len": 294,
       "steps": [
         {
           "now": 1792886410,
@@ -5702,7 +5702,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-13-confirmation-required.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5729,7 +5729,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-02-grant-transfer-request-balance.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5754,7 +5754,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-03-undeclared-op.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -5781,7 +5781,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-04-opv-unsupported.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -5808,7 +5808,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/OP-14-rop-unsupported-opv-not-requested.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -5833,7 +5833,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-01-mandated-valid.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -5858,7 +5858,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-02-mandated-transfer-not-eligible.hex",
-      "grant_len": 345,
+      "grant_len": 337,
       "steps": [
         {
           "now": 1792886410,
@@ -5885,7 +5885,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-03-mandated-unconfirmed-op.hex",
-      "grant_len": 339,
+      "grant_len": 331,
       "steps": [
         {
           "now": 1792886410,
@@ -5913,7 +5913,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-04-mid-with-cfm-1.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -5938,7 +5938,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-05-mid-with-cfm-0.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -5963,7 +5963,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-06-mid-15-bytes.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -5988,7 +5988,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-07-mid-17-bytes.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -6013,7 +6013,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-08-mid-text.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -6038,7 +6038,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-09-read-with-mid.hex",
-      "grant_len": 320,
+      "grant_len": 312,
       "steps": [
         {
           "now": 1792886410,
@@ -6063,7 +6063,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-10-cfm-3.hex",
-      "grant_len": 312,
+      "grant_len": 304,
       "steps": [
         {
           "now": 1792886410,
@@ -6088,7 +6088,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-11-mid-altered.hex",
-      "grant_len": 330,
+      "grant_len": 322,
       "steps": [
         {
           "now": 1792886410,
@@ -6113,7 +6113,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/MND-12-mandated-op-human-confirmed.hex",
-      "grant_len": 312,
+      "grant_len": 304,
       "steps": [
         {
           "now": 1792886410,
@@ -6138,7 +6138,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-01-amount-exceeds-bound.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6166,7 +6166,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-02-exact-to-mismatch.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6193,7 +6193,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-03-exact-currency-mismatch.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6221,7 +6221,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-04-resource-mismatch.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6248,7 +6248,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-06-exact-amount-higher.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6275,7 +6275,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-07-exact-amount-lower.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6302,7 +6302,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-20-request-exact-wrong-type.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6329,7 +6329,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-21-request-bounded-wrong-type.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6357,7 +6357,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-22-request-missing-exact.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6383,7 +6383,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-23-request-missing-resource.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6409,7 +6409,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-24-con-text-257.hex",
-      "grant_len": 572,
+      "grant_len": 564,
       "steps": [
         {
           "now": 1792886410,
@@ -6435,7 +6435,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-10-missing-exact-param.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6462,7 +6462,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-11-bounded-encoded-exact.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6490,7 +6490,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-12-exact-encoded-bounded.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6517,7 +6517,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-13-free-param-in-con.hex",
-      "grant_len": 329,
+      "grant_len": 321,
       "steps": [
         {
           "now": 1792886410,
@@ -6545,7 +6545,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-14-unknown-con-key.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -6572,7 +6572,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-15-unknown-res-key.hex",
-      "grant_len": 332,
+      "grant_len": 324,
       "steps": [
         {
           "now": 1792886410,
@@ -6599,7 +6599,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-16-res-empty.hex",
-      "grant_len": 320,
+      "grant_len": 312,
       "steps": [
         {
           "now": 1792886410,
@@ -6626,7 +6626,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-17-res-wrong-type.hex",
-      "grant_len": 322,
+      "grant_len": 314,
       "steps": [
         {
           "now": 1792886410,
@@ -6653,7 +6653,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-18-currency-lowercase.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6681,7 +6681,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/CON-19-to-wrong-type.hex",
-      "grant_len": 324,
+      "grant_len": 316,
       "steps": [
         {
           "now": 1792886410,
@@ -6708,7 +6708,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-01-identical-resubmission.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6750,7 +6750,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-02-replay-different-request.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6794,7 +6794,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-03-denied-grant-is-consumed.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6854,7 +6854,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-08-retry-after-expiry.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6896,7 +6896,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-07-memo-change-is-replay.hex",
-      "grant_len": 321,
+      "grant_len": 313,
       "steps": [
         {
           "now": 1792886410,
@@ -6940,7 +6940,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-04-unverified-grant-not-consumed.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -6982,7 +6982,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-05-revoked-then-retried.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7034,7 +7034,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/RPL-06-revocation-after-consumption.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7081,7 +7081,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-01-tenant.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7113,7 +7113,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-02-tenant-workload.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7146,7 +7146,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-03-tenant-subject.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7179,7 +7179,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-04-boundary-equal.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7211,7 +7211,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-05-other-tenant.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7243,7 +7243,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-06-other-subject.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7276,7 +7276,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-08-read-grant.hex",
-      "grant_len": 302,
+      "grant_len": 294,
       "steps": [
         {
           "now": 1792886410,
@@ -7326,7 +7326,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-07-other-workload.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -7359,7 +7359,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/REV-09-future-iat-escapes-earlier-revocation.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886500,
@@ -7391,7 +7391,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-20-rop-raw-string-order.hex",
-      "grant_len": 313,
+      "grant_len": 305,
       "steps": [
         {
           "now": 1792886410,
@@ -7416,7 +7416,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PDEC-21-rop-duplicate-key.hex",
-      "grant_len": 322,
+      "grant_len": 314,
       "steps": [
         {
           "now": 1792886410,
@@ -7441,7 +7441,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-72-rop-17-entries.hex",
-      "grant_len": 504,
+      "grant_len": 496,
       "steps": [
         {
           "now": 1792886410,
@@ -7466,7 +7466,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-73-rop-name-65.hex",
-      "grant_len": 350,
+      "grant_len": 342,
       "steps": [
         {
           "now": 1792886410,
@@ -7491,7 +7491,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-74-read-carrying-opv.hex",
-      "grant_len": 304,
+      "grant_len": 296,
       "steps": [
         {
           "now": 1792886410,
@@ -7516,7 +7516,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-75-read-carrying-res.hex",
-      "grant_len": 304,
+      "grant_len": 296,
       "steps": [
         {
           "now": 1792886410,
@@ -7541,7 +7541,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-76-read-carrying-use.hex",
-      "grant_len": 304,
+      "grant_len": 296,
       "steps": [
         {
           "now": 1792886410,
@@ -7566,7 +7566,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-80-read-missing-ver.hex",
-      "grant_len": 300,
+      "grant_len": 292,
       "steps": [
         {
           "now": 1792886410,
@@ -7591,7 +7591,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-81-read-missing-iss.hex",
-      "grant_len": 277,
+      "grant_len": 271,
       "steps": [
         {
           "now": 1792886410,
@@ -7616,7 +7616,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-82-read-missing-aud.hex",
-      "grant_len": 272,
+      "grant_len": 266,
       "steps": [
         {
           "now": 1792886410,
@@ -7641,7 +7641,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-84-read-missing-iat.hex",
-      "grant_len": 296,
+      "grant_len": 288,
       "steps": [
         {
           "now": 1792886410,
@@ -7666,7 +7666,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-85-read-missing-nbf.hex",
-      "grant_len": 296,
+      "grant_len": 288,
       "steps": [
         {
           "now": 1792886410,
@@ -7691,7 +7691,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-86-read-missing-exp.hex",
-      "grant_len": 296,
+      "grant_len": 288,
       "steps": [
         {
           "now": 1792886410,
@@ -7716,7 +7716,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-87-read-missing-wid.hex",
-      "grant_len": 263,
+      "grant_len": 257,
       "steps": [
         {
           "now": 1792886410,
@@ -7741,7 +7741,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-88-read-missing-ten.hex",
-      "grant_len": 296,
+      "grant_len": 288,
       "steps": [
         {
           "now": 1792886410,
@@ -7766,7 +7766,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-89-read-missing-sub.hex",
-      "grant_len": 291,
+      "grant_len": 283,
       "steps": [
         {
           "now": 1792886410,
@@ -7791,7 +7791,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-90-ten-del-0x7f.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -7818,7 +7818,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-91-ten-space-0x20.hex",
-      "grant_len": 328,
+      "grant_len": 320,
       "steps": [
         {
           "now": 1792886410,
@@ -7845,7 +7845,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-92-ten-129.hex",
-      "grant_len": 454,
+      "grant_len": 446,
       "steps": [
         {
           "now": 1792886410,
@@ -7872,7 +7872,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-93-aud-129.hex",
-      "grant_len": 430,
+      "grant_len": 424,
       "steps": [
         {
           "now": 1792886410,
@@ -7899,7 +7899,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-94-iss-129.hex",
-      "grant_len": 435,
+      "grant_len": 429,
       "steps": [
         {
           "now": 1792886410,
@@ -7926,7 +7926,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-95-wid-257.hex",
-      "grant_len": 550,
+      "grant_len": 544,
       "steps": [
         {
           "now": 1792886410,
@@ -7953,7 +7953,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-96-opv-65536.hex",
-      "grant_len": 331,
+      "grant_len": 323,
       "steps": [
         {
           "now": 1792886410,
@@ -7980,7 +7980,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-97-con-uint-2pow53.hex",
-      "grant_len": 333,
+      "grant_len": 325,
       "steps": [
         {
           "now": 1792886410,
@@ -8007,7 +8007,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/PSCH-98-con-ceiling-2pow53.hex",
-      "grant_len": 333,
+      "grant_len": 325,
       "steps": [
         {
           "now": 1792886410,
@@ -8034,7 +8034,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-39-altered-rop.hex",
-      "grant_len": 325,
+      "grant_len": 317,
       "steps": [
         {
           "now": 1792886410,
@@ -8059,7 +8059,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-40-small-order-R.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -8086,7 +8086,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/SIG-41-non-canonical-R.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -8113,7 +8113,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/KEY-05-key-not-yet-active.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1792886410,
@@ -8140,7 +8140,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/KEY-06-key-window-end-boundary.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1767225600,
@@ -8167,7 +8167,7 @@
       "registry": "registry.json",
       "operations": "operations.json",
       "grant": "grants/KEY-07-key-window-last-second.hex",
-      "grant_len": 327,
+      "grant_len": 319,
       "steps": [
         {
           "now": 1767225599,
@@ -8590,19 +8590,19 @@
       "id": "TRN-01-canonical",
       "kind": "transport",
       "category": "transport",
-      "description": "Canonical unpadded base64url of ACC-02-valid-read-grant.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
-      "text_len": 403,
+      "description": "Canonical unpadded base64url of ACC-01-valid-transfer.",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OBQ",
+      "text_len": 426,
       "expected": "DECODED",
-      "decoded": "grants/ACC-02-valid-read-grant.hex"
+      "decoded": "grants/ACC-01-valid-transfer.hex"
     },
     {
       "id": "TRN-02-padding",
       "kind": "transport",
       "category": "transport",
-      "description": "ACC-02-valid-read-grant with = padding.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI=",
-      "text_len": 404,
+      "description": "ACC-01-valid-transfer with = padding.",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OBQ==",
+      "text_len": 428,
       "expected": "grant_encoding_invalid",
       "decoded": null
     },
@@ -8610,9 +8610,9 @@
       "id": "TRN-03-standard-alphabet",
       "kind": "transport",
       "category": "transport",
-      "description": "ACC-02-valid-read-grant with one - or _ replaced by its standard-alphabet counterpart.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR+OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
-      "text_len": 403,
+      "description": "ACC-01-valid-transfer with one - or _ replaced by its standard-alphabet counterpart.",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB/JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OBQ",
+      "text_len": 426,
       "expected": "grant_encoding_invalid",
       "decoded": null
     },
@@ -8620,9 +8620,9 @@
       "id": "TRN-04-embedded-lf",
       "kind": "transport",
       "category": "transport",
-      "description": "ACC-02-valid-read-grant with a line feed after 76 characters.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Ni\nb3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
-      "text_len": 404,
+      "description": "ACC-01-valid-transfer with a line feed after 76 characters.",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9y\noFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OBQ",
+      "text_len": 427,
       "expected": "grant_encoding_invalid",
       "decoded": null
     },
@@ -8630,9 +8630,9 @@
       "id": "TRN-05-length-1-mod-4",
       "kind": "transport",
       "category": "transport",
-      "description": "First 4n+1 characters of ACC-02-valid-read-grant.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094O",
-      "text_len": 401,
+      "description": "First 4n+1 characters of ACC-01-valid-transfer.",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OB",
+      "text_len": 425,
       "expected": "grant_encoding_invalid",
       "decoded": null
     },
@@ -8640,9 +8640,9 @@
       "id": "TRN-06-non-zero-trailing-bits",
       "kind": "transport",
       "category": "transport",
-      "description": "ACC-02-valid-read-grant with a non-zero unused low bit in the final character.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQJ",
-      "text_len": 403,
+      "description": "ACC-01-valid-transfer with a non-zero unused low bit in the final character.",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OBR",
+      "text_len": 426,
       "expected": "grant_encoding_invalid",
       "decoded": null
     },
@@ -8651,7 +8651,7 @@
       "kind": "transport",
       "category": "transport",
       "description": "The 2048-byte grant ACC-11: 2731 characters, the maximum.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWQd_sQABAXdnbGVpcG5pci5hdXRob3JpdHkudGVzdAJ4G2dsZWlwbmlyLmJyb2tlci5sZWRnZXItdGVzdANQo5Ry3ML68lXbTpUoxfdPKgQaat1GgAUaat1GgAYaat1Gngd4JHNwaWZmZTovL2dsZWlwbmlyLnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cml0ZXN0LmJ1bGsLAQyhAGVhbGljZQ2oAIIAePJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQGCAHjyYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmICggB48mNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjA4IAePJkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZASCAHjyZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWUFggB48mZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmBoIAePJnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZweCAGZ6enp6enoOAREBEgBYQDNyfviLD8-AvWppzaqrt9G8aMkfAvXqUT7yZHZ6o6EQ6XvlSYh94wp8hwIJKFwPgXzl4O1S46L0azoL-HD6egg",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFkHgbEAAQF1bm9ka2V5LmF1dGhvcml0eS50ZXN0AngZbm9ka2V5LmJyb2tlci5sZWRnZXItdGVzdANQYe5Sm-SQbqgH29DiS9kZoAQaat1GgAUaat1GgAYaat1Gngd4InNwaWZmZTovL25vZGtleS50ZXN0L3dvcmtsb2FkL2FwcDEIZGFjbWUJaXVzZXI6dS0xNwppdGVzdC5idWxrCwEMoQBlYWxpY2UNqACCAHj0YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQGCAHj0YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYgKCAHj0Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYwOCAHj0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZASCAHj0ZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZQWCAHj0ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZgaCAHj0Z2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZweCAGAOAREBEgBYQK3lAOF5sEMl_TDDDoiofQpX0VpJZBDtKPB6F3C5OelYgwbcV7wGa1sQqkGw36d0QHgbcZJdk1ktHxCpuwWSkAw",
       "text_len": 2731,
       "expected": "DECODED",
       "decoded": "grants/ACC-11-grant-exactly-2048-bytes.hex"
@@ -8661,7 +8661,7 @@
       "kind": "transport",
       "category": "transport",
       "description": "2732 characters (a 2049-byte value): rejected before decoding.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWQd_sQABAXdnbGVpcG5pci5hdXRob3JpdHkudGVzdAJ4G2dsZWlwbmlyLmJyb2tlci5sZWRnZXItdGVzdANQo5Ry3ML68lXbTpUoxfdPKgQaat1GgAUaat1GgAYaat1Gngd4JHNwaWZmZTovL2dsZWlwbmlyLnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cml0ZXN0LmJ1bGsLAQyhAGVhbGljZQ2oAIIAePJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQGCAHjyYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmICggB48mNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjA4IAePJkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZASCAHjyZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWUFggB48mZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmBoIAePJnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZweCAGZ6enp6enoOAREBEgBYQDNyfviLD8-AvWppzaqrt9G8aMkfAvXqUT7yZHZ6o6EQ6XvlSYh94wp8hwIJKFwPgXzl4O1S46L0azoL-HD6eggA",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFkHgbEAAQF1bm9ka2V5LmF1dGhvcml0eS50ZXN0AngZbm9ka2V5LmJyb2tlci5sZWRnZXItdGVzdANQYe5Sm-SQbqgH29DiS9kZoAQaat1GgAUaat1GgAYaat1Gngd4InNwaWZmZTovL25vZGtleS50ZXN0L3dvcmtsb2FkL2FwcDEIZGFjbWUJaXVzZXI6dS0xNwppdGVzdC5idWxrCwEMoQBlYWxpY2UNqACCAHj0YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQGCAHj0YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYgKCAHj0Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjYwOCAHj0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZASCAHj0ZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZWVlZQWCAHj0ZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZgaCAHj0Z2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZ2dnZweCAGAOAREBEgBYQK3lAOF5sEMl_TDDDoiofQpX0VpJZBDtKPB6F3C5OelYgwbcV7wGa1sQqkGw36d0QHgbcZJdk1ktHxCpuwWSkAwA",
       "text_len": 2732,
       "expected": "grant_too_large",
       "decoded": null
@@ -8680,9 +8680,9 @@
       "id": "TRN-10-leading-space",
       "kind": "transport",
       "category": "transport",
-      "description": "ACC-02-valid-read-grant with a leading space.",
-      "text": " 0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQI",
-      "text_len": 404,
+      "description": "ACC-01-valid-transfer with a leading space.",
+      "text": " 0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OBQ",
+      "text_len": 427,
       "expected": "grant_encoding_invalid",
       "decoded": null
     },
@@ -8690,9 +8690,9 @@
       "id": "TRN-11-non-ascii",
       "kind": "transport",
       "category": "transport",
-      "description": "ACC-02-valid-read-grant with a trailing U+00E9.",
-      "text": "0oRYN6MBMgRQT89Bo790LsfbluCqpQR-OhB4H2FwcGxpY2F0aW9uL2dsZWlwbmlyLWdyYW50K2Nib3KgWK6sAAEBd2dsZWlwbmlyLmF1dGhvcml0eS50ZXN0AngbZ2xlaXBuaXIuYnJva2VyLmxlZGdlci10ZXN0A1DMnTcm0QA1-xgjVCYAzX0hBBpq3UaABRpq3UaABhpq3UaeB3gkc3BpZmZlOi8vZ2xlaXBuaXIudGVzdC93b3JrbG9hZC9hcHAxCGRhY21lCWl1c2VyOnUtMTcRAhOhcmxlZGdlci5nZXRfYmFsYW5jZQFYQAdz3ZiziZxEclflwRtNPSPkc1J8snkQ3bqzjugGX0h08NU5H83o18ZTyVFEqcQvBxsJEgF62QJY22iLk094OQIé",
-      "text_len": 405,
+      "description": "ACC-01-valid-transfer with a trailing U+00E9.",
+      "text": "0oRYNaMBMgRQwQRKX5wze2odDwG5zB_JyRB4HWFwcGxpY2F0aW9uL25vZGtleS1ncmFudCtjYm9yoFjBsQABAXVub2RrZXkuYXV0aG9yaXR5LnRlc3QCeBlub2RrZXkuYnJva2VyLmxlZGdlci10ZXN0A1AJlUD1oZv7hMy91n1cfiLcBBpq3UaABRpq3UaABhpq3UaeB3gic3BpZmZlOi8vbm9ka2V5LnRlc3Qvd29ya2xvYWQvYXBwMQhkYWNtZQlpdXNlcjp1LTE3Cm9sZWRnZXIudHJhbnNmZXILAQyhAGVhbGljZQ2iAIIAY2JvYgGCABkw1A4BEQESAVhAkUAK797Vs-cLjJ8c7myXg6_YFiNSsdkjP46eZWtGWAkOyFNtWMxy-uERLdk6QSXajSjFME22ALUXnUwHCD_OBQé",
+      "text_len": 428,
       "expected": "grant_encoding_invalid",
       "decoded": null
     }

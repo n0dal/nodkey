@@ -145,16 +145,16 @@ impl Workload {
                 op.kind().wire_name(),
             ));
         }
-        if let Operation::Transfer(t) = op {
-            if t.amount_cents > self.max_transfer_cents {
-                return Err(Deny::new(
-                    ErrorCode::LimitExceeded,
-                    format!(
-                        "amount {} > max {}",
-                        t.amount_cents, self.max_transfer_cents
-                    ),
-                ));
-            }
+        if let Operation::Transfer(t) = op
+            && t.amount_cents > self.max_transfer_cents
+        {
+            return Err(Deny::new(
+                ErrorCode::LimitExceeded,
+                format!(
+                    "amount {} > max {}",
+                    t.amount_cents, self.max_transfer_cents
+                ),
+            ));
         }
         Ok(())
     }
