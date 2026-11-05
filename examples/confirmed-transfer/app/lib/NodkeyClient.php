@@ -1,5 +1,5 @@
 <?php
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 //
 // Minimal Nodkey workload client, protocol v2 (docs/specs/effect-protocol-v2.md §2). A

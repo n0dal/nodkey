@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! Nodkey per-agent MCP front (agent-interface-v1 Draft 2 §2). **Prototype.**

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! Socket P (payments-adapter-v1 §1, §4): the broker is the only client. One strict JSON request

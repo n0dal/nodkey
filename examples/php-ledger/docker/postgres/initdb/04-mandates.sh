@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 #
 # Mandates and agent operations (docs/specs/agent-interface-v1.md Draft 2 §3, §4; effect-protocol-v2

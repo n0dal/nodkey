@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! Integration-test harness: a real PostgreSQL (see `tests/run-pg-integration.sh`) initialized

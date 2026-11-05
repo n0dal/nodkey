@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! T28/T37: the authority's digest code against tests/vectors/effect-v2/digest-vectors.json

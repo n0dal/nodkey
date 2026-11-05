@@ -61,7 +61,7 @@ brackets stay as they are.
 - After §4(d) applies, downstream redistributors must keep the NOTICE attributions [A1].
 
 **Assessment.** With nothing bundled, NOTICE needs only the product name and the copyright
-line. The committed NOTICE has three lines: product name, `Copyright 2026 Henry Cuevas`, and
+line. The committed NOTICE has three lines: product name, `Copyright 2026 n0dal`, and
 "This product is licensed under the Apache License, Version 2.0 (see LICENSE)." The third line
 is harmless but not legally required. Under the ASF minimalism guidance [A3], it could be
 dropped, because every downstream redistributor must reproduce it. The NOTICE also contains the
@@ -87,21 +87,21 @@ added only when third-party material is **bundled** (vendored code, binaries, co
 **Assessment / recommendation.** Use a two-line header in every source file:
 
 ```
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 ```
 
 This satisfies OpenSSF gold and is machine-checkable (`reuse lint`). The full appendix boilerplate is also valid. Whether the short
 form is "enough" is a style choice, since Apache-2.0 does not make headers a condition. Counsel
 can confirm this (§7, Q3). Contributor copyright: under DCO (§2) contributors keep their
-copyright. Decide whether headers name only "Henry Cuevas", say "Henry Cuevas and contributors",
+copyright. Decide whether headers name only "n0dal", say "n0dal and contributors",
 or point to an AUTHORS/git-history convention. The ASF asks committers not to add personal
 copyright lines [A2]. That is ASF policy, not a requirement of the license.
 
 ### 1.5 Copyright holder (owner decision)
 
-The owner decided on 2026-10-24 that the copyright holder is **Henry Cuevas**. LICENSE (the
-canonical text) and NOTICE (`Copyright 2026 Henry Cuevas`) were committed in `718dd8f`. OQ-03
+The owner decided on 2026-10-24 that the copyright holder is **n0dal**. LICENSE (the
+canonical text) and NOTICE (`Copyright 2026 n0dal`) were committed in `718dd8f`. OQ-03
 can close. The remaining open item is AI-assisted authorship (§5), which affects what the notice
 *covers*, not who it names.
 
@@ -288,7 +288,7 @@ backing API refused a scripted query (HTTP 405), so no results are reported. Man
   The Supreme Court **denied certiorari on March 2, 2026** (No. 25-449) [C3].
 
 **Implications for copyright notices**
-1. `Copyright 2026 Henry Cuevas` is a notice, not a registration. It is not false merely
+1. `Copyright 2026 n0dal` is a notice, not a registration. It is not false merely
    because some material is not protectable. Any portions that are purely AI-generated, with no
    human creative contribution, may not be protected by copyright at all. The notice does not
    create rights where none exist.
@@ -355,7 +355,7 @@ how hard compliance is.
 **Licensing**
 1. Is the committed NOTICE adequate? Should the non-required "This product is licensed..." line
    be removed to minimise downstream obligations?
-2. Is "Copyright 2026 Henry Cuevas" the correct form? Should year ranges or "and contributors"
+2. Is "Copyright 2026 n0dal" the correct form? Should year ranges or "and contributors"
    be used as contributions arrive?
 3. Is an SPDX two-line header enough, or should the full Apache appendix boilerplate be used in
    each file?

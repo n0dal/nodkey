@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 
 """Second code path for the effect-v2 pending-effect digest vectors (spec section 3.2).

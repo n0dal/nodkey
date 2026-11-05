@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 #
 # Demo P / payments-adapter-v1 Draft 3 §2, §7: schema `nodkey` with the operator-owned orders,

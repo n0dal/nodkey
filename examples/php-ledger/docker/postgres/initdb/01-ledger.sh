@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 #
 # Creates the simulated ledger. Runs once, as the postgres OS user, over the local socket.

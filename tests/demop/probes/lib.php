@@ -1,5 +1,5 @@
 <?php
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 //
 // Helpers for Demo P probes (copied from tests/demo2/probes/lib.php). Runs INSIDE the untrusted workload (via the RCE endpoint or

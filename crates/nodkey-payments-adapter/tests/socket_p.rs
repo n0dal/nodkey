@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! Socket P: the broker-compromise suite (PT-29), grant rules RX-1..RX-3 (PT-42), charge-id

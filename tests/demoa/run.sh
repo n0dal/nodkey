@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 #
 # Demo A (an AI support agent under Nodkey; agent-interface-v1 Draft 2 §5, §7) runner for the

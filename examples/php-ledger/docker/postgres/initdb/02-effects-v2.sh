@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 #
 # Tables for broker protocol v2 (docs/specs/effect-protocol-v2.md Draft 2). Runs once, after

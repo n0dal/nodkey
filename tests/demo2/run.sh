@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 #
 # Demo 2 (confirmed transfers) end-to-end runner for the LOCAL, INTENTIONALLY VULNERABLE stack in

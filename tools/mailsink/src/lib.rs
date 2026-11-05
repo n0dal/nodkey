@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! mailsink: a SIMULATED mail sink for Nodkey Demo A (agent-interface-v1 Draft 2 §3, §5).

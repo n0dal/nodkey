@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! Egress to the provider (payments-adapter-v1 §5): TLS 1.3 to one pinned CA, then one HTTP/1.1

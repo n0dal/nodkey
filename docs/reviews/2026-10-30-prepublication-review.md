@@ -27,7 +27,7 @@
 | 4 | Committed test keys/certs labelled TEST-ONLY, unusable for real | **PASS**, one Low (F-04) |
 | 5 | SECURITY.md contact | **PASS** after this review's edit (see "SECURITY.md change") |
 | 6a | LICENSE is canonical Apache-2.0 | **PASS**: byte-identical to apache.org `LICENSE-2.0.txt`, sha256 `cfc7749b…3d30` |
-| 6b | NOTICE reads "Nodkey / Copyright 2026 Henry Cuevas" | **PASS** |
+| 6b | NOTICE reads "Nodkey / Copyright 2026 n0dal" | **PASS** |
 | 6c | No third-party code copied without attribution | **PASS (pattern search only)**: no foreign copyright/SPDX headers, no "adapted/copied/ported from" code; all 14 Cargo manifests declare `Apache-2.0`. A provenance audit of every line was not done |
 | 7 | `.github/workflows` permissions and secrets | **NOT APPLICABLE**: no `.github/` directory in HEAD or in history |
 

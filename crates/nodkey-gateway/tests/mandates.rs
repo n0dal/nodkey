@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! Mandate pages on the auth origin (effect-protocol-v2 Draft 4 §12.6; agent-interface-v1 Draft 2

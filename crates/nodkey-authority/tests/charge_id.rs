@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 
 //! Charge-id pattern boundaries (payments-adapter-v1 PA-19, RX-6): `^ch_[A-Za-z0-9]{8,61}$`, so the

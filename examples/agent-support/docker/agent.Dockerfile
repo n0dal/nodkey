@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# SPDX-FileCopyrightText: 2026 Henry Cuevas
+# SPDX-FileCopyrightText: 2026 n0dal
 # SPDX-License-Identifier: Apache-2.0
 #
 # Demo A agent-side image (LOCAL DEMO ONLY): the per-agent MCP front `nodkey-mcp`, the stdio

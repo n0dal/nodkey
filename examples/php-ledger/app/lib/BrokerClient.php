@@ -1,5 +1,5 @@
 <?php
-// SPDX-FileCopyrightText: 2026 Henry Cuevas
+// SPDX-FileCopyrightText: 2026 n0dal
 // SPDX-License-Identifier: Apache-2.0
 //
 // Minimal Nodkey broker client (prototype SDK). This client is a convenience, NOT an enforcement
